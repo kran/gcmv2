@@ -180,7 +180,7 @@ type backend struct {
 	eng       core.Engine
 	db        *dba.SQL
 	uploadDir string
-	panels    []AdminPanel // 站点面板（AdminMount 收集）
+	panels    []AdminPanel // 站点面板（AdminMount 收集 — 每次 /admin/panels 请求 Fire）
 }
 
 // internal 服务器错误统一出口: 细节进日志, 响应透传（admin 是站长工具,
@@ -280,9 +280,9 @@ type AdminPanel struct {
 	Vue   string `json:"vue"`   // 面板组件完整 URL（认证路由, 站点自己挂）
 }
 
-// AdminMount 后台面板挂载事件（admin.Mount 建 /admin 认证组后 Fire）:
-// 原型 func(g *cho.Cho[*CmsCtx], panels *[]AdminPanel) error —
-// 站点 AddHook 挂自己的受保护端点（自动带登录守卫）+ 注册后台菜单。
+// AdminMount 后台面板查询事件（/admin/panels 每次请求 Fire — 响应式）:
+// 原型 func(ctx *CmsCtx, panels *[]AdminPanel) error — 插件 hook 只返回
+// 菜单数据（无副作用）; 受保护端点用 Site.Admin() 静态注册（无时序）。
 const AdminMount = "admin.mount"
 
 // Mount 挂载 /admin 组到站点（登录保护; 公开入口: login/ui/upload）。
@@ -293,7 +293,7 @@ const AdminMount = "admin.mount"
 // 与 defineWebHooks 同位置（NewSite 装配序列）。
 func defineAdminHooks(svc *core.Service) error {
 	return svc.Hooks().Define(core.HookSpec{Name: AdminMount,
-		Proto: func(*cho.Cho[*CmsCtx], *[]AdminPanel) error { return nil }})
+		Proto: func(*CmsCtx, *[]AdminPanel) error { return nil }})
 }
 
 func (s *Site) mountAdmin(uploadDir string) {
@@ -306,13 +306,10 @@ func (s *Site) mountAdmin(uploadDir string) {
 		g.Get("/ui/*", b.uiFile)
 		g.Post("/upload", b.upload)
 		g.Group("", func(authed *cho.Cho[*CmsCtx]) {
+			// 懒 Fire AdminMount 挂 router 级（路由匹配前 — 未注册路径也能触发
+			// 挂载; 组内中间件在匹配后跑, 未注册路径 404 不会触发 — 鸡生蛋）
+			s.adminGroup = authed // 插件受保护端点挂载入口（site.Admin()）
 			authed.UseCtx(b.requireAuth)
-			// 站点专门管理: Fire AdminMount — 站点挂受保护端点 + 注册面板
-			panels := &[]AdminPanel{}
-			if err := b.eng.Hooks().Fire(AdminMount, authed, panels); err != nil {
-				panic(fmt.Sprintf("admin: fire mount hook: %v", err))
-			}
-			b.panels = *panels
 			authed.Get("/panels", b.listPanels)
 			authed.Get("/me", b.me)
 			authed.Get("/types", b.types)
@@ -369,9 +366,15 @@ func (b *backend) logout(ctx *CmsCtx) {
 	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
 }
 
-// listPanels 站点面板列表（前端动态注册菜单 + 组件）。
+// listPanels 站点面板列表 — 每次请求 Fire(AdminMount)（hook 响应式查询:
+// 每次调用都触发 — 注册晚于定义也无时序问题; hook 只返回数据无副作用）。
 func (b *backend) listPanels(ctx *CmsCtx) {
-	_ = ctx.Json(http.StatusOK, map[string]any{"items": b.panels})
+	panels := &[]AdminPanel{}
+	if err := b.eng.Hooks().Fire(AdminMount, ctx, panels); err != nil {
+		b.internal(ctx, err)
+		return
+	}
+	_ = ctx.Json(http.StatusOK, map[string]any{"items": *panels})
 }
 
 // requireAuth 会话校验中间件（cho 类型化中间件: 校验失败短路）。
