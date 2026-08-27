@@ -23,7 +23,7 @@
         </el-form>
         <template #footer>
             <el-button @click="visibleModel = false">取消</el-button>
-            <el-button type="primary" :loading="saving" @click="save">保存</el-button>
+            <el-button type="primary" :loading="saving" @click="save"><el-icon><Check /></el-icon>保存</el-button>
         </template>
     </el-dialog>
 </template>

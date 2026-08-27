@@ -2,14 +2,14 @@
     <!-- 初始化加载 -->
     <div v-if="phase === 'loading'" class="panel-init-loading">
         <div class="panel-init-spinner"></div>
-        <div class="panel-init-text">gcm Admin</div>
+        <div class="panel-init-text">GCM Admin</div>
     </div>
 
     <!-- 登录 -->
     <div v-else-if="phase === 'login'" class="panel-login-wrapper">
         <div class="panel-login-card">
             <div class="panel-login-logo">
-                <span>gcm</span>
+                <span>GCM</span>
             </div>
             <div class="panel-login-subtitle">{{ siteName }} · 内容管理</div>
             <el-form @submit.prevent="doLogin" class="panel-login-form">
@@ -23,7 +23,7 @@
                 <el-alert v-if="loginForm.error" :title="loginForm.error" type="error"
                     :closable="false" show-icon style="margin-bottom:4px;" />
                 <el-button type="primary" :loading="loginForm.loading" size="large" style="width:100%"
-                    @click="doLogin">登 录</el-button>
+                    @click="doLogin"><el-icon><User /></el-icon>登 录</el-button>
             </el-form>
         </div>
     </div>
@@ -31,14 +31,22 @@
     <!-- 主布局: Jira 骨架 (顶部横栏贯穿 + 下方侧栏/内容) -->
     <div v-else class="panel-shell">
         <header class="panel-topbar">
-            <span class="topbar-logo">gcm</span>
-            <span class="topbar-title">{{ siteName }}{{ siteName ? ' · ' : '' }}{{ pageTitle }}</span>
+            <div class="topbar-brand">
+                <img src="/admin/ui/logo.svg" class="topbar-logo-img" alt="gcm">
+                <span class="topbar-brand-name">GCM</span>
+            </div>
+            <nav class="topbar-menu">
+                <a v-for="item in menuData" :key="item.key" class="topbar-menu-item"
+                   :class="{ active: route.name === item.route }"
+                   @click.prevent="router.push({ name: item.route, params: item.params })">
+                    <el-icon :size="15"><component :is="item.icon" /></el-icon>
+                    <span>{{ item.label }}</span>
+                </a>
+            </nav>
             <div class="topbar-right">
+                <button class="topbar-icon-btn" @click="globalQ && globalSearch()"><el-icon><Search /></el-icon></button>
                 <el-dropdown>
-                    <span class="topbar-user">
-                        <el-icon><User /></el-icon>
-                        {{ user?.username || 'admin' }}
-                    </span>
+                    <button class="topbar-icon-btn"><el-icon><User /></el-icon></button>
                     <template #dropdown>
                         <el-dropdown-menu>
                             <el-dropdown-item @click="doLogout">退出登录</el-dropdown-item>
@@ -49,31 +57,9 @@
         </header>
 
         <div class="panel-body">
-            <!-- 左侧主菜单（默认展开: 图标 + 文字标签） -->
-            <aside class="panel-sidebar expanded">
-                <div class="panel-menu-scroll">
-                    <div class="panel-menu expanded">
-                        <!-- 动态菜单（tree 类型/面板）— 最上面 -->
-                        <div v-for="item in extraMenu" :key="item.key" class="menu-item"
-                            :class="{ active: route.name === item.route }"
-                            @click="router.push({ name: item.route, params: item.params })">
-                            <span class="menu-icon"><el-icon :size="18"><component :is="item.icon" /></el-icon></span>
-                            <span>{{ item.label }}</span>
-                        </div>
-                        <!-- 固定菜单（内置: 内容管理/配置/账号）— 分隔线 -->
-                        <div v-if="extraMenu.length" class="menu-divider" />
-                        <div v-for="item in mainMenu" :key="item.key" class="menu-item"
-                            :class="{ active: route.name === item.route }"
-                            @click="router.push({ name: item.route, params: item.params })">
-                            <span class="menu-icon"><el-icon :size="18"><component :is="item.icon" /></el-icon></span>
-                            <span>{{ item.label }}</span>
-                        </div>
-                    </div>
-                </div>
-            </aside>
-
             <div class="panel-main">
                 <div class="panel-content">
+                    <div class="page-title">{{ pageTitle }}</div>
                     <div class="content-card">
                         <router-view />
                     </div>
@@ -97,6 +83,24 @@ export default {
         // 固定菜单（内置）与动态菜单（tree/面板）— 动态项由 section 标记
         var mainMenu = computed(function () { return menuData.value.filter(function (m) { return !m.section }) })
         var extraMenu = computed(function () { return menuData.value.filter(function (m) { return m.section }) })
+        var globalQ = ref('')
+        // 分组菜单（TokenHub 风格）— 静态项按 group 归组; 动态项（tree/panel）归"管理"
+        var menuGroups = computed(function () {
+            var order = ['平台', '内容', '管理']
+            var seen = {}
+            menuData.value.forEach(function (m) {
+                var g = m.group || '管理'
+                if (!seen[g]) { seen[g] = { name: g, open: true, items: [] } }
+                seen[g].items.push(m)
+            })
+            var groups = order.filter(function (g) { return seen[g] }).map(function (g) { return seen[g] })
+            var rest = Object.keys(seen).filter(function (g) { return order.indexOf(g) < 0 }).map(function (g) { return seen[g] })
+            return groups.concat(rest)
+        })
+        function globalSearch() {
+            if (!globalQ.value) return
+            router.push({ name: 'nodes', query: { q: globalQ.value } })
+        }
 
         var phase = ref('loading')
         var user = ref(null)
@@ -206,7 +210,8 @@ export default {
 
         return {
             phase: phase, user: user, siteName: siteName, pageTitle: pageTitle,
-            menuData: menuData, mainMenu: mainMenu, extraMenu: extraMenu, loginForm: loginForm,
+            menuData: menuData, menuGroups: menuGroups, globalQ: globalQ, globalSearch: globalSearch,
+            mainMenu: mainMenu, extraMenu: extraMenu, loginForm: loginForm,
             route: route, router: router,
             doLogin: doLogin, doLogout: doLogout,
         }

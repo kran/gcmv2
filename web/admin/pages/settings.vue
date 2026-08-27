@@ -6,7 +6,7 @@
         <el-option v-for="g in groups" :key="g" :label="g || '(未分组)'" :value="g" />
       </el-select>
       <el-button size="small" @click="refresh">刷新</el-button>
-      <el-button type="primary" size="small" @click="openEdit(null)">新建</el-button>
+      <el-button type="primary" size="small" @click="openEdit(null)"><el-icon><Plus /></el-icon>新建</el-button>
     </div>
 
     <el-table :data="rows" v-loading="loading" >
@@ -25,8 +25,8 @@
       </el-table-column>
       <el-table-column label="操作" width="130" fixed="right">
         <template #default="{ row: r }">
-          <el-button link type="primary" size="small" @click="openEdit(r)">编辑</el-button>
-          <el-button link type="danger" size="small" @click="doDelete(r)">删除</el-button>
+          <el-button link size="small" @click="openEdit(r)">编辑</el-button>
+          <el-button link size="small" @click="doDelete(r)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -65,7 +65,7 @@
             <div v-for="(kv, i) in dialog.entries" :key="i" style="display:flex;gap:8px;margin-bottom:8px;">
               <el-input v-model="kv.name" placeholder="键" style="width:140px;" />
               <el-input v-model="kv.value" placeholder="值 (JSON 或字符串)" style="flex:1;" />
-              <el-button link type="danger" @click="dialog.entries.splice(i, 1)">删</el-button>
+              <el-button link @click="dialog.entries.splice(i, 1)">删</el-button>
             </div>
             <el-button size="small" @click="dialog.entries.push({ name: '', value: '' })">+ 添加字段</el-button>
           </div>
@@ -90,7 +90,7 @@
           <div style="width:100%;">
             <div v-for="(v, i) in dialog.array" :key="i" style="display:flex;gap:8px;margin-bottom:8px;">
               <el-input v-model="dialog.array[i]" placeholder="元素 (JSON 或字符串)" style="flex:1;" />
-              <el-button link type="danger" @click="dialog.array.splice(i, 1)">删</el-button>
+              <el-button link @click="dialog.array.splice(i, 1)">删</el-button>
             </div>
             <el-button size="small" @click="dialog.array.push('')">+ 添加元素</el-button>
           </div>

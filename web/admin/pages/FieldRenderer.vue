@@ -74,7 +74,7 @@
                                         :disabled="i === 0">上移</el-button>
                                     <el-button link size="small" @click="moveItem(f.name, i, 1)"
                                         :disabled="i === (get(f.name) || []).length - 1">下移</el-button>
-                                    <el-button link type="danger" size="small"
+                                    <el-button link size="small"
                                         @click="removeItem(f.name, i)">删除</el-button>
                                 </span>
                             </div>

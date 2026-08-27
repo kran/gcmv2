@@ -16,7 +16,7 @@
                     <el-input v-model="form.confirm" type="password" show-password />
                 </el-form-item>
                 <el-form-item>
-                    <el-button type="primary" :loading="saving" @click="doChange">修改密码</el-button>
+                    <el-button type="primary" :loading="saving" @click="doChange"><el-icon><Key /></el-icon>修改密码</el-button>
                 </el-form-item>
             </el-form>
             <div style="color:#999;font-size:12px;line-height:1.8;">

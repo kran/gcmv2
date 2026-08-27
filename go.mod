@@ -54,5 +54,5 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-//replace github.com/kran/cho => ../cho
-//replace github.com/kran/dba => ../stupidql
+replace github.com/kran/cho => ../cho
+replace github.com/kran/dba => ../stupidql

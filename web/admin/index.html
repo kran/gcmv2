@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>gcm Admin</title>
+    <title>GCM Admin</title>
     <link rel="stylesheet" href="vendor/element-plus.css">
     <link rel="stylesheet" href="vendor/quill.snow.css">
     <link rel="stylesheet" href="vendor/quill-resize.css">
@@ -27,9 +27,9 @@
         window.AppConfig = {
             defaultPage: 'dashboard',
             menu: [
-                { key: 'nodes', label: '内容管理', icon: 'Document', route: 'nodes' },
-                { key: 'settings', label: '站点配置', icon: 'Setting', route: 'settings' },
-                { key: 'account', label: '账号', icon: 'User', route: 'account' },
+                { key: 'nodes', label: '内容管理', icon: 'Document', route: 'nodes', group: '平台' },
+                { key: 'settings', label: '站点配置', icon: 'Setting', route: 'settings', group: '平台' },
+                { key: 'account', label: '账号', icon: 'User', route: 'account', group: '平台' },
             ],
         }
         Panel.createApp({

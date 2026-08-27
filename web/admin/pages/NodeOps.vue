@@ -1,9 +1,9 @@
 <template>
     <div style="display:inline-flex;gap:4px;">
-        <el-button v-if="showCreate" size="small" plain class="op-btn" @click="openCreate()">新建子级</el-button>
-        <el-button size="small" plain type="primary" class="op-btn" @click="openEdit">编辑</el-button>
-        <el-button size="small" plain class="op-btn" @click="openExpand">引用</el-button>
-        <el-button size="small" plain type="danger" class="op-btn" @click="doDelete">删除</el-button>
+        <el-button v-if="showCreate" size="small" link class="op-btn" @click="openCreate()">新建子级</el-button>
+        <el-button size="small" link class="op-btn" @click="openEdit">编辑</el-button>
+        <el-button size="small" link class="op-btn" @click="openExpand">引用</el-button>
+        <el-button size="small" link class="op-btn" @click="doDelete">删除</el-button>
     </div>
     <node-edit-dialog v-model:visible="editVisible" :node="node" :type-name="typeName"
                       :preset-field="'parent'" :preset-value="parentId"

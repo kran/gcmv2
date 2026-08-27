@@ -1,4 +1,26 @@
-// ── Colors (Atlassian/Jira 调) ─────────────────
+// ── TokenHub 风格 tokens ─────────────────────
+:root {
+    --bg: #f5f5f7;
+    --surface: #ffffff;
+    --surface-2: #fafafb;
+    --surface-3: #f2f2f5;
+    --border: #eaeaee;
+    --border-2: #e0e0e5;
+    --ink: #16161a;
+    --ink-2: #5c5c66;
+    --ink-3: #9c9ca6;
+    --accent: #0052CC;
+    --accent-weak: rgba(0, 82, 204, 0.11);
+    --shadow-sm: 0 1px 2px rgba(20, 20, 32, 0.05), 0 1px 3px rgba(20, 20, 32, 0.05);
+    --shadow-md: 0 4px 14px rgba(20, 20, 32, 0.07), 0 1px 3px rgba(20, 20, 32, 0.05);
+    --page: var(--bg);
+    --shell: var(--surface);
+    --text: var(--ink);
+    --muted: var(--ink-3);
+    --muted-strong: var(--ink-2);
+}
+
+// ── Colors ─────────────────────────────────
 @primary: #0052CC;
 @primary-10: rgba(0, 82, 204, 0.1);
 @primary-20: rgba(0, 82, 204, 0.2);
@@ -96,22 +118,85 @@ html, body {
     position: relative;
 }
 
-// ── 顶部横栏 (深藏青, Jira 识别度核心) ──────────────
+// ── 顶部横栏 (NocoBase 官网 demo: 白底 + 下划线选中) ──
 .panel-topbar {
-    height: 52px;
+    height: 48px;
     flex-shrink: 0;
     display: flex;
     align-items: center;
-    padding: 0 20px;
-    gap: 14px;
-    background: #fff; border-bottom: 1px solid #EBECF0; /* Directus 风格: 白顶栏 */
-    color: #fff;
+    padding: 0 16px;
+    gap: 20px;
+    background: #fff;
+    border-bottom: 1px solid #eaeaee;
+    color: #16161a;
 
-    .topbar-logo {
-        font-size: 17px;
-        font-weight: 700;
-        letter-spacing: .5px;
-        color: #4E5D78; /* 白顶栏上深色 */
+    .topbar-brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        .topbar-logo-img { width: 28px; height: 28px; }
+        .topbar-brand-name {
+            font-size: 16px;
+            font-weight: 700;
+            letter-spacing: .5px;
+            color: #16161a;
+        }
+    }
+
+    .topbar-menu {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex: 1;
+        overflow-x: auto;
+
+        .topbar-menu-item {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 0 14px;
+            height: 48px;
+            font-size: 14px;
+            color: #5c5c66;
+            cursor: pointer;
+            text-decoration: none;
+            transition: color .15s ease;
+
+            &:hover { color: #16161a; }
+
+            &.active {
+                color: #16161a;
+                font-weight: 600;
+                &::after {
+                    content: '';
+                    position: absolute;
+                    left: 14px; right: 14px; bottom: 0;
+                    height: 2px;
+                    background: #16161a; // 黑色加粗下划线
+                    border-radius: 2px 2px 0 0;
+                }
+            }
+        }
+    }
+
+    .topbar-right {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+
+        .topbar-icon-btn {
+            width: 32px; height: 32px;
+            border-radius: 6px;
+            display: inline-flex; align-items: center; justify-content: center;
+            background: transparent;
+            border: none;
+            color: #5c5c66;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all .15s ease;
+            &:hover { color: #16161a; background: #f2f2f5; }
+        }
     }
 
     .topbar-toggle {
@@ -123,27 +208,12 @@ html, body {
         &:hover { opacity: 1; }
     }
 
-    .topbar-title {
-        font-size: 14px;
-        font-weight: 500;
-        color: #4E5D78;
-    }
-
     .topbar-right {
         margin-left: auto;
         display: flex;
         align-items: center;
     }
 
-    .topbar-user {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 14px;
-        font-weight: 500;
-        color: #4E5D78;
-        cursor: pointer;
-    }
 }
 
 // ── 主体行: 侧栏 + 内容 ───────────────────────────
@@ -181,25 +251,24 @@ html, body {
     }
 }
 
-// ── Sidebar（Directus 风格: 暗色底 + 浅色菜单） ──
+// ── Sidebar（TokenHub 精确: 纯白 shell + 分组浮卡项） ──
 .panel-sidebar {
     height: 100%;
     display: flex;
     flex-direction: column;
-    background: #EFF4FB; /* Directus 风格: 浅蓝灰 sidebar */
-    border-right: 1px solid #E4E9F2;
+    background: var(--shell);
+    border-right: 1px solid var(--border);
     transition: width 0.3s ease-in-out;
     flex-shrink: 0;
     overflow: hidden;
 
-    &.expanded { width: 220px; }
-    &.collapsed { width: 64px; }
+    &.expanded { width: 238px; }
+    &.collapsed { width: 68px; }
 
-    // Scrollable menu area
     .panel-menu-scroll {
         flex: 1;
         overflow-y: auto;
-        padding: 8px 0;
+        padding: 18px 8px;
     }
 }
 
@@ -251,6 +320,63 @@ html, body {
             flex: 1;
             overflow: hidden;
             text-overflow: ellipsis;
+        }
+    }
+
+    // ── 分组菜单 (TokenHub 精确) ──
+    .menu-group {
+        display: grid;
+        gap: 6px;
+
+        .menu-group-head {
+            width: 100%;
+            min-height: 24px;
+            padding: 0 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-radius: 7px;
+            background: transparent;
+            color: var(--ink);
+            font-size: 12px;
+            font-weight: 760;
+            cursor: pointer;
+            letter-spacing: 0;
+            text-transform: none;
+
+            .menu-group-arrow {
+                flex: 0 0 auto;
+                color: var(--ink-3);
+                font-size: 10px;
+                transition: transform 140ms ease;
+                &.open { transform: rotate(90deg); }
+            }
+            &:hover { background: #e8e8e8; }
+        }
+    }
+
+    .menu-item {
+        width: 100%;
+        min-height: 36px;
+        border-radius: 8px;
+        padding: 0 14px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        background: transparent;
+        color: var(--ink-2);
+        font-size: 13px;
+        font-weight: 560;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: all .15s ease;
+
+        &:hover { background: #ededed; color: var(--ink); }
+        &.active {
+            background: var(--surface);
+            color: var(--text);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            font-weight: 560;
         }
     }
 
@@ -327,49 +453,41 @@ html, body {
     overflow: hidden;
 }
 
-// ── Content area ────────────────────────────────
+// ── Content area (NocoBase: 白底 + 页面标题 + 卡片) ──
 .panel-content {
     flex: 1;
-    padding: 15px;
+    padding: 24px 32px;
     overflow: auto;
-    background: @content-bg;
-    border-radius: 10px;
+    background: #F5F5F5; // NocoBase 主区浅灰
+
+    .page-title {
+        font-size: 20px;
+        font-weight: 600;
+        color: #16161a;
+        margin-bottom: 20px;
+    }
 
     .content-card {
-        /* 严格等高 (min-height 只是下限, 内容高会被撑开) —
-           内部 flex 列 + 溢出滚动兜底 (nodes-page 类页面内部自行滚动) */
-        height: 100%;
-        //background: #fff;
-        padding: 10px;
+        padding: 22px;
         display: flex;
         flex-direction: column;
-        overflow: auto;
-        border-radius: 0; /* Directus: 容器无圆角阴影 */
+        background: #fff;
+        border-radius: 8px;
+        border: 1px solid #eaeaee;
     }
 }
 
-// ── Custom scrollbar ────────────────────────────
-::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-}
-::-webkit-scrollbar-track {
-    background: @primary-20;
-    border-radius: 6px;
-}
-::-webkit-scrollbar-thumb {
-    background: @primary-40;
-    border-radius: 6px;
-}
-::-webkit-scrollbar-thumb:hover {
-    background: @primary;
-}
-::-webkit-scrollbar-corner {
-    background: @primary-20;
-}
+// ── 滚动条: 系统默认（不自定义 — 还原系统色） ──
 
 // ── Utilities ───────────────────────────────────
 .ts { transition: all 0.3s ease-in-out; }
+
+/* el-tree 当前节点高亮: 系统灰 #E1E1E1（替代默认蓝 — 与类型列表一致） */
+.el-tree--highlight-current .el-tree-node.is-current > .el-tree-node__content,
+.el-tree-node__content.current {
+    background: #E1E1E1 !important;
+    color: #16161a;
+}
 .el-table {
     width: 100% !important;
     // Element Plus 默认表头是白底; 给个浅灰让它和正文区分开
@@ -497,5 +615,15 @@ html, body {
 .el-table .el-table__cell:last-child, .el-table th.el-table__cell:last-child { padding-right: 0 !important; }
 
 /* 操作列按钮: 收紧（plain 小按钮 — 表格行内不占空间） */
-.op-btn { padding: 3px 8px !important; font-size: 12px !important; height: 24px !important; }
-.op-btn + .op-btn { margin-left: 4px !important; }
+/* 表格内操作按钮: 普通链接 — 无色 + 下划线 + 无间距; hover 变黑 */
+.op-btn {
+    padding: 0 !important;
+    font-size: 13px !important;
+    height: auto !important;
+    border: none !important;
+    text-decoration: underline;
+    color: #000000a6 !important;   /* 半透明黑 */
+    margin-left: 0 !important;
+    &:hover { color: #000 !important; }
+}
+.op-btn + .op-btn { margin-left: 0 !important; }

@@ -31,7 +31,7 @@
         <el-popover v-for="ft in filterTrees" :key="ft.field" trigger="click" placement="bottom-start"
                     :width="200" style="margin-left:8px;" :ref="'tp-' + ft.field">
           <template #reference>
-            <el-button size="small" :type="ft.active ? 'primary' : ''">
+            <el-button link size="small" class="filter-link" :class="{ active: ft.active }">
               {{ ft.active ? (ft.activeLabel + ' ✕') : ('按' + ft.label + '过滤') }}
             </el-button>
           </template>
@@ -48,10 +48,11 @@
             </el-tree>
           </div>
         </el-popover>
-        <el-button size="small" @click="refresh">刷新</el-button>
-        <el-button size="small" type="danger" plain :loading="rebuilding" @click="rebuildSearch">重建索引</el-button>
+        <el-button size="small" @click="refresh"><el-icon><Refresh /></el-icon>刷新</el-button>
+        <div style="flex:1;"></div> <!-- 右侧靠拢 -->
+        <el-button size="small" :loading="rebuilding" @click="rebuildSearch"><el-icon><Refresh /></el-icon>重建索引</el-button>
         <el-button type="primary" size="small" :disabled="!query.type" @click="createVisible = true">
-          新建 {{ query.type || '' }}
+          <el-icon><Plus /></el-icon>新建 {{ query.type || '' }}
         </el-button>
       </div>
 
@@ -296,21 +297,39 @@ export default {
     },
 }</script>
 
-<style scoped>
-.nodes-page { display: flex; gap: 16px; flex: 1; min-height: 0; }
+<style>
+.nodes-page { display: flex; flex: 1; min-height: 0; }
 .nodes-tree {
-    width: 230px; flex-shrink: 0;
-    padding-right: 12px;
+    width: 250px; flex-shrink: 0;
+    padding: 16px 16px 16px 0;
     overflow: auto;
+    border-right: 1px solid #eaeaee; /* 中间竖线分隔 */
 }
 .nodes-tree-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.nodes-list { flex: 1; min-width: 0; }
+.nodes-list {
+    flex: 1; min-width: 0;
+    padding: 16px 0 16px 16px;
+}
 .type-list { display: flex; flex-direction: column; gap: 2px; }
 .type-item {
     display: flex; align-items: center; gap: 8px;
     padding: 6px 10px; border-radius: 6px; cursor: pointer;
     font-size: 13px; color: #555;
 }
-.type-item:hover { background: #f5f7fa; }
-.type-item.active { background: #ecf5ff; color: #409eff; font-weight: 600; }
+.type-item:hover { background: #ececec; }
+.type-item.active { background: #E1E1E1; color: #16161a; font-weight: 600; }
+
+/* 树过滤按钮: link 下划线样式（非按钮框 — 看着轻） */
+.filter-link {
+    color: #000000a6 !important;
+    text-decoration: underline;
+    &:hover { color: #000 !important; }
+    &.active { color: #000 !important; font-weight: 600; }
+}
+
+/* el-tree 当前节点高亮: 蓝 → #E1E1E1（与类型列表一致） */
+.el-tree--highlight-current .el-tree-node.is-current > .el-tree-node__content {
+    background: #E1E1E1 !important;
+    color: #16161a;
+}
 </style>
