@@ -70,9 +70,11 @@ func (s *Service) CreateNode(n *Node) (int64, error) {
 	if err := s.validateSlug(n.Slug, 0); err != nil {
 		return 0, err
 	}
-	// 内部拷贝（不触碰调用方）: Fields 剥 ref, Title 投影
+	if n.Display == "" {
+		return 0, errors.New("core: create: display required")
+	}
+	// 内部拷贝（不触碰调用方）: Fields 剥 ref
 	m := *n
-	m.Title = s.titleFrom(td, m.Fields)
 	scalar, refs, err := splitRefs(td, s.types, m.Fields)
 	if err != nil {
 		return 0, err
@@ -158,25 +160,11 @@ func (s *Service) PatchNode(id int64, patch *NodePatch) error {
 	if patch.Sort != nil {
 		cols["sort"] = *patch.Sort
 	}
-	if patch.Title != nil {
-		cols["title"] = *patch.Title
-	}
-	// title 列是投影（Create 时 titleFrom 算）— fields 含声明字段（单段标量）
-	// 时重投影, 保证列与 fields 一致（admin 改 title 字段 → 底表同步）;
-	// 否则用 patch.Title（显式改列 / 快照旧值无害）。
-	if td.Title != "" && len(scalarPatch) > 0 {
-		if path, err := types.ParsePath(td.Title); err == nil && len(path) == 1 {
-			if _, ok := scalarPatch[path[0].Field]; ok {
-				merged := Fields{}
-				for k, v := range existing.Fields {
-					merged[k] = v
-				}
-				for k, v := range scalarPatch {
-					merged[k] = v
-				}
-				cols["title"] = s.titleFrom(td, merged)
-			}
+	if patch.Display != nil {
+		if *patch.Display == "" {
+			return errors.New("core: patch: display required")
 		}
+		cols["display"] = *patch.Display
 	}
 	if len(scalarPatch) > 0 {
 		b, _ := json.Marshal(scalarPatch)

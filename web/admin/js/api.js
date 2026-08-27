@@ -27,7 +27,7 @@ window.$api = {
     // （关系节点兜底, 如 employment 的 role）→ expand 引用合成 → #id。
     refLabel: function (n, def) {
         if (!n) { console.log('[refLabel] null node'); return '#?' }
-        if (n.title) return n.title
+        if (n.display) return n.display
         if (n.slug) return n.slug
         if (def) {
             for (const f of def.fields || []) {
@@ -38,11 +38,11 @@ window.$api = {
         const parts = []
         for (const v of Object.values(n.expand || {})) {
             const arr = Array.isArray(v) ? v : (v ? [v] : [])
-            for (const m of arr) if (m && m.title) parts.push(m.title)
+            for (const m of arr) if (m && m.display) parts.push(m.display)
         }
         if (parts.length) return parts.join('·')
         // 兜底: 打日志定位 — 为什么没走到 title/slug/def/expand
-        console.log('[refLabel] 兜底 #id:', { id: n.id, type: n.type, title: n.title, slug: n.slug,
+        console.log('[refLabel] 兜底 #id:', { id: n.id, type: n.type, display: n.display, slug: n.slug,
             hasDef: !!def, fields: n.fields, expandKeys: Object.keys(n.expand || {}) })
         return '#' + n.id
     },

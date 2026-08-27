@@ -15,22 +15,22 @@ import (
 //
 // 构造: 请求 JSON 直接 Unmarshal（null/缺失 → nil）; 表单全量用 PatchFromNode。
 type NodePatch struct {
-	Slug   *string        `json:"slug"`
-	Status *int           `json:"status"`
-	Sort   *int           `json:"sort"`
-	Title  *string        `json:"title"`
-	Fields map[string]any `json:"fields,omitempty"`
+	Slug    *string        `json:"slug"`
+	Status  *int           `json:"status"`
+	Sort    *int           `json:"sort"`
+	Display *string        `json:"display"`
+	Fields  map[string]any `json:"fields,omitempty"`
 }
 
 // PatchFromNode Node → 全非 nil patch（表单"读-改-写"全量提交用）:
 // 读出节点 → 改 patch 字段 → PatchNode。全非 nil = 全量写（值同无害）。
 func PatchFromNode(n *Node) *NodePatch {
 	return &NodePatch{
-		Slug:   &n.Slug,
-		Status: &n.Status,
-		Sort:   &n.Sort,
-		Title:  &n.Title,
-		Fields: n.Fields,
+		Slug:    &n.Slug,
+		Status:  &n.Status,
+		Sort:    &n.Sort,
+		Display: &n.Display,
+		Fields:  n.Fields,
 	}
 }
 
@@ -48,8 +48,8 @@ func (p *NodePatch) Cols() map[string]any {
 	if p.Sort != nil {
 		cols["sort"] = *p.Sort
 	}
-	if p.Title != nil {
-		cols["title"] = *p.Title
+	if p.Display != nil {
+		cols["display"] = *p.Display
 	}
 	if len(p.Fields) > 0 {
 		b, err := json.Marshal(p.Fields)

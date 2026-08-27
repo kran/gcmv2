@@ -101,9 +101,9 @@ func NewFTSIndex(svc *Service) SearchIndex { return &ftsIndex{svc: svc} }
 func (s *Service) searchableText(n *Node) string {
 	td, ok := s.types.Type(n.Type)
 	if !ok {
-		return n.Title
+		return n.Display
 	}
-	parts := []string{n.Title}
+	parts := []string{n.Display}
 	for _, f := range td.Fields {
 		if !s.types.IsRefKind(f.Kind) {
 			if v, ok := n.Fields[f.Name]; ok {
@@ -128,8 +128,8 @@ func (f *ftsIndex) Sync(tx *dba.SQL, n *Node) error {
 		return fmt.Errorf("core: fts sync: %w", err)
 	}
 	if _, err := tx.Add(
-		`INSERT INTO nodes_fts (rowid, type, title, body_text) VALUES (#{1}, #{2}, #{3}, #{4})`,
-		n.ID, n.Type, bigram(n.Title), body).Exec(); err != nil {
+		`INSERT INTO nodes_fts (rowid, type, display, body_text) VALUES (#{1}, #{2}, #{3}, #{4})`,
+		n.ID, n.Type, bigram(n.Display), body).Exec(); err != nil {
 		return fmt.Errorf("core: fts sync: %w", err)
 	}
 	return nil

@@ -5,8 +5,8 @@ import "testing"
 // TestAddRefPublic 公开写入口校验: 字段/类型/目标/重复。
 func TestAddRefPublic(t *testing.T) {
 	s := newTestService(t)
-	pid, _ := s.CreateNode(&Node{Type: "person", Fields: Fields{"name": "张三"}})
-	aid, _ := s.CreateNode(&Node{Type: "article", Fields: Fields{"body": "x"}})
+	pid, _ := s.CreateNode(&Node{Type: "person", Display: "t", Fields: Fields{"name": "张三"}})
+	aid, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"body": "x"}})
 
 	// 正常
 	if _, err := s.AddEdge(aid, pid, "authors", 1); err != nil {
@@ -29,7 +29,7 @@ func TestAddRefPublic(t *testing.T) {
 		t.Fatal("non-ref field must fail")
 	}
 	// to 类型不匹配（person 的 articles 要 article, 传 category）
-	catID, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "c"}})
+	catID, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "c"}})
 	if _, err := s.AddEdge(pid, catID, "articles", 0); err == nil {
 		t.Fatal("to type mismatch must fail")
 	}
@@ -38,10 +38,10 @@ func TestAddRefPublic(t *testing.T) {
 // TestOutInRefs 出/入边查询 + 分页。
 func TestOutInRefs(t *testing.T) {
 	s := newTestService(t)
-	p1, _ := s.CreateNode(&Node{Type: "person", Fields: Fields{"name": "a"}})
-	p2, _ := s.CreateNode(&Node{Type: "person", Fields: Fields{"name": "b"}})
-	a1, _ := s.CreateNode(&Node{Type: "article", Fields: Fields{"body": "1", "authors": []any{p1, p2}}})
-	a2, _ := s.CreateNode(&Node{Type: "article", Fields: Fields{"body": "2", "authors": []any{p1}}})
+	p1, _ := s.CreateNode(&Node{Type: "person", Display: "t", Fields: Fields{"name": "a"}})
+	p2, _ := s.CreateNode(&Node{Type: "person", Display: "t", Fields: Fields{"name": "b"}})
+	a1, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"body": "1", "authors": []any{p1, p2}}})
+	a2, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"body": "2", "authors": []any{p1}}})
 
 	// 出边: a1 有 2 条 authors
 	out, total, err := s.OutEdges("article", a1, "authors", 1, 10)
@@ -85,8 +85,8 @@ types:
       - { name: related, kind: "ref[]", to: article, symmetric: true }
 `)
 	s := New(testDB(t), ts)
-	a1, _ := s.CreateNode(&Node{Type: "article", Fields: Fields{"body": "1"}})
-	a2, _ := s.CreateNode(&Node{Type: "article", Fields: Fields{"body": "2"}})
+	a1, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"body": "1"}})
+	a2, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"body": "2"}})
 	// 存一条: a1 → a2
 	if _, err := s.AddEdge(a1, a2, "related", 0); err != nil {
 		t.Fatal(err)
@@ -110,8 +110,8 @@ types:
 // TestRemoveRef 删引用。
 func TestRemoveRef(t *testing.T) {
 	s := newTestService(t)
-	pid, _ := s.CreateNode(&Node{Type: "person", Fields: Fields{"name": "a"}})
-	s.CreateNode(&Node{Type: "article", Fields: Fields{"body": "1", "authors": []any{pid}}})
+	pid, _ := s.CreateNode(&Node{Type: "person", Display: "t", Fields: Fields{"name": "a"}})
+	s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"body": "1", "authors": []any{pid}}})
 	in, total, _ := s.InEdges(pid, "authors", 1, 10)
 	if total != 1 {
 		t.Fatalf("inbound: %d", total)
@@ -131,10 +131,10 @@ func TestRemoveRef(t *testing.T) {
 func TestMerge(t *testing.T) {
 	s := newTestService(t)
 	// 出边合并 + 冲突去重（category.parent）
-	catA, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "A"}})
-	catB, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "B"}})
-	cFrom, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "from-cat"}})
-	cTo, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "to-cat"}})
+	catA, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "A"}})
+	catB, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "B"}})
+	cFrom, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "from-cat"}})
+	cTo, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "to-cat"}})
 	s.AddEdge(cFrom, catA, "parent", 0)
 	s.AddEdge(cTo, catA, "parent", 0) // 冲突: 同 field+to_node, 合并后只留 to 的
 	s.AddEdge(cFrom, catB, "parent", 0)
@@ -151,10 +151,10 @@ func TestMerge(t *testing.T) {
 	}
 
 	// 入边合并（article.authors → person）
-	pA, _ := s.CreateNode(&Node{Type: "person", Fields: Fields{"name": "A"}})
-	pB, _ := s.CreateNode(&Node{Type: "person", Fields: Fields{"name": "B"}})
-	s.CreateNode(&Node{Type: "article", Fields: Fields{"body": "x", "authors": []any{pA}}})
-	s.CreateNode(&Node{Type: "article", Fields: Fields{"body": "y", "authors": []any{pB}}})
+	pA, _ := s.CreateNode(&Node{Type: "person", Display: "t", Fields: Fields{"name": "A"}})
+	pB, _ := s.CreateNode(&Node{Type: "person", Display: "t", Fields: Fields{"name": "B"}})
+	s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"body": "x", "authors": []any{pA}}})
+	s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"body": "y", "authors": []any{pB}}})
 	if err := s.Merge(pA, pB); err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestMerge(t *testing.T) {
 // TestMergeErrors 合并错误: 自身合并 / 缺失。
 func TestMergeErrors(t *testing.T) {
 	s := newTestService(t)
-	pid, _ := s.CreateNode(&Node{Type: "person", Fields: Fields{"name": "a"}})
+	pid, _ := s.CreateNode(&Node{Type: "person", Display: "t", Fields: Fields{"name": "a"}})
 	if err := s.Merge(pid, pid); err == nil {
 		t.Fatal("self merge must fail")
 	}

@@ -6,8 +6,8 @@ import "testing"
 
 func TestFilterColAndJSON(t *testing.T) {
 	s := newTestService(t)
-	s.CreateNode(&Node{Type: "article", Status: 1, Fields: Fields{"title": "甲", "views": 100}})
-	s.CreateNode(&Node{Type: "article", Status: 0, Fields: Fields{"title": "乙", "views": 5}})
+	s.CreateNode(&Node{Type: "article", Display: "t", Status: 1, Fields: Fields{"title": "甲", "views": 100}})
+	s.CreateNode(&Node{Type: "article", Display: "t", Status: 0, Fields: Fields{"title": "乙", "views": 5}})
 
 	// 列比较
 	list, _, err := s.QueryPage(ListQuery{Filter: `(= status 1)`, Page: 1, Size: 10})
@@ -39,9 +39,9 @@ func TestFilterColAndJSON(t *testing.T) {
 
 func TestFilterLogic(t *testing.T) {
 	s := newTestService(t)
-	s.CreateNode(&Node{Type: "article", Status: 1, Fields: Fields{"title": "甲", "views": 100}})
-	s.CreateNode(&Node{Type: "article", Status: 1, Fields: Fields{"title": "乙", "views": 5}})
-	s.CreateNode(&Node{Type: "article", Status: 0, Fields: Fields{"title": "丙", "views": 100}})
+	s.CreateNode(&Node{Type: "article", Display: "t", Status: 1, Fields: Fields{"title": "甲", "views": 100}})
+	s.CreateNode(&Node{Type: "article", Display: "t", Status: 1, Fields: Fields{"title": "乙", "views": 5}})
+	s.CreateNode(&Node{Type: "article", Display: "t", Status: 0, Fields: Fields{"title": "丙", "views": 100}})
 
 	// and
 	list, _, _ := s.QueryPage(ListQuery{Filter: `(and (= status 1) (> $views 50))`, Page: 1, Size: 10})
@@ -64,7 +64,7 @@ func TestFilterLogic(t *testing.T) {
 
 func TestFilterPlaceholder(t *testing.T) {
 	s := newTestService(t)
-	s.CreateNode(&Node{Type: "article", Status: 1, Fields: Fields{"title": "甲"}})
+	s.CreateNode(&Node{Type: "article", Display: "t", Status: 1, Fields: Fields{"title": "甲"}})
 	list, _, err := s.QueryPage(ListQuery{Filter: `(= status {:st})`, Page: 1, Size: 10},
 		map[string]any{"st": 1})
 	if err != nil {
@@ -84,9 +84,9 @@ func TestFilterPlaceholder(t *testing.T) {
 
 func TestFilterEdge(t *testing.T) {
 	s := newTestService(t)
-	cat, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "c"}})
-	s.CreateNode(&Node{Type: "article", Fields: Fields{"title": "挂c", "categories": []any{cat}}})
-	s.CreateNode(&Node{Type: "article", Fields: Fields{"title": "没挂"}})
+	cat, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "c"}})
+	s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "挂c", "categories": []any{cat}}})
+	s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "没挂"}})
 
 	// 出边存在性
 	list, _, err := s.QueryPage(ListQuery{Filter: `(edge ->categories)`, Page: 1, Size: 10})
@@ -135,7 +135,7 @@ func TestFilterSyntaxErrors(t *testing.T) {
 
 func TestFilterQuoteEscape(t *testing.T) {
 	s := newTestService(t)
-	s.CreateNode(&Node{Type: "article", Fields: Fields{"title": `他说"你好"`}})
+	s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": `他说"你好"`}})
 	list, _, err := s.QueryPage(ListQuery{Filter: `(= $title "他说\"你好\"")`, Page: 1, Size: 10})
 	if err != nil {
 		t.Fatal(err)
@@ -148,10 +148,10 @@ func TestFilterQuoteEscape(t *testing.T) {
 // subtree 集合函数: (in ->categories (subtree "root"))
 func TestFilterSubtree(t *testing.T) {
 	s := newTestService(t)
-	root, _ := s.CreateNode(&Node{Type: "category", Slug: "root", Fields: Fields{"name": "root"}})
-	a, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "a", "parent": root}})
-	_, _ = s.CreateNode(&Node{Type: "article", Fields: Fields{"title": "挂a", "categories": []any{a}}})
-	_, _ = s.CreateNode(&Node{Type: "article", Fields: Fields{"title": "没挂"}})
+	root, _ := s.CreateNode(&Node{Type: "category", Display: "t", Slug: "root", Fields: Fields{"name": "root"}})
+	a, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "a", "parent": root}})
+	_, _ = s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "挂a", "categories": []any{a}}})
+	_, _ = s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "没挂"}})
 
 	list, _, err := s.QueryPage(ListQuery{Filter: `(in ->categories (subtree "root"))`, Page: 1, Size: 10})
 	if err != nil {

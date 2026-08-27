@@ -329,6 +329,7 @@ func (s *Site) mountAdmin(uploadDir string) {
 			authed.Get("/settings", b.listSettings)
 			authed.Post("/settings", b.setSetting)
 			authed.Delete("/settings/{key}", b.deleteSetting)
+			authed.Post("/search/rebuild", b.rebuildSearch)
 		})
 	})
 }
@@ -483,10 +484,11 @@ func (b *backend) expandMany(nodes []core.Node) ([]core.Node, error) {
 // nodeInput 创建/更新输入: 列字段 + 类型字段（含 ref 字段 — 引擎落边）。
 // Status/Sort 指针: nil = 未提交（保持现值）, 非 nil = 提交（0 合法 — 草稿）。
 type nodeInput struct {
-	Slug   string      `json:"slug"`
-	Status *int        `json:"status"`
-	Sort   *int        `json:"sort"`
-	Fields core.Fields `json:"fields"`
+	Slug    string      `json:"slug"`
+	Status  *int        `json:"status"`
+	Sort    *int        `json:"sort"`
+	Display *string     `json:"display"` // 公共显示文本（固有列）
+	Fields  core.Fields `json:"fields"`
 }
 
 func (b *backend) createNode(ctx *CmsCtx) {
@@ -507,8 +509,13 @@ func (b *backend) createNode(ctx *CmsCtx) {
 	if in.Sort != nil {
 		sort = *in.Sort
 	}
+	display := ""
+	if in.Display != nil {
+		display = *in.Display
+	}
 	id, err := b.eng.CreateNode(&core.Node{
-		Type: typ, Slug: in.Slug, Status: status, Sort: sort, Fields: in.Fields,
+		Type: typ, Slug: in.Slug, Status: status, Sort: sort,
+		Display: display, Fields: in.Fields,
 	})
 	if err != nil {
 		b.bad(ctx, err)
@@ -572,6 +579,9 @@ func (b *backend) updateNode(ctx *CmsCtx) {
 	}
 	if in.Sort != nil {
 		patch.Sort = in.Sort
+	}
+	if in.Display != nil {
+		patch.Display = in.Display
 	}
 	// 全量语义下 fields 可能带回历史脏数据（类型收敛前的遗留字段）—
 	// 提交前清洗: 只保留类型声明的字段（保存即自愈）
@@ -646,7 +656,7 @@ func (b *backend) tree(ctx *CmsCtx) {
 			return
 		}
 		items = append(items, map[string]any{
-			"id": n.ID, "type": n.Type, "title": n.Title, "slug": n.Slug,
+			"id": n.ID, "type": n.Type, "display": n.Display, "slug": n.Slug,
 			"status": n.Status, "sort": n.Sort, "fields": fields,
 		})
 	}
@@ -702,13 +712,13 @@ func (b *backend) inbound(ctx *CmsCtx) {
 	type inboundRow struct {
 		ID       int64  `db:"from_node" json:"id"`
 		Type     string `db:"type" json:"type"`
-		Title    string `db:"title" json:"title"`
+		Display  string `db:"display" json:"display"`
 		Slug     string `db:"slug" json:"slug"`
 		ViaField string `db:"MIN(e.field)" json:"via_field"`
 	}
 	// 溯源: 每个来源节点取一条边字段（MIN(field) — GROUP BY 去重）
 	rows, err := b.db.Add(
-		`SELECT e.from_node, n.type, n.title, n.slug, MIN(e.field) FROM edges e JOIN nodes n ON n.id = e.from_node
+		`SELECT e.from_node, n.type, n.display, n.slug, MIN(e.field) FROM edges e JOIN nodes n ON n.id = e.from_node
 		 WHERE e.to_node IN (#{1|expand})
 		 GROUP BY e.from_node
 		 ORDER BY n.sort, n.id DESC
@@ -721,7 +731,7 @@ func (b *backend) inbound(ctx *CmsCtx) {
 	items := make([]map[string]any, 0, len(rows))
 	for _, r := range rows {
 		items = append(items, map[string]any{
-			"id": r.ID, "type": r.Type, "title": r.Title, "slug": r.Slug, "via_field": r.ViaField,
+			"id": r.ID, "type": r.Type, "display": r.Display, "slug": r.Slug, "via_field": r.ViaField,
 		})
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{"items": items, "total": total})
@@ -791,6 +801,15 @@ func (b *backend) setSetting(ctx *CmsCtx) {
 func (b *backend) deleteSetting(ctx *CmsCtx) {
 	if err := b.eng.DeleteSetting(ctx.PathValue("key")); err != nil {
 		ctx.Error(http.StatusNotFound, err.Error())
+		return
+	}
+	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
+}
+
+// rebuildSearch 全量重建搜索索引（FTS 表被迁移重建/导入后手动触发）。
+func (b *backend) rebuildSearch(ctx *CmsCtx) {
+	if err := b.eng.RebuildSearch(); err != nil {
+		b.internal(ctx, err)
 		return
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})

@@ -17,7 +17,7 @@
             <div style="flex:1;min-width:0;">
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
                     <span style="font-weight:600;">引用列表</span>
-                    <el-tag v-if="activeNode" size="small">{{ activeNode.title || '#' + activeNode.id }}</el-tag>
+                    <el-tag v-if="activeNode" size="small">{{ activeNode.display || '#' + activeNode.id }}</el-tag>
                     <el-checkbox v-model="subtree" :disabled="!activeId" @change="loadInbound">
                         含子树
                     </el-checkbox>
@@ -46,7 +46,7 @@
                         </template>
                     </el-table-column>
                     <el-table-column label="标题" min-width="360" show-overflow-tooltip>
-                        <template #default="{ row }">{{ row.title || row.slug || '#' + row.id }}</template>
+                        <template #default="{ row }">{{ row.display || row.slug || '#' + row.id }}</template>
                     </el-table-column>
                     <el-table-column label="溯源" min-width="160" show-overflow-tooltip>
                         <template #default="{ row }">
@@ -107,7 +107,7 @@ export default {
     mounted() { this.loadTypes() },
     methods: {
         titleOf(n) {
-            return n.title || n.slug || '#' + n.id
+            return n.display || n.slug || '#' + n.id
         },
         async loadTypes() {
             var res = await $api.types()

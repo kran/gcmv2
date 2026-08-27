@@ -6,7 +6,7 @@
 CREATE TABLE nodes (
 	id         INTEGER PRIMARY KEY,
 	type       TEXT    NOT NULL,               -- article / category / person / employment ...
-	title      TEXT    NOT NULL DEFAULT '',    -- 显示名投影列（类型级 title 声明映射, 列表/搜索/排序用）
+	title      TEXT    NOT NULL DEFAULT '',    -- 显示文本固有列（00005 改名为 display — 消除投影语义）
 	slug       TEXT    NOT NULL DEFAULT '',    -- URL 段（类型可配置是否用）
 	status     INTEGER NOT NULL DEFAULT 0,     -- 发布状态（通用）
 	sort       INTEGER NOT NULL DEFAULT 0,

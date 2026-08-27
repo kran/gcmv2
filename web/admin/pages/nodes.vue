@@ -49,6 +49,7 @@
           </div>
         </el-popover>
         <el-button size="small" @click="refresh">刷新</el-button>
+        <el-button size="small" type="danger" plain :loading="rebuilding" @click="rebuildSearch">重建索引</el-button>
         <el-button type="primary" size="small" :disabled="!query.type" @click="createVisible = true">
           新建 {{ query.type || '' }}
         </el-button>
@@ -141,6 +142,7 @@ export default {
             parentField: 'parent',
             filterTrees: [],   // 多个树过滤: [{def, field, label, nodes, active, activeLabel}]
             query: { type: '', status: null, q: '', page: 1, size: 25 },
+            rebuilding: false,
             createVisible: false,
         }
     },
@@ -279,6 +281,13 @@ export default {
             } finally { this.loading = false }
         },
         onPageChange(p) { this.query.page = p; this.refresh() },
+        rebuildSearch() {
+            this.rebuilding = true
+            window.$api.post('/admin/search/rebuild').then(() => {
+                ElMessage.success('索引已重建')
+                this.refresh()
+            }).catch(() => {}).finally(() => { this.rebuilding = false })
+        },
         fmt(s) { return s ? s.replace('T', ' ').slice(0, 16) : '' },
         // 列表标题: 统一走 $api.refLabel（title 列 → slug → 类型字段序兜底 → expand 合成）
         titleOf(r) {

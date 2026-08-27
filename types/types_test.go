@@ -291,61 +291,6 @@ types:
 }
 
 // title 穿透声明: 合法/非法校验。
-func TestTitleThrough(t *testing.T) {
-	good := `
-types:
-  person:
-    title: name
-    fields:
-      - { name: name, kind: text }
-  employment:
-    title: person.$.name
-    fields:
-      - { name: person, kind: ref, to: person }
-`
-	bad := []struct{ name, raw string }{
-		{"ref 不存在", `
-types:
-  person: { fields: [ { name: name, kind: text } ] }
-  employment:
-    title: ghost.$.name
-    fields: [ { name: person, kind: ref, to: person } ]`},
-		{"第一段非 ref", `
-types:
-  person: { fields: [ { name: name, kind: text } ] }
-  employment:
-    title: role.$.name
-    fields: [ { name: role, kind: text } ]`},
-		{"目标字段不存在", `
-types:
-  person: { fields: [ { name: name, kind: text } ] }
-  employment:
-    title: person.$.ghost
-    fields: [ { name: person, kind: ref, to: person } ]`},
-		{"目标非标量", `
-types:
-  person: { fields: [ { name: buddy, kind: ref, to: person } ] }
-  employment:
-    title: person.$.buddy
-    fields: [ { name: person, kind: ref, to: person } ]`},
-		{"第二段既非 $ 也非列", `
-types:
-  person: { fields: [ { name: name, kind: text } ] }
-  employment:
-    title: person.xyz
-    fields: [ { name: person, kind: ref, to: person } ]`},
-	}
-	ts := New()
-	if err := ts.Load([]byte(good)); err != nil {
-		t.Fatalf("good title path must load: %v", err)
-	}
-	for _, c := range bad {
-		if err := New().Load([]byte(c.raw)); err == nil {
-			t.Fatalf("%s: must fail", c.name)
-		}
-	}
-}
-
 // slug 约束: 字母开头 / 白名单字符 / 禁止连续 --。
 func TestValidSlug(t *testing.T) {
 	valid := []string{"ai", "ai-industry", "page1", "a_b", "a-1-b", "A-B"}

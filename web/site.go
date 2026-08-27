@@ -2,6 +2,7 @@
 package web
 
 import (
+	"bytes"
 	"log"
 	"net/http"
 	"os"
@@ -22,6 +23,7 @@ type Site struct {
 	rend  *RenderEngine
 	r     *cho.Cho[*CmsCtx]
 	funcs map[string]any
+	debug bool
 }
 
 // SiteSpec 站点装配配置（纯数据 — 业务由调用方在 NewSite 后直接写）。
@@ -32,6 +34,8 @@ type SiteSpec struct {
 	Static    string // 静态资源目录（空 = 跳过）
 	Uploads   string // 上传目录（空 = 跳过）
 	Migrate   bool   // 是否自动跑引擎迁移（默认 true）
+	// Debug 开发模式: 渲染失败显示错误详情页（模板名/行号/候选/数据 keys）。
+	Debug bool
 	// AdminPass 管理后台固定密码（空 = 首次生成随机密码并打印一次）。
 	AdminPass string
 	// SQLLogger dba SQL 日志器（nil = 默认 — dba.NewLogger(slog.Default, 1s, true)）。
@@ -86,7 +90,7 @@ func NewSite(spec SiteSpec) (*Site, error) {
 	// ④ 渲染引擎
 	rend := NewRenderEngine(spec.Templates, svc)
 	// ⑤ Site（先建 — cho 工厂引用同一 site）
-	site := &Site{eng: svc, db: db, rend: rend, funcs: map[string]any{}}
+	site := &Site{eng: svc, db: db, rend: rend, funcs: map[string]any{}, debug: spec.Debug}
 	r := cho.New(func(w http.ResponseWriter, r *http.Request) *CmsCtx {
 		return &CmsCtx{BaseContext: cho.MakeBaseContext(w, r), site: site}
 	})
@@ -169,9 +173,14 @@ func (c *CmsCtx) Render(candidates []string, data map[string]any) {
 		c.String(http.StatusInternalServerError, "render hook: "+err.Error())
 		return
 	}
-	if err := c.site.rend.Render(c.W, candidates, data); err != nil {
-		c.String(http.StatusInternalServerError, "render: "+err.Error())
+	// buffer 先行: 渲染成功才写（失败不留半截页面 + 状态码正确）
+	var buf bytes.Buffer
+	if err := c.site.rend.Render(&buf, candidates, data); err != nil {
+		c.site.renderError(c, candidates, data, err)
+		return
 	}
+	c.SetHeader("Content-Type", "text/html; charset=utf-8")
+	_, _ = c.W.Write(buf.Bytes())
 }
 
 // Func 模板函数（站点 hook 内注册 — 等价 site.Func）。

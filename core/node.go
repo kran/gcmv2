@@ -65,8 +65,8 @@ func (f Fields) Value() (driver.Value, error) {
 type Node struct {
 	ID        int64     `db:"id,omitempty" json:"id"` // omitempty: 插入跳零值走自增
 	Type      string    `db:"type" json:"type"`
-	Title     string    `db:"title" json:"title"` // 显示名投影列（引擎从类型 title 声明字段算）
-	Slug      string    `db:"slug" json:"slug"`   // URL 段（'' = 无 URL）
+	Display   string    `db:"display" json:"display"` // 公共显示文本（固有列 — 创建必传; 与 fields 无投影关系）
+	Slug      string    `db:"slug" json:"slug"`       // URL 段（'' = 无 URL）
 	Status    int       `db:"status" json:"status"`
 	Sort      int       `db:"sort" json:"sort"`
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
@@ -87,61 +87,6 @@ func (n *Node) Field(name string) any {
 		return nil
 	}
 	return n.Fields[name]
-}
-
-// titleFrom 抽标题列: 类型 title 声明字段的值（fields 保留完整, 列是投影）。
-// 支持 "字段名"（本类型标量字段）; 穿透 "ref.$字段"（引用目标字段 — 写时快照）。
-func (s *Service) titleFrom(td types.TypeDef, fields map[string]any) string {
-	if td.Title == "" {
-		return ""
-	}
-	path, err := types.ParsePath(td.Title)
-	if err != nil || len(path) == 0 {
-		return "" // 声明非法由 types 校验期拒绝; 此处防御
-	}
-	if len(path) == 1 {
-		if v, ok := fields[path[0].Field].(string); ok {
-			return v
-		}
-		return ""
-	}
-	// 穿透（两段）: ref 字段值（ref[] 取第一条）
-	v, ok := fields[path[0].Field]
-	if !ok {
-		return ""
-	}
-	var tid int64
-	switch n := v.(type) {
-	case int64:
-		tid = n
-	case float64:
-		tid = int64(n)
-	case []any:
-		if len(n) > 0 {
-			tid, _ = types.ToID(n[0])
-		}
-	}
-	if tid <= 0 {
-		return ""
-	}
-	target, err := s.GetNodeById(tid)
-	if err != nil || target == nil {
-		return ""
-	}
-	seg2 := path[1]
-	if seg2.JSON {
-		if tv, ok := target.Fields[seg2.Field].(string); ok {
-			return tv
-		}
-		return ""
-	}
-	switch seg2.Field {
-	case "title":
-		return target.Title
-	case "slug":
-		return target.Slug
-	}
-	return ""
 }
 
 // FullFields 管理视图: 节点 fields + ref 字段值（id 列表）— 编辑表单回显用。

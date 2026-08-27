@@ -2,6 +2,9 @@
     <el-dialog append-to-body v-model="visibleModel" :title="isEdit ? '编辑 #' + node.id : '新建 ' + (typeName || '')"
                width="80vw" :close-on-click-modal="false" :close-on-press-escape="false">
         <el-form>
+            <el-form-item label="显示名 *">
+                <el-input v-model="form.display" placeholder="公共显示文本（列表/搜索/导航显示）" />
+            </el-form-item>
             <el-form-item label="slug">
                 <el-input v-model="form.slug" placeholder="URL 段（留空 = /node/{id}）" />
             </el-form-item>
@@ -42,7 +45,7 @@ export default {
     },
     emits: ['update:visible', 'changed'],
     data() {
-        return { form: { slug: '', status: 1, sort: 0, fields: {}, refPreset: {} }, saving: false, def: null }
+        return { form: { display: '', slug: '', status: 1, sort: 0, fields: {}, refPreset: {} }, saving: false, def: null }
     },
     computed: {
         // v-model:visible 代理 — prop 只读, 内部写走 emit
@@ -62,7 +65,7 @@ export default {
     methods: {
         loadCreate() {
             this.def = this.defs[this.typeName] || null
-            this.form = { slug: '', status: 1, sort: 0, fields: {}, refPreset: {} }
+            this.form = { display: '', slug: '', status: 1, sort: 0, fields: {}, refPreset: {} }
             if (this.presetField && this.presetValue) {
                 this.form.fields[this.presetField] = this.presetValue
                 // ref 字段显示名（否则只显示裸 id）
@@ -77,6 +80,7 @@ export default {
             this.def = this.defs[type] || null
             window.$api.node(r.id).then((full) => {
                 this.form = {
+                    display: full.display || '',
                     slug: full.slug || '',
                     status: full.status,
                     sort: full.sort || 0,
@@ -100,6 +104,7 @@ export default {
         save() {
             this.saving = true
             var body = {
+                display: this.form.display,
                 slug: this.form.slug,
                 status: this.form.status,
                 sort: this.form.sort,

@@ -31,7 +31,7 @@ func TestFTSSync(t *testing.T) {
 		t.Fatal("test types must declare article search: true")
 	}
 	// 已发布文章 → 进索引
-	id, _ := s.CreateNode(&Node{Type: "article", Status: StatusPublished,
+	id, _ := s.CreateNode(&Node{Type: "article", Display: "t", Status: StatusPublished,
 		Fields: Fields{"title": "人工智能与制造业", "body": "深度融合路径研究"}})
 	rows, total, err := s.Search("人工智能", "", 1, 10)
 	if err != nil {
@@ -41,7 +41,7 @@ func TestFTSSync(t *testing.T) {
 		t.Fatalf("published must be searchable: total=%d", total)
 	}
 	// 草稿 → 不进
-	draftID, _ := s.CreateNode(&Node{Type: "article", Status: StatusDraft,
+	draftID, _ := s.CreateNode(&Node{Type: "article", Display: "t", Status: StatusDraft,
 		Fields: Fields{"title": "秘密草稿", "body": "不可搜"}})
 	_, total, _ = s.Search("秘密", "", 1, 10)
 	if total != 0 {
@@ -77,11 +77,11 @@ func TestFTSSync(t *testing.T) {
 // 查询: 类型过滤 + 多词短语精确。
 func TestFTSQuery(t *testing.T) {
 	s := newFilterSvc(t)
-	s.CreateNode(&Node{Type: "article", Status: StatusPublished,
+	s.CreateNode(&Node{Type: "article", Display: "t", Status: StatusPublished,
 		Fields: Fields{"title": "人工智能与制造业", "body": "产业路径研究"}})
-	s.CreateNode(&Node{Type: "article", Status: StatusPublished,
+	s.CreateNode(&Node{Type: "article", Display: "t", Status: StatusPublished,
 		Fields: Fields{"title": "区域规划", "body": "2026 年规划报告"}})
-	s.CreateNode(&Node{Type: "person", Status: StatusPublished,
+	s.CreateNode(&Node{Type: "person", Display: "t", Status: StatusPublished,
 		Fields: Fields{"name": "人工智能专家"}})
 
 	// 多词 phrase: 连续 bigram 才命中
@@ -109,7 +109,7 @@ func TestFTSQuery(t *testing.T) {
 // Rebuild: 全量重建（类型声明变化后）。
 func TestFTSRebuild(t *testing.T) {
 	s := newFilterSvc(t)
-	s.CreateNode(&Node{Type: "article", Status: StatusPublished,
+	s.CreateNode(&Node{Type: "article", Display: "t", Status: StatusPublished,
 		Fields: Fields{"title": "重建测试", "body": "x"}})
 	// 手动删索引模拟损坏
 	if _, err := s.db.Add("DELETE FROM nodes_fts").Exec(); err != nil {
@@ -131,7 +131,7 @@ func TestFTSRebuild(t *testing.T) {
 // 搜索文本拼接: 只拼标量字段（ref 值不进索引）。
 func TestSearchableText(t *testing.T) {
 	s := newFilterSvc(t)
-	n := &Node{Type: "article", Title: "标题", Fields: Fields{"body": "正文", "authors": []any{5}}}
+	n := &Node{Type: "article", Display: "标题", Fields: Fields{"body": "正文", "authors": []any{5}}}
 	text := s.searchableText(n)
 	if !strings.Contains(text, "标题") || !strings.Contains(text, "正文") || strings.Contains(text, "5") {
 		t.Fatalf("searchableText: %q", text)

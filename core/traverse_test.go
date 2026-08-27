@@ -24,9 +24,9 @@ func newTraverseService(t *testing.T) *Service {
 // 造树: root → a → b（b.parent=a, a.parent=root）
 func buildTree(t *testing.T, s *Service) (root, a, b int64) {
 	t.Helper()
-	root, _ = s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "root"}})
-	a, _ = s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "a", "parent": root}})
-	b, _ = s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "b", "parent": a}})
+	root, _ = s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "root"}})
+	a, _ = s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "a", "parent": root}})
+	b, _ = s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "b", "parent": a}})
 	return
 }
 
@@ -96,10 +96,10 @@ func TestTraverseMaxHops(t *testing.T) {
 func TestEquivalenceClass(t *testing.T) {
 	s := newTraverseService(t)
 	// 等价类: x ↔ y ↔ z（只存单向边 x→y, y→z — 等价无方向, 类内全可达）
-	x, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "x"}})
-	y, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "y"}})
-	z, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "z"}})
-	alone, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "alone"}})
+	x, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "x"}})
+	y, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "y"}})
+	z, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "z"}})
+	alone, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "alone"}})
 	s.AddEdge(x, y, "synonym", 0)
 	s.AddEdge(y, z, "synonym", 0)
 
@@ -121,8 +121,8 @@ func TestEquivalenceClass(t *testing.T) {
 // 环防: 循环引用不无限递归, maxHops 截断。
 func TestTraverseCycle(t *testing.T) {
 	s := newTraverseService(t)
-	a, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "a"}})
-	b, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "b"}})
+	a, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "a"}})
+	b, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "b"}})
 	s.AddEdge(a, b, "parent", 0)
 	s.AddEdge(b, a, "parent", 0) // 环
 
@@ -167,9 +167,9 @@ func TestAncestorsDepthOrder(t *testing.T) {
 	s := newFilterSvc(t)
 	// 先建叶后建根 — id 序与层级序相反: leaf(id1) → mid(id2) → top(id3)
 	// 父链: leaf 的父 = mid, mid 的父 = top
-	top, _ := s.CreateNode(&Node{Type: "category", Slug: "top", Status: StatusPublished, Fields: Fields{"name": "顶"}})
-	mid, _ := s.CreateNode(&Node{Type: "category", Slug: "mid", Fields: Fields{"name": "中", "parent": top}})
-	leaf, _ := s.CreateNode(&Node{Type: "category", Slug: "leaf", Fields: Fields{"name": "叶", "parent": mid}})
+	top, _ := s.CreateNode(&Node{Type: "category", Display: "t", Slug: "top", Status: StatusPublished, Fields: Fields{"name": "顶"}})
+	mid, _ := s.CreateNode(&Node{Type: "category", Display: "t", Slug: "mid", Fields: Fields{"name": "中", "parent": top}})
+	leaf, _ := s.CreateNode(&Node{Type: "category", Display: "t", Slug: "leaf", Fields: Fields{"name": "叶", "parent": mid}})
 	// Traverse(id 序) 与 Ancestors(深度序) 对照
 	tr, err := s.Traverse("category", leaf, "parent", 20)
 	if err != nil {

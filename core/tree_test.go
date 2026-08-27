@@ -8,10 +8,10 @@ import (
 // 树形态: root → a → b; root → c（c 下架 status=0 不入树）
 func buildTreeForTree(t *testing.T, s *Service) (root, a, b int64) {
 	t.Helper()
-	root, _ = s.CreateNode(&Node{Type: "category", Slug: "root", Status: 1, Sort: 1, Fields: Fields{"name": "root"}})
-	a, _ = s.CreateNode(&Node{Type: "category", Slug: "a", Status: 1, Sort: 1, Fields: Fields{"name": "a", "parent": root}})
-	b, _ = s.CreateNode(&Node{Type: "category", Slug: "b", Status: 1, Sort: 2, Fields: Fields{"name": "b", "parent": a}})
-	c, _ := s.CreateNode(&Node{Type: "category", Slug: "c", Status: 0, Fields: Fields{"name": "c", "parent": root}})
+	root, _ = s.CreateNode(&Node{Type: "category", Display: "t", Slug: "root", Status: 1, Sort: 1, Fields: Fields{"name": "root"}})
+	a, _ = s.CreateNode(&Node{Type: "category", Display: "t", Slug: "a", Status: 1, Sort: 1, Fields: Fields{"name": "a", "parent": root}})
+	b, _ = s.CreateNode(&Node{Type: "category", Display: "t", Slug: "b", Status: 1, Sort: 2, Fields: Fields{"name": "b", "parent": a}})
+	c, _ := s.CreateNode(&Node{Type: "category", Display: "t", Slug: "c", Status: 0, Fields: Fields{"name": "c", "parent": root}})
 	_ = c
 	return
 }
@@ -95,8 +95,8 @@ func TestTreeBasics(t *testing.T) {
 func TestTreeCycleSafe(t *testing.T) {
 	s := newTraverseService(t)
 	// 造环: a.parent = b, b.parent = a
-	a, _ := s.CreateNode(&Node{Type: "category", Slug: "a", Status: 1, Fields: Fields{"name": "a"}})
-	b, _ := s.CreateNode(&Node{Type: "category", Slug: "b", Status: 1, Fields: Fields{"name": "b", "parent": a}})
+	a, _ := s.CreateNode(&Node{Type: "category", Display: "t", Slug: "a", Status: 1, Fields: Fields{"name": "a"}})
+	b, _ := s.CreateNode(&Node{Type: "category", Display: "t", Slug: "b", Status: 1, Fields: Fields{"name": "b", "parent": a}})
 	if err := s.PatchNode(a, &NodePatch{Fields: Fields{"parent": b}}); err != nil {
 		t.Fatal(err)
 	}

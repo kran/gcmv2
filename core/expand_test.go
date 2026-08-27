@@ -35,10 +35,10 @@ types:
 func TestExpandPathParallel(t *testing.T) {
 	ts := newTypes(t, expandPathTypes)
 	s := New(testDB(t), ts)
-	cat, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "行业"}})
-	p1, _ := s.CreateNode(&Node{Type: "person", Fields: Fields{"name": "张三"}})
-	p2, _ := s.CreateNode(&Node{Type: "person", Fields: Fields{"name": "李四"}})
-	art, _ := s.CreateNode(&Node{Type: "article", Fields: Fields{
+	cat, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "行业"}})
+	p1, _ := s.CreateNode(&Node{Type: "person", Display: "t", Fields: Fields{"name": "张三"}})
+	p2, _ := s.CreateNode(&Node{Type: "person", Display: "t", Fields: Fields{"name": "李四"}})
+	art, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{
 		"title": "甲", "authors": []any{p1, p2}, "categories": []any{cat}}})
 
 	root, err := s.ExpandPath(art, "authors, categories")
@@ -61,9 +61,9 @@ func TestExpandPathParallel(t *testing.T) {
 func TestExpandPathChain(t *testing.T) {
 	ts := newTypes(t, expandPathTypes)
 	s := New(testDB(t), ts)
-	top, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "顶级"}})
-	mid, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "中层", "broader": top}})
-	art, _ := s.CreateNode(&Node{Type: "article", Fields: Fields{"title": "甲", "categories": []any{mid}}})
+	top, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "顶级"}})
+	mid, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "中层", "broader": top}})
+	art, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "甲", "categories": []any{mid}}})
 
 	root, err := s.ExpandPath(art, "categories.broader")
 	if err != nil {
@@ -84,9 +84,9 @@ func TestExpandPathChain(t *testing.T) {
 func TestExpandPathIn(t *testing.T) {
 	ts := newTypes(t, expandPathTypes)
 	s := New(testDB(t), ts)
-	cat, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "行业"}})
-	s.CreateNode(&Node{Type: "article", Fields: Fields{"title": "甲", "categories": []any{cat}}})
-	s.CreateNode(&Node{Type: "article", Fields: Fields{"title": "乙", "categories": []any{cat}}})
+	cat, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "行业"}})
+	s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "甲", "categories": []any{cat}}})
+	s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "乙", "categories": []any{cat}}})
 
 	root, err := s.ExpandPath(cat, "<-categories")
 	if err != nil {
@@ -102,9 +102,9 @@ func TestExpandPathIn(t *testing.T) {
 func TestExpandPathMixed(t *testing.T) {
 	ts := newTypes(t, expandPathTypes)
 	s := New(testDB(t), ts)
-	cat, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "行业"}})
-	p1, _ := s.CreateNode(&Node{Type: "person", Fields: Fields{"name": "张三"}})
-	s.CreateNode(&Node{Type: "article", Fields: Fields{"title": "甲", "categories": []any{cat}, "authors": []any{p1}}})
+	cat, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "行业"}})
+	p1, _ := s.CreateNode(&Node{Type: "person", Display: "t", Fields: Fields{"name": "张三"}})
+	s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "甲", "categories": []any{cat}, "authors": []any{p1}}})
 
 	root, err := s.ExpandPath(cat, "<-categories.authors")
 	if err != nil {
@@ -124,7 +124,7 @@ func TestExpandPathMixed(t *testing.T) {
 func TestExpandPathValidation(t *testing.T) {
 	ts := newTypes(t, expandPathTypes)
 	s := New(testDB(t), ts)
-	art, _ := s.CreateNode(&Node{Type: "article", Fields: Fields{"title": "甲"}})
+	art, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "甲"}})
 	if n, err := s.ExpandPath(art, "ghost"); err != nil {
 		t.Fatalf("unknown field must be silent: %v", err)
 	} else if v, has := n.Expand["ghost"]; !has || len(v.([]*Node)) != 0 {
@@ -144,8 +144,8 @@ func TestExpandPathValidation(t *testing.T) {
 func TestExpandPathAuto(t *testing.T) {
 	ts := newTypes(t, expandPathTypes)
 	s := New(testDB(t), ts)
-	p1, _ := s.CreateNode(&Node{Type: "person", Fields: Fields{"name": "张三"}})
-	art, _ := s.CreateNode(&Node{Type: "article", Fields: Fields{"title": "甲", "authors": []any{p1}}})
+	p1, _ := s.CreateNode(&Node{Type: "person", Display: "t", Fields: Fields{"name": "张三"}})
+	art, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "甲", "authors": []any{p1}}})
 	n, err := s.ExpandPath(art, "*")
 	if err != nil {
 		t.Fatal(err)
@@ -162,11 +162,11 @@ func TestExpandPathAuto(t *testing.T) {
 func TestExpandPathMany(t *testing.T) {
 	ts := newTypes(t, expandPathTypes)
 	s := New(testDB(t), ts)
-	cat, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "行业"}})
-	p1, _ := s.CreateNode(&Node{Type: "person", Fields: Fields{"name": "张三"}})
-	p2, _ := s.CreateNode(&Node{Type: "person", Fields: Fields{"name": "李四"}})
-	a1, _ := s.CreateNode(&Node{Type: "article", Fields: Fields{"title": "甲", "categories": []any{cat}, "authors": []any{p1}}})
-	a2, _ := s.CreateNode(&Node{Type: "article", Fields: Fields{"title": "乙", "categories": []any{cat}, "authors": []any{p2}}})
+	cat, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "行业"}})
+	p1, _ := s.CreateNode(&Node{Type: "person", Display: "t", Fields: Fields{"name": "张三"}})
+	p2, _ := s.CreateNode(&Node{Type: "person", Display: "t", Fields: Fields{"name": "李四"}})
+	a1, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "甲", "categories": []any{cat}, "authors": []any{p1}}})
+	a2, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "乙", "categories": []any{cat}, "authors": []any{p2}}})
 
 	// 列表两篇, 一次展开 authors + categories
 	list, err := s.ExpandPathMany([]int64{a1, a2}, "authors, categories")
@@ -198,13 +198,13 @@ func TestExpandOverflowFails(t *testing.T) {
 	// 1500 个作者 + 1 篇文章挂满（绕过 title 用 categories? — article 有 categories ref[]）
 	ids := make([]any, 0, 1500)
 	for i := 0; i < 1500; i++ {
-		id, err := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "c" + strconv.Itoa(i)}})
+		id, err := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "c" + strconv.Itoa(i)}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		ids = append(ids, id)
 	}
-	aid, err := s.CreateNode(&Node{Type: "article", Fields: Fields{"title": "big", "categories": ids}})
+	aid, err := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "big", "categories": ids}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,8 +222,8 @@ func TestExpandOverflowFails(t *testing.T) {
 // 爆炸防护: 链深超 4 段 → fail-loud。
 func TestExpandDeepPathFails(t *testing.T) {
 	s := newFilterSvc(t)
-	p, _ := s.CreateNode(&Node{Type: "person", Fields: Fields{"name": "张三"}})
-	a, _ := s.CreateNode(&Node{Type: "article", Fields: Fields{"title": "x", "authors": []any{p}}})
+	p, _ := s.CreateNode(&Node{Type: "person", Display: "t", Fields: Fields{"name": "张三"}})
+	a, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "x", "authors": []any{p}}})
 	_, err := s.ExpandPath(a, "authors.authors.authors.authors.authors")
 	if err == nil {
 		t.Fatal("5-segment path must fail (max 4)")
@@ -233,9 +233,9 @@ func TestExpandDeepPathFails(t *testing.T) {
 // 双向同名字段展开: 出边 "categories" 与入边 "<-categories" 各自独立（key 不冲突）。
 func TestExpandBidirectionalKey(t *testing.T) {
 	s := newFilterSvc(t)
-	root, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "根"}})
-	child, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "子", "parent": root}})
-	s.CreateNode(&Node{Type: "article", Status: StatusPublished, Fields: Fields{"title": "a", "categories": []any{child}}})
+	root, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "根"}})
+	child, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "子", "parent": root}})
+	s.CreateNode(&Node{Type: "article", Display: "t", Status: StatusPublished, Fields: Fields{"title": "a", "categories": []any{child}}})
 
 	// 展开子分类: 出边 categories（无, 叶子）+ 入边 <-categories（文章 a 引用它）
 	n, err := s.ExpandPath(child, "categories, <-categories")
@@ -267,11 +267,11 @@ func TestExpandBidirectionalKey(t *testing.T) {
 // 多层展开（三层出边链 / 多层入边 / 批量）: 每层递归挂载, 方向每段独立。
 func TestExpandMultiLevel(t *testing.T) {
 	s := newFilterSvc(t)
-	root, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "根"}})
-	child, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "子", "parent": root}})
-	grand, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "孙", "parent": child}})
-	great, _ := s.CreateNode(&Node{Type: "category", Fields: Fields{"name": "重孙", "parent": grand}})
-	art, _ := s.CreateNode(&Node{Type: "article", Status: StatusPublished,
+	root, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "根"}})
+	child, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "子", "parent": root}})
+	grand, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "孙", "parent": child}})
+	great, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "重孙", "parent": grand}})
+	art, _ := s.CreateNode(&Node{Type: "article", Display: "t", Status: StatusPublished,
 		Fields: Fields{"title": "a", "categories": []any{grand}}})
 
 	// 三层出边链: 文章 → categories(grand) → parent(child) → parent(root)

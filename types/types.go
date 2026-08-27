@@ -23,7 +23,6 @@ type TypeDef struct {
 	Name   string     `json:"name"`                 // 类型名（配置键）
 	Search bool       `yaml:"search" json:"search"` // 参与全文检索（FTS）
 	View   string     `yaml:"view" json:"view"`     // 展示形态: tree / list（空 = list）
-	Title  string     `yaml:"title" json:"title"`   // 标题字段名（映射到 nodes.title 列）; 空 = 无
 	Icon   string     `yaml:"icon" json:"icon"`     // 管理端图标名（Element Plus icon）; 空 = 默认
 	Auth   bool       `yaml:"auth" json:"auth"`     // 可认证类型（认证信息存 auth_methods 表 — 节点 1:N 登录方式）
 	Create string     `yaml:"create" json:"create"` // 创建权限规则（Lisp 表达式 — 空 = 公开; 假 = 前台禁创建; admin 通道不受限）
@@ -213,11 +212,6 @@ func (t *Types) validate(defs map[string]TypeDef) error {
 		if reserved[name] {
 			return fmt.Errorf("types: type %q is reserved", name)
 		}
-		if td.Title != "" {
-			if err := t.validateTitle(name, td, defs); err != nil {
-				return err
-			}
-		}
 		if td.View == "tree" && !hasSelfRef(td) {
 			return fmt.Errorf("types: type %q: view 'tree' requires a self-ref field (ref to own type)", name)
 		}
@@ -248,67 +242,6 @@ func (t *Types) validate(defs map[string]TypeDef) error {
 				return err
 			}
 		}
-	}
-	return nil
-}
-
-// validateTitle 校验 title 声明: 本类型字段名（标量）或穿透路径
-// "ref.$字段"（引用目标 JSON 标量）/ "ref.列"（引用目标节点列）。
-// 穿透第一段必须是本类型 ref 字段; 第二段跨类型校验（defs 全量在手）。
-func (t *Types) validateTitle(name string, td TypeDef, defs map[string]TypeDef) error {
-	// 统一路径语言解析（与 filter/expand 同一抽象）
-	path, err := ParsePath(td.Title)
-	if err != nil {
-		return fmt.Errorf("types: type %q: title: %w", name, err)
-	}
-	if len(path) == 1 {
-		// 本类型标量字段
-		if path[0].JSON || path[0].In {
-			return fmt.Errorf("types: type %q: title %q must be a plain field name (no $. or <-)", name, td.Title)
-		}
-		f, ok := FieldByName(td, path[0].Field)
-		if !ok {
-			return fmt.Errorf("types: type %q: title field %q not defined", name, td.Title)
-		}
-		k, ok := t.kinds[f.Kind]
-		if !ok || k.Class() != ClassField {
-			return fmt.Errorf("types: type %q: title field %q must be a scalar kind", name, td.Title)
-		}
-		return nil
-	}
-	// 穿透（两段）: 首段 = 引用字段
-	if len(path) > 2 {
-		return fmt.Errorf("types: type %q: title path %q: at most 2 segments (ref.field)", name, td.Title)
-	}
-	if path[0].JSON || path[0].In {
-		return fmt.Errorf("types: type %q: title path %q: first segment must be a ref field", name, td.Title)
-	}
-	f, ok := FieldByName(td, path[0].Field)
-	if !ok {
-		return fmt.Errorf("types: type %q: title path %q: ref field %q not defined", name, td.Title, path[0].Field)
-	}
-	k, ok := t.kinds[f.Kind]
-	if !ok || (k.Class() != ClassRef && k.Class() != ClassRefList) {
-		return fmt.Errorf("types: type %q: title path %q: first segment must be a ref field", name, td.Title)
-	}
-	target, ok := defs[f.To]
-	if !ok {
-		return fmt.Errorf("types: type %q: title path %q: target type %q not defined", name, td.Title, f.To)
-	}
-	seg2 := path[1]
-	if seg2.JSON {
-		tf, ok := FieldByName(target, seg2.Field)
-		if !ok {
-			return fmt.Errorf("types: type %q: title path %q: field %q not on type %q", name, td.Title, seg2.Field, f.To)
-		}
-		tk, ok := t.kinds[tf.Kind]
-		if !ok || tk.Class() != ClassField {
-			return fmt.Errorf("types: type %q: title path %q: target field %q must be a scalar kind", name, td.Title, seg2.Field)
-		}
-		return nil
-	}
-	if seg2.In || !nodeColumns[seg2.Field] {
-		return fmt.Errorf("types: type %q: title path %q: %q is neither $.field nor a node column", name, td.Title, seg2.Field)
 	}
 	return nil
 }

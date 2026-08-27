@@ -62,6 +62,10 @@ func (s *Site) render404(ctx *CmsCtx) {
 		_, _ = ctx.W.Write(buf.Bytes())
 		return
 	}
+	if s.debug {
+		s.renderError(ctx, []string{"404.html"}, data, err)
+		return
+	}
 	ctx.String(http.StatusNotFound, "404 page not found")
 }
 

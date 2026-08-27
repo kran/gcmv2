@@ -60,7 +60,7 @@ func newTestService(t *testing.T) *Service {
 
 func TestCreateAndGet(t *testing.T) {
 	s := newTestService(t)
-	id, err := s.CreateNode(&Node{Type: "article", Slug: "news", Status: 1,
+	id, err := s.CreateNode(&Node{Type: "article", Display: "t", Slug: "news", Status: 1,
 		Fields: map[string]any{"title": "标题", "body": "正文", "views": 5}})
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +72,7 @@ func TestCreateAndGet(t *testing.T) {
 	if err != nil || n == nil {
 		t.Fatal(err)
 	}
-	if n.Title != "标题" || n.Slug != "news" || n.Status != 1 {
+	if n.Display != "t" || n.Slug != "news" || n.Status != 1 {
 		t.Fatalf("node = %+v", n)
 	}
 	if n.Fields["body"] != "正文" || n.Fields["views"] != float64(5) {
@@ -85,10 +85,10 @@ func TestCreateAndGet(t *testing.T) {
 
 func TestCreateSlugDup(t *testing.T) {
 	s := newTestService(t)
-	if _, err := s.CreateNode(&Node{Type: "article", Slug: "a", Fields: map[string]any{"title": "t1"}}); err != nil {
+	if _, err := s.CreateNode(&Node{Type: "article", Display: "t", Slug: "a", Fields: map[string]any{"title": "t1"}}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := s.CreateNode(&Node{Type: "article", Slug: "a", Fields: map[string]any{"title": "t2"}})
+	_, err := s.CreateNode(&Node{Type: "article", Display: "t", Slug: "a", Fields: map[string]any{"title": "t2"}})
 	if err == nil {
 		t.Fatal("slug dup should fail")
 	}
@@ -96,8 +96,8 @@ func TestCreateSlugDup(t *testing.T) {
 
 func TestCreateRefs(t *testing.T) {
 	s := newTestService(t)
-	cat, _ := s.CreateNode(&Node{Type: "category", Fields: map[string]any{"name": "c"}})
-	id, err := s.CreateNode(&Node{Type: "article",
+	cat, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: map[string]any{"name": "c"}})
+	id, err := s.CreateNode(&Node{Type: "article", Display: "t",
 		Fields: map[string]any{"title": "t", "categories": []any{cat}}})
 	if err != nil {
 		t.Fatal(err)
@@ -117,7 +117,7 @@ func TestCreateRefs(t *testing.T) {
 
 func TestPatchColumns(t *testing.T) {
 	s := newTestService(t)
-	id, _ := s.CreateNode(&Node{Type: "article", Slug: "a", Status: 0, Sort: 3,
+	id, _ := s.CreateNode(&Node{Type: "article", Display: "t", Slug: "a", Status: 0, Sort: 3,
 		Fields: map[string]any{"title": "t", "body": "b"}})
 
 	// PATCH: 改 slug + status（Sort 未提供 — 保留）
@@ -137,7 +137,7 @@ func TestPatchColumns(t *testing.T) {
 
 func TestPatchSlugEmpty(t *testing.T) {
 	s := newTestService(t)
-	id, _ := s.CreateNode(&Node{Type: "article", Slug: "a", Fields: map[string]any{"title": "t"}})
+	id, _ := s.CreateNode(&Node{Type: "article", Display: "t", Slug: "a", Fields: map[string]any{"title": "t"}})
 	empty := ""
 	if err := s.PatchNode(id, &NodePatch{Slug: &empty}); err != nil {
 		t.Fatal(err)
@@ -150,7 +150,7 @@ func TestPatchSlugEmpty(t *testing.T) {
 
 func TestPatchFieldsMerge(t *testing.T) {
 	s := newTestService(t)
-	id, _ := s.CreateNode(&Node{Type: "article",
+	id, _ := s.CreateNode(&Node{Type: "article", Display: "t",
 		Fields: map[string]any{"title": "t", "body": "旧", "views": 100}})
 
 	// PATCH fields: 只给 body — views 保留（json_patch merge）
@@ -168,7 +168,7 @@ func TestPatchFieldsMerge(t *testing.T) {
 
 func TestPatchFieldsNullDelete(t *testing.T) {
 	s := newTestService(t)
-	id, _ := s.CreateNode(&Node{Type: "article",
+	id, _ := s.CreateNode(&Node{Type: "article", Display: "t",
 		Fields: map[string]any{"title": "t", "body": "旧"}})
 
 	// PATCH fields: body = nil → 删除字段（json_patch RFC 7396）
@@ -183,8 +183,8 @@ func TestPatchFieldsNullDelete(t *testing.T) {
 
 func TestPatchRefNullClear(t *testing.T) {
 	s := newTestService(t)
-	cat, _ := s.CreateNode(&Node{Type: "category", Fields: map[string]any{"name": "c"}})
-	id, _ := s.CreateNode(&Node{Type: "article",
+	cat, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: map[string]any{"name": "c"}})
+	id, _ := s.CreateNode(&Node{Type: "article", Display: "t",
 		Fields: map[string]any{"title": "t", "categories": []any{cat}}})
 	// 清空 ref（null = 只删边不加边 — PATCH 语义）
 	if err := s.PatchNode(id, &NodePatch{Fields: map[string]any{"categories": nil}}); err != nil {
@@ -198,9 +198,9 @@ func TestPatchRefNullClear(t *testing.T) {
 
 func TestPatchRefReplace(t *testing.T) {
 	s := newTestService(t)
-	cat1, _ := s.CreateNode(&Node{Type: "category", Fields: map[string]any{"name": "c1"}})
-	cat2, _ := s.CreateNode(&Node{Type: "category", Fields: map[string]any{"name": "c2"}})
-	id, _ := s.CreateNode(&Node{Type: "article",
+	cat1, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: map[string]any{"name": "c1"}})
+	cat2, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: map[string]any{"name": "c2"}})
+	id, _ := s.CreateNode(&Node{Type: "article", Display: "t",
 		Fields: map[string]any{"title": "t", "categories": []any{cat1}}})
 	// 换引用（只动出现的字段 — 差量）
 	if err := s.PatchNode(id, &NodePatch{Fields: map[string]any{"categories": []any{cat2}}}); err != nil {
@@ -214,7 +214,7 @@ func TestPatchRefReplace(t *testing.T) {
 
 func TestPatchNoOp(t *testing.T) {
 	s := newTestService(t)
-	id, _ := s.CreateNode(&Node{Type: "article", Fields: map[string]any{"title": "t"}})
+	id, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: map[string]any{"title": "t"}})
 	// 空 patch（全 nil + fields 空）— 幂等无错
 	if err := s.PatchNode(id, &NodePatch{}); err != nil {
 		t.Fatal(err)
@@ -236,8 +236,8 @@ func TestPatchMissingNode(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	s := newTestService(t)
-	cat, _ := s.CreateNode(&Node{Type: "category", Fields: map[string]any{"name": "c"}})
-	id, _ := s.CreateNode(&Node{Type: "article",
+	cat, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: map[string]any{"name": "c"}})
+	id, _ := s.CreateNode(&Node{Type: "article", Display: "t",
 		Fields: map[string]any{"title": "t", "categories": []any{cat}}})
 
 	if err := s.DeleteNode(id); err != nil {
@@ -259,7 +259,7 @@ func TestDelete(t *testing.T) {
 func TestQueryPage(t *testing.T) {
 	s := newTestService(t)
 	for i := 0; i < 5; i++ {
-		s.CreateNode(&Node{Type: "article", Sort: i,
+		s.CreateNode(&Node{Type: "article", Display: "t", Sort: i,
 			Fields: map[string]any{"title": "t" + string(rune('a'+i))}})
 	}
 	list, total, err := s.QueryPage(ListQuery{Page: 1, Size: 2})
@@ -285,4 +285,22 @@ func newTypes(t *testing.T, yaml string) *types.Types {
 func newFilterSvc(t *testing.T) *Service {
 	t.Helper()
 	return New(testDB(t), newTypes(t, testTypesYAML))
+}
+
+func TestPatchDisplayEmpty(t *testing.T) {
+	s := newTestService(t)
+	id, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"body": "x"}})
+	empty := ""
+	if err := s.PatchNode(id, &NodePatch{Display: &empty}); err == nil {
+		t.Fatal("empty display should be rejected")
+	}
+	// 非空可改
+	ok := "新名字"
+	if err := s.PatchNode(id, &NodePatch{Display: &ok}); err != nil {
+		t.Fatal(err)
+	}
+	n, _ := s.GetNodeById(id)
+	if n.Display != "新名字" {
+		t.Fatalf("display = %q", n.Display)
+	}
 }
