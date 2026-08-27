@@ -38,6 +38,7 @@ type RegisterInput struct {
 	Method     string         `json:"method"`
 	Identifier string         `json:"identifier"`
 	Secret     string         `json:"secret"`
+	Display    string         `json:"display"` // 公共显示文本（固有列 — 必传）
 	Fields     map[string]any `json:"fields"`
 }
 
@@ -104,7 +105,7 @@ func (b *authBackend) register(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, "method and identifier required")
 		return
 	}
-	n := &core.Node{Fields: in.Fields}
+	n := &core.Node{Display: in.Display, Fields: in.Fields}
 	// 站点敏感字段兜底（hook 可改 fields/拒绝）
 	if err := ctx.site.eng.Hooks().Fire(HookAuthRegister, ctx, &in, n); err != nil {
 		ctx.Error(http.StatusBadRequest, err.Error())
@@ -274,17 +275,19 @@ func (s *Site) apiCreateNode(ctx *CmsCtx) {
 		}
 	}
 	var in struct {
-		Slug   string         `json:"slug"`
-		Status int            `json:"status"`
-		Sort   int            `json:"sort"`
-		Fields map[string]any `json:"fields"`
+		Slug    string         `json:"slug"`
+		Status  int            `json:"status"`
+		Sort    int            `json:"sort"`
+		Display string         `json:"display"` // 公共显示文本（固有列 — 必传）
+		Fields  map[string]any `json:"fields"`
 	}
 	if err := ctx.BindJson(&in); err != nil {
 		ctx.Error(http.StatusBadRequest, err.Error())
 		return
 	}
 	id, err := s.eng.CreateNode(&core.Node{
-		Type: typ, Slug: in.Slug, Status: in.Status, Sort: in.Sort, Fields: in.Fields,
+		Type: typ, Slug: in.Slug, Status: in.Status, Sort: in.Sort,
+		Display: in.Display, Fields: in.Fields,
 	})
 	if err != nil {
 		ctx.Error(http.StatusBadRequest, err.Error())

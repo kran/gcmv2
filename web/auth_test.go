@@ -28,10 +28,9 @@ types:
     fields:
       - { name: title, kind: text }
   article:
-    title: title
     create: 'false'
     fields:
-      - { name: title, kind: text }
+      - { name: body, kind: richtext }
 `
 	tp := filepath.Join(dir, "types.yaml")
 	if err := os.WriteFile(tp, []byte(typesYAML), 0o644); err != nil {
@@ -74,7 +73,7 @@ func TestAuthRegisterLoginMe(t *testing.T) {
 	// 注册（注册即登录 — 响应带 token + cookie）
 	w := do(s, "POST", "/api/auth/register", map[string]any{
 		"method": "email", "identifier": "a@x.com", "secret": "password123",
-		"fields": map[string]any{"name": "张三"},
+		"display": "张三", "fields": map[string]any{"name": "张三"},
 	})
 	if w.Code != http.StatusOK {
 		t.Fatalf("register = %d: %s", w.Code, w.Body.String())
@@ -127,6 +126,7 @@ func TestAuthLoginWrongPassword(t *testing.T) {
 	s := testSite(t)
 	do(s, "POST", "/api/auth/register", map[string]any{
 		"method": "email", "identifier": "a@x.com", "secret": "password123",
+		"display": "a",
 	})
 	w := do(s, "POST", "/api/auth/login", map[string]any{
 		"method": "email", "identifier": "a@x.com", "secret": "wrong",
@@ -147,6 +147,7 @@ func TestAuthRegisterDup(t *testing.T) {
 	s := testSite(t)
 	do(s, "POST", "/api/auth/register", map[string]any{
 		"method": "email", "identifier": "a@x.com", "secret": "password123",
+		"display": "a",
 	})
 	w := do(s, "POST", "/api/auth/register", map[string]any{
 		"method": "email", "identifier": "a@x.com", "secret": "password456",
@@ -175,13 +176,14 @@ func TestAuthCreateRule(t *testing.T) {
 	// 登录后 guestbook 可创建
 	w = do(s, "POST", "/api/auth/register", map[string]any{
 		"method": "email", "identifier": "a@x.com", "secret": "password123",
+		"display": "a",
 	})
 	var out struct {
 		Token string `json:"token"`
 	}
 	_ = json.Unmarshal(w.Body.Bytes(), &out)
 	req := httptest.NewRequest("POST", "/api/nodes/guestbook", bytes.NewReader(
-		[]byte(`{"fields":{"title":"留言"}}`)))
+		[]byte(`{"display":"留言","fields":{"title":"留言"}}`)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+out.Token)
 	w2 := httptest.NewRecorder()
@@ -205,6 +207,7 @@ func TestAuthLogout(t *testing.T) {
 	s := testSite(t)
 	w := do(s, "POST", "/api/auth/register", map[string]any{
 		"method": "email", "identifier": "a@x.com", "secret": "password123",
+		"display": "a",
 	})
 	var ck *http.Cookie
 	for _, c := range w.Result().Cookies() {
