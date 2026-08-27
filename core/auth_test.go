@@ -1,0 +1,160 @@
+package core
+
+import (
+	"testing"
+	"time"
+)
+
+// testAuthType user 可认证类型（testTypesYAML 基础上加）。
+const testAuthYAML = `
+types:
+  user:
+    title: name
+    auth: true
+    fields:
+      - { name: name, kind: text }
+      - { name: role, kind: select, options: [member, editor] }
+`
+
+func newAuthService(t *testing.T) *Service {
+	t.Helper()
+	svc := newTestService(t)
+	if err := svc.types.Load([]byte(testAuthYAML)); err != nil {
+		t.Fatal(err)
+	}
+	return svc
+}
+
+func TestRegisterAuth(t *testing.T) {
+	s := newAuthService(t)
+	id, err := s.RegisterAuth("user", "email", "a@x.com", "password123",
+		&Node{Fields: map[string]any{"name": "张三"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 节点存在 + 类型正确
+	n, err := s.GetNodeById(id)
+	if err != nil || n == nil {
+		t.Fatalf("node = %v, %v", n, err)
+	}
+	if n.Type != "user" {
+		t.Fatalf("type = %q", n.Type)
+	}
+	// auth 方式可查 + 验密
+	am, err := s.FindAuth("user", "email", "a@x.com")
+	if err != nil || am == nil {
+		t.Fatalf("auth = %v, %v", am, err)
+	}
+	if !s.VerifyPassword(am, "password123") {
+		t.Fatal("password should match")
+	}
+	if s.VerifyPassword(am, "wrong") {
+		t.Fatal("wrong password should not match")
+	}
+	// secret 列不可 JSON 输出（json:"-"）— 字段检查
+	if am.Secret == "password123" {
+		t.Fatal("secret must be hashed")
+	}
+}
+
+func TestRegisterAuthDupIdentifier(t *testing.T) {
+	s := newAuthService(t)
+	if _, err := s.RegisterAuth("user", "email", "a@x.com", "password123", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RegisterAuth("user", "email", "a@x.com", "password456", nil); err == nil {
+		t.Fatal("duplicate identifier should fail")
+	}
+	// 不同类型同 identifier 允许
+	if _, err := s.RegisterAuth("user", "phone", "13800138000", "password123", nil); err != nil {
+		t.Fatalf("different method should work: %v", err)
+	}
+}
+
+func TestRegisterAuthNotAuthType(t *testing.T) {
+	s := newAuthService(t)
+	if _, err := s.RegisterAuth("article", "email", "a@x.com", "password123", nil); err == nil {
+		t.Fatal("non-auth type should be rejected")
+	}
+}
+
+func TestRegisterAuthShortSecret(t *testing.T) {
+	s := newAuthService(t)
+	if _, err := s.RegisterAuth("user", "email", "a@x.com", "short", nil); err == nil {
+		t.Fatal("short secret should be rejected")
+	}
+}
+
+func TestAddRemoveAuthMethod(t *testing.T) {
+	s := newAuthService(t)
+	id, _ := s.RegisterAuth("user", "email", "a@x.com", "password123", nil)
+	// 绑定第二种方式
+	if err := s.AddAuthMethod("user", id, "phone", "13800138000", "password456"); err != nil {
+		t.Fatal(err)
+	}
+	am, _ := s.FindAuth("user", "phone", "13800138000")
+	if am == nil || am.NodeID != id {
+		t.Fatalf("bound method = %+v", am)
+	}
+	// 解绑（保留一种 — 允许）
+	if err := s.RemoveAuthMethod("user", "phone", "13800138000"); err != nil {
+		t.Fatal(err)
+	}
+	// 解绑最后一种 — 拒绝
+	if err := s.RemoveAuthMethod("user", "email", "a@x.com"); err == nil {
+		t.Fatal("removing last method should fail")
+	}
+}
+
+func TestSessionLifecycle(t *testing.T) {
+	s := newAuthService(t)
+	id, _ := s.RegisterAuth("user", "email", "a@x.com", "password123", nil)
+	token, err := s.CreateSession(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token == "" {
+		t.Fatal("token empty")
+	}
+	// 有效
+	got, err := s.ValidSession(token)
+	if err != nil || got != id {
+		t.Fatalf("valid session = %d, %v", got, err)
+	}
+	// 无效 token
+	got, _ = s.ValidSession("nope")
+	if got != 0 {
+		t.Fatalf("invalid token should fail: %d", got)
+	}
+	// 登出
+	if err := s.DeleteSession(token); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = s.ValidSession(token)
+	if got != 0 {
+		t.Fatal("deleted session should be invalid")
+	}
+}
+
+func TestSessionExpiry(t *testing.T) {
+	s := newAuthService(t)
+	id, _ := s.RegisterAuth("user", "email", "a@x.com", "password123", nil)
+	token, _ := s.CreateSession(id)
+	// 手动过期
+	if _, err := s.db.Update("sessions", map[string]any{"expires_at": time.Now().Add(-time.Hour)},
+		`token = #{1}`, token).Exec(); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.ValidSession(token)
+	if got != 0 {
+		t.Fatal("expired session should be invalid")
+	}
+	// 过期清理（行删除）
+	n, err := s.db.Add(`SELECT COUNT(1) FROM sessions WHERE token = #{1}`, token).FetchOne[int64]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n == nil || *n != 0 {
+		t.Fatal("expired session row should be cleaned")
+	}
+}

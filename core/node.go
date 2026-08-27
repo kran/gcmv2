@@ -1,0 +1,185 @@
+package core
+
+import (
+	"database/sql/driver"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/kran/gcmv2/types"
+)
+
+// ── 底表列（固定 8 个 — nodes 表固有列） ──────────
+//
+// 类型字段名不得与这些保留名冲突（types 校验期拒绝）:
+//   id / type / title / slug / status / sort / created_at / updated_at
+
+// Node 节点 — 值模型（读/模板/JSON 展示用）。
+//
+// 公开值字段: 模板 .Node.Title 直接访问; JSON 默认序列化（tag）;
+// 引擎读取直接 n.Slug。无指针无 Getter — 读场景零负担。
+//
+// 写路径不经过 Node（差量用 NodePatch — 指针字段 nil 区分未提供）:
+//
+//	CreateNode(n *Node)  全量插入
+//	PatchNode(id, patch) 非 nil 列写 + fields json_patch merge
+//
+// Fields 类型字段（动态 — 类型定义声明; ref 引用在 edges, 不在此）。
+// Scan/Value: DB JSON 字符串 ↔ map 自动转换（dba 扫/插直接可用）。
+type Fields map[string]any
+
+// Scan 从 DB JSON 还原。
+func (f *Fields) Scan(v any) error {
+	if v == nil {
+		*f = Fields{}
+		return nil
+	}
+	var b []byte
+	switch t := v.(type) {
+	case []byte:
+		b = t
+	case string:
+		b = []byte(t)
+	default:
+		return fmt.Errorf("core: fields scan: unexpected type %T", v)
+	}
+	m := Fields{}
+	if len(b) > 0 && string(b) != "null" {
+		if err := json.Unmarshal(b, &m); err != nil {
+			return fmt.Errorf("core: fields scan: %w", err)
+		}
+	}
+	*f = m
+	return nil
+}
+
+// Value 存库为 JSON。
+func (f Fields) Value() (driver.Value, error) {
+	if f == nil {
+		return []byte("{}"), nil
+	}
+	return json.Marshal(f)
+}
+
+// Node 节点 — 值模型（读/模板/JSON/DB 直接可用）。
+type Node struct {
+	ID        int64     `db:"id,omitempty" json:"id"` // omitempty: 插入跳零值走自增
+	Type      string    `db:"type" json:"type"`
+	Title     string    `db:"title" json:"title"` // 显示名投影列（引擎从类型 title 声明字段算）
+	Slug      string    `db:"slug" json:"slug"`   // URL 段（'' = 无 URL）
+	Status    int       `db:"status" json:"status"`
+	Sort      int       `db:"sort" json:"sort"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
+
+	// 类型字段（Scan/Value 自动 JSON 转换）
+	Fields Fields `db:"fields" json:"fields"`
+
+	// Expand 引用展开容器（ExpandPath 填充 — 不落库）: map[字段名] → *Node / []*Node
+	Expand map[string]any `db:"-" json:"expand,omitempty"`
+	// Extra 渲染期附加数据（HookNodeEnrich 填充 — 不落库）: url 注入、高亮等
+	Extra map[string]any `db:"-" json:"extra,omitempty"`
+}
+
+// Field 类型字段值（无 → nil）。
+func (n *Node) Field(name string) any {
+	if n.Fields == nil {
+		return nil
+	}
+	return n.Fields[name]
+}
+
+// titleFrom 抽标题列: 类型 title 声明字段的值（fields 保留完整, 列是投影）。
+// 支持 "字段名"（本类型标量字段）; 穿透 "ref.$字段"（引用目标字段 — 写时快照）。
+func (s *Service) titleFrom(td types.TypeDef, fields map[string]any) string {
+	if td.Title == "" {
+		return ""
+	}
+	path, err := types.ParsePath(td.Title)
+	if err != nil || len(path) == 0 {
+		return "" // 声明非法由 types 校验期拒绝; 此处防御
+	}
+	if len(path) == 1 {
+		if v, ok := fields[path[0].Field].(string); ok {
+			return v
+		}
+		return ""
+	}
+	// 穿透（两段）: ref 字段值（ref[] 取第一条）
+	v, ok := fields[path[0].Field]
+	if !ok {
+		return ""
+	}
+	var tid int64
+	switch n := v.(type) {
+	case int64:
+		tid = n
+	case float64:
+		tid = int64(n)
+	case []any:
+		if len(n) > 0 {
+			tid, _ = types.ToID(n[0])
+		}
+	}
+	if tid <= 0 {
+		return ""
+	}
+	target, err := s.GetNodeById(tid)
+	if err != nil || target == nil {
+		return ""
+	}
+	seg2 := path[1]
+	if seg2.JSON {
+		if tv, ok := target.Fields[seg2.Field].(string); ok {
+			return tv
+		}
+		return ""
+	}
+	switch seg2.Field {
+	case "title":
+		return target.Title
+	case "slug":
+		return target.Slug
+	}
+	return ""
+}
+
+// FullFields 管理视图: 节点 fields + ref 字段值（id 列表）— 编辑表单回显用。
+func (s *Service) FullFields(id int64) (map[string]any, error) {
+	n, err := s.GetNodeById(id)
+	if err != nil {
+		return nil, err
+	}
+	if n == nil {
+		return nil, ErrNotFound
+	}
+	out := map[string]any{}
+	for k, v := range n.Fields {
+		out[k] = v
+	}
+	td, ok := s.types.Type(n.Type)
+	if !ok {
+		return nil, fmt.Errorf("core: type %q not defined", n.Type)
+	}
+	for _, f := range td.Fields {
+		if !s.types.IsRefKind(f.Kind) {
+			continue
+		}
+		ids, err := s.db.Add(`SELECT to_node FROM edges WHERE from_node = #{1} AND field = #{2} ORDER BY sort, id`, id, f.Name).FetchList[int64]()
+		if err != nil {
+			return nil, err
+		}
+		if k, ok := s.types.Kind(f.Kind); ok && k.Class() == types.ClassRef {
+			if len(ids) > 0 {
+				out[f.Name] = ids[0]
+			}
+		} else {
+			anyIDs := make([]any, 0, len(ids))
+			for _, tid := range ids {
+				anyIDs = append(anyIDs, tid)
+			}
+			out[f.Name] = anyIDs
+		}
+	}
+	return out, nil
+}

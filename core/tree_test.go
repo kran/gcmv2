@@ -1,0 +1,113 @@
+package core
+
+import (
+	"reflect"
+	"testing"
+)
+
+// 树形态: root → a → b; root → c（c 下架 status=0 不入树）
+func buildTreeForTree(t *testing.T, s *Service) (root, a, b int64) {
+	t.Helper()
+	root, _ = s.CreateNode(&Node{Type: "category", Slug: "root", Status: 1, Sort: 1, Fields: Fields{"name": "root"}})
+	a, _ = s.CreateNode(&Node{Type: "category", Slug: "a", Status: 1, Sort: 1, Fields: Fields{"name": "a", "parent": root}})
+	b, _ = s.CreateNode(&Node{Type: "category", Slug: "b", Status: 1, Sort: 2, Fields: Fields{"name": "b", "parent": a}})
+	c, _ := s.CreateNode(&Node{Type: "category", Slug: "c", Status: 0, Fields: Fields{"name": "c", "parent": root}})
+	_ = c
+	return
+}
+
+func TestTreeBasics(t *testing.T) {
+	s := newTraverseService(t)
+	root, a, b := buildTreeForTree(t, s)
+
+	tr, err := s.LoadTree("category", "parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Len: c 下架不入树
+	if tr.Len() != 3 {
+		t.Fatalf("len = %d, want 3", tr.Len())
+	}
+
+	// Roots: 只 root
+	roots := tr.Roots()
+	if len(roots) != 1 || roots[0].ID != root {
+		t.Fatalf("roots = %v, want [root]", roots)
+	}
+
+	// Get: id / float64 / slug
+	if tr.Get(root) == nil || tr.Get(float64(a)) == nil || tr.Get("b") == nil {
+		t.Fatal("get failed")
+	}
+	if tr.Get("c") != nil { // 下架取不到
+		t.Fatal("c should not be in tree")
+	}
+	if tr.Get("nope") != nil {
+		t.Fatal("unknown slug should be nil")
+	}
+
+	// Children: root → [a]; a → [b]; b → nil
+	if got := tr.Children(root); len(got) != 1 || got[0].ID != a {
+		t.Fatalf("children(root) = %v, want [a]", got)
+	}
+	if got := tr.Children("a"); len(got) != 1 || got[0].ID != b {
+		t.Fatalf("children(a) = %v, want [b]", got)
+	}
+	if got := tr.Children(b); len(got) != 0 {
+		t.Fatalf("children(b) = %v, want empty", got)
+	}
+
+	// Parent
+	if tr.Parent("b").ID != a {
+		t.Fatal("parent(b) != a")
+	}
+	if tr.Parent(root) != nil {
+		t.Fatal("parent(root) should be nil")
+	}
+
+	// Ancestors: b → [root, a, b]
+	anc := tr.Ancestors(b)
+	var ids []int64
+	for _, n := range anc {
+		ids = append(ids, n.ID)
+	}
+	if !reflect.DeepEqual(ids, []int64{root, a, b}) {
+		t.Fatalf("ancestors(b) = %v, want [root a b]", ids)
+	}
+
+	// SubtreeIDs: root → [root, a, b]
+	sub := tr.SubtreeIDs(root)
+	if !reflect.DeepEqual(sub, []int64{root, a, b}) {
+		t.Fatalf("subtreeIDs(root) = %v, want [root a b]", sub)
+	}
+	// a → [a, b]
+	if got := tr.SubtreeIDs(a); !reflect.DeepEqual(got, []int64{a, b}) {
+		t.Fatalf("subtreeIDs(a) = %v, want [a b]", got)
+	}
+
+	// Subtree 节点列表
+	if got := tr.Subtree("a"); len(got) != 2 {
+		t.Fatalf("subtree(a) len = %d, want 2", len(got))
+	}
+}
+
+func TestTreeCycleSafe(t *testing.T) {
+	s := newTraverseService(t)
+	// 造环: a.parent = b, b.parent = a
+	a, _ := s.CreateNode(&Node{Type: "category", Slug: "a", Status: 1, Fields: Fields{"name": "a"}})
+	b, _ := s.CreateNode(&Node{Type: "category", Slug: "b", Status: 1, Fields: Fields{"name": "b", "parent": a}})
+	if err := s.PatchNode(a, &NodePatch{Fields: Fields{"parent": b}}); err != nil {
+		t.Fatal(err)
+	}
+
+	tr, err := s.LoadTree("category", "parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 环上 Ancestors 不死循环（链长截断）
+	anc := tr.Ancestors(a)
+	if len(anc) > tr.Len()+1 {
+		t.Fatalf("ancestors loop: %d nodes", len(anc))
+	}
+}
