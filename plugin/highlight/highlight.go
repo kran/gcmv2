@@ -42,6 +42,8 @@ func Highlight(text, q string) template.HTML {
 }
 
 // Mount 安装 highlight 模板函数。
+// 管道用法 {{ .Display | highlight $.Query }} = highlight($.Query, .Display) —
+// Go 模板管道把前置值追加为最后一个参数, 包装层调换顺序。
 func Mount(s *web.Site) {
-	s.Func("highlight", Highlight)
+	s.Func("highlight", func(q, text string) template.HTML { return Highlight(text, q) })
 }

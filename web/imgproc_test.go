@@ -126,3 +126,39 @@ func TestImgBadParam(t *testing.T) {
 		t.Fatalf("bad param = %d", w.Code)
 	}
 }
+
+// TestImgOSSProcess x-oss-process 兼容格式（线上 OSS / 线下本地同一套参数）。
+func TestImgOSSProcess(t *testing.T) {
+	s, _ := testSiteWithStatic(t)
+	// resize 全参数（m_fill → cover）
+	w := do(s, "GET", "/static/pic.png?x-oss-process=image/resize,w_100,h_50,m_fill", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("oss proc = %d: %s", w.Code, w.Body.String())
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(w.Body.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Width != 100 || cfg.Height != 50 {
+		t.Fatalf("size = %dx%d", cfg.Width, cfg.Height)
+	}
+	// 等比（m_lfit → fit）— 200x100 → w100 高 50
+	w = do(s, "GET", "/static/pic.png?x-oss-process=image/resize,w_100,m_lfit", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("lfit = %d", w.Code)
+	}
+	cfg, _, _ = image.DecodeConfig(bytes.NewReader(w.Body.Bytes()))
+	if cfg.Width != 100 || cfg.Height != 50 {
+		t.Fatalf("lfit size = %dx%d", cfg.Width, cfg.Height)
+	}
+	// 不支持的类型 → 400
+	w = do(s, "GET", "/static/pic.png?x-oss-process=image/crop,w_100", nil)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("crop = %d", w.Code)
+	}
+	// 缺尺寸 → 400
+	w = do(s, "GET", "/static/pic.png?x-oss-process=image/resize,m_fill", nil)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("no dim = %d", w.Code)
+	}
+}

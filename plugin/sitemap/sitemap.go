@@ -30,8 +30,12 @@ type urlEntry struct {
 }
 
 // Mount 安装 sitemap 插件: GET /sitemap.xml — 全部已发布节点（slug 优先）。
-// baseURL 是站点绝对地址（如 https://viicn.org.cn）— 协议要求绝对 URL。
-func Mount(s *web.Site, baseURL string) {
+// 站点绝对地址读 site.Config()["base_url"]（协议要求绝对 URL — 缺失 panic）。
+func Mount(s *web.Site) {
+	baseURL, _ := s.Config()["base_url"].(string)
+	if baseURL == "" {
+		panic("sitemap: config base_url required")
+	}
 	s.Get("/sitemap.xml", func(ctx *web.CmsCtx) {
 		list, _, err := s.Engine().QueryPage(core.ListQuery{
 			Filter: `(= status 1)`, Page: 1, Size: 10000, Sort: `id ASC`,

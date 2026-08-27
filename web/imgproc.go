@@ -30,6 +30,11 @@ type imgParams struct {
 // parseImgParams 解析查询参数; 三态: (p, true) 处理 / (p, false) 无参数原图 / err 非法参数。
 func parseImgParams(r *http.Request) (imgParams, bool, error) {
 	q := r.URL.Query()
+	// OSS 兼容格式: ?x-oss-process=image/resize,w_600,h_450,m_fill
+	// （线上 OSS 原生处理; 线下同一 URL 走本地 imgproc — 参数一套两边用）
+	if proc := q.Get("x-oss-process"); proc != "" {
+		return parseOSSProcess(proc)
+	}
 	w := q.Get("w")
 	h := q.Get("h")
 	if w == "" && h == "" {
@@ -81,6 +86,50 @@ func imgCachePath(uploads string, p imgParams, reqPath string) string {
 		ext = "." + p.Fmt // 输出格式由 fmt 决定（照片类 jpg 降体积）
 	}
 	return filepath.Join(uploads, ".cache", fmt.Sprintf("%dx%d-%s-%s%s", p.W, p.H, p.Mode, baseNoExt, ext))
+}
+
+// parseOSSProcess 解析 OSS 图片处理参数（x-oss-process 子集）:
+//
+//	image/resize[,w_N][,h_N][,m_fill|m_lfit]
+//
+// 映射到本地: m_fill → cover（裁剪填充）, m_lfit → fit（等比）。
+// 其他 process 类型（crop/format 等）→ 报错（不支持 — fail-loud）。
+func parseOSSProcess(proc string) (imgParams, bool, error) {
+	p := imgParams{Mode: "cover"}
+	for _, seg := range strings.Split(proc, ",") {
+		seg = strings.TrimSpace(seg)
+		if seg == "" {
+			continue
+		}
+		switch {
+		case seg == "image/resize":
+			// 类型段
+		case strings.HasPrefix(seg, "image/"):
+			return imgParams{}, false, fmt.Errorf("img: unsupported process %q", seg)
+		case strings.HasPrefix(seg, "w_"):
+			n, err := strconv.Atoi(strings.TrimPrefix(seg, "w_"))
+			if err != nil || n < 1 || n > maxImgDim {
+				return imgParams{}, false, fmt.Errorf("img: invalid w_")
+			}
+			p.W = n
+		case strings.HasPrefix(seg, "h_"):
+			n, err := strconv.Atoi(strings.TrimPrefix(seg, "h_"))
+			if err != nil || n < 1 || n > maxImgDim {
+				return imgParams{}, false, fmt.Errorf("img: invalid h_")
+			}
+			p.H = n
+		case seg == "m_fill":
+			p.Mode = "cover"
+		case seg == "m_lfit":
+			p.Mode = "fit"
+		default:
+			return imgParams{}, false, fmt.Errorf("img: unsupported process segment %q", seg)
+		}
+	}
+	if p.W == 0 && p.H == 0 {
+		return imgParams{}, false, fmt.Errorf("img: resize needs w_ or h_")
+	}
+	return p, true, nil
 }
 
 // serveImg 图片处理入口（uploads/static 通用）: 无参数 → 原图直出;
