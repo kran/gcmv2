@@ -425,9 +425,9 @@ func (b *backend) listNodes(ctx *CmsCtx) {
 	if q != "" {
 		params["q"] = "%" + q + "%"
 		if filter != "" {
-			filter = "(and " + filter + " (like title {:q}))"
+			filter = "(and " + filter + " (like display {:q}))"
 		} else {
-			filter = "(like title {:q})"
+			filter = "(like display {:q})"
 		}
 	}
 	if st := ctx.Query("status"); st != "" {
@@ -834,7 +834,7 @@ func (b *backend) search(ctx *CmsCtx) {
 		params["typ"] = typ
 	}
 	if q != "" {
-		like := `(or (like title {:q}) (like slug {:q}))`
+		like := `(or (like display {:q}) (like slug {:q}))`
 		if f != "" {
 			f = `(and ` + f + ` ` + like + `)`
 		} else {

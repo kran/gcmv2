@@ -194,10 +194,10 @@ var (
 	// 节点列字段名: slug/status/sort 是 Node 的列（不是类型字段）,
 	// 类型定义声明它们会存进 fields JSON 而非列 — 防歧义, 直接拒绝
 	reservedField = map[string]bool{"slug": true, "status": true, "sort": true}
-	// nodeColumns 节点列全集（title 穿透路径第二段: 无 $. 前缀即列）;
+	// nodeColumns 节点列全集（穿透路径第二段: 无 $. 前缀即列）;
 	// schema 常量唯一声明处（core 经 types.IsNodeColumn 引用）。
 	nodeColumns = map[string]bool{
-		"id": true, "type": true, "title": true, "slug": true,
+		"id": true, "type": true, "display": true, "slug": true,
 		"status": true, "sort": true, "created_at": true, "updated_at": true,
 	}
 )
