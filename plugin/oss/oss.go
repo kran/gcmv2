@@ -51,7 +51,7 @@ func Mount(s *web.Site) {
 		}
 		return OSSURL(bucket, url, rest...)
 	})
-	s.Func("rich", func(html string) template.HTML {
+	s.Func("rich", func(html any) template.HTML {
 		return Rich(bucket, html)
 	})
 }
@@ -102,13 +102,15 @@ func OSSURL(bucket, url string, args ...any) string {
 
 // Rich 处理富文本内嵌媒体 — 替换 <img|video|audio src="/uploads/..."> 的 src
 // 为 oss URL（桶链接 / 本地原路径 — 复用 OSSURL）。外部 URL/CDN 不转。
+// html 为 any（字段缺失/为 null 时安全返回空 — 不报错）。
 // 返回 template.HTML（富文本信任输出 — 模板直接 {{ body | rich }}）。
-func Rich(bucket, html string) template.HTML {
-	if html == "" {
+func Rich(bucket string, html any) template.HTML {
+	s, ok := html.(string)
+	if !ok || s == "" {
 		return ""
 	}
 	re := regexp.MustCompile(`src="(/uploads/[^"]*)"`)
-	out := re.ReplaceAllStringFunc(html, func(m string) string {
+	out := re.ReplaceAllStringFunc(s, func(m string) string {
 		url := re.FindStringSubmatch(m)[1]
 		return `src="` + OSSURL(bucket, url) + `"`
 	})

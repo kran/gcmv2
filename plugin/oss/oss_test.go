@@ -82,3 +82,13 @@ func TestRich(t *testing.T) {
 		t.Fatalf("local mode: %q", got3)
 	}
 }
+
+// TestRichNil 字段缺失/非 string 安全返回（模板 {{ body | rich }} 不报错）。
+func TestRichNil(t *testing.T) {
+	if got := string(Rich("", nil)); got != "" {
+		t.Fatalf("nil should return empty: %q", got)
+	}
+	if got := string(Rich("", 123)); got != "" {
+		t.Fatalf("non-string should return empty: %q", got)
+	}
+}
