@@ -23,6 +23,8 @@ package oss
 
 import (
 	"fmt"
+	"html/template"
+	"regexp"
 	"strings"
 
 	"github.com/kran/gcmv2/web"
@@ -48,6 +50,9 @@ func Mount(s *web.Site) {
 			url, rest = fmt.Sprint(args[len(args)-1]), args[:len(args)-1] // 管道
 		}
 		return OSSURL(bucket, url, rest...)
+	})
+	s.Func("rich", func(html string) template.HTML {
+		return Rich(bucket, html)
 	})
 }
 
@@ -93,6 +98,21 @@ func OSSURL(bucket, url string, args ...any) string {
 		out += proc
 	}
 	return out
+}
+
+// Rich 处理富文本内嵌媒体 — 替换 <img|video|audio src="/uploads/..."> 的 src
+// 为 oss URL（桶链接 / 本地原路径 — 复用 OSSURL）。外部 URL/CDN 不转。
+// 返回 template.HTML（富文本信任输出 — 模板直接 {{ body | rich }}）。
+func Rich(bucket, html string) template.HTML {
+	if html == "" {
+		return ""
+	}
+	re := regexp.MustCompile(`src="(/uploads/[^"]*)"`)
+	out := re.ReplaceAllStringFunc(html, func(m string) string {
+		url := re.FindStringSubmatch(m)[1]
+		return `src="` + OSSURL(bucket, url) + `"`
+	})
+	return template.HTML(out)
 }
 
 // isMedia 视频/音频扩展名（图片处理参数不适用）。

@@ -1,6 +1,9 @@
 package oss
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestOSSURL(t *testing.T) {
 	bucket := "https://viicn-files.oss-cn-beijing.aliyuncs.com"
@@ -53,5 +56,29 @@ func TestOSSLocalMode(t *testing.T) {
 		if got != c.want {
 			t.Fatalf("local mode %q %v = %q, want %q", c.url, c.args, got, c.want)
 		}
+	}
+}
+
+// TestRich 富文本内嵌媒体 src 转 oss。
+func TestRich(t *testing.T) {
+	bucket := "https://viicn-files.oss-cn-beijing.aliyuncs.com"
+	html := `<p>正文 <img src="/uploads/a.jpg" alt="x"> <video src="/uploads/v.mp4"></video></p>`
+	got := string(Rich(bucket, html))
+	if !strings.Contains(got, `src="https://viicn-files.oss-cn-beijing.aliyuncs.com/uploads/a.jpg"`) {
+		t.Fatalf("img not converted: %q", got)
+	}
+	if !strings.Contains(got, `src="https://viicn-files.oss-cn-beijing.aliyuncs.com/uploads/v.mp4"`) {
+		t.Fatalf("video not converted: %q", got)
+	}
+	// 外部 URL 不转
+	html2 := `<p><img src="https://cdn.example.com/x.jpg"></p>`
+	got2 := string(Rich(bucket, html2))
+	if strings.Contains(got2, "viicn-files") {
+		t.Fatalf("external should not be converted: %q", got2)
+	}
+	// bucket 空 = 本地原路径
+	got3 := string(Rich("", `<img src="/uploads/x.png">`))
+	if !strings.Contains(got3, `src="/uploads/x.png"`) {
+		t.Fatalf("local mode: %q", got3)
 	}
 }
