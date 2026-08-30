@@ -1,4 +1,4 @@
-// 渲染引擎: 模板引擎（级联/片段/sprig）+ 查询函数注入 + 模板函数
+// Package web 渲染引擎: 模板引擎（级联/片段/sprig）+ 查询函数注入 + 模板函数
 // （内置/sprig/查询原语）。
 //
 // 查询函数定义在 Go 层（引擎原语 + dba）, 注入 funcMap 后模板一行调用:
@@ -15,12 +15,9 @@ package web
 import (
 	"errors"
 	"fmt"
-	"github.com/Masterminds/sprig/v3"
-	"github.com/kran/gcmv2/core"
-	"github.com/kran/gcmv2/types"
 	"html/template"
 	"io"
-	"jaytaylor.com/html2text"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -28,6 +25,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Masterminds/sprig/v3"
+	"github.com/kran/gcmv2/core"
+	"github.com/kran/gcmv2/types"
+	"jaytaylor.com/html2text"
 )
 
 // RenderEngine 渲染引擎: 模板根目录 + 函数表 + 核心服务（查询注入源）。
@@ -38,12 +40,10 @@ type RenderEngine struct {
 	eng   core.Engine
 }
 
-// New 建渲染引擎。root 是模板目录; svc 提供查询函数。
+// NewRenderEngine 建渲染引擎。root 是模板目录; svc 提供查询函数。
 func NewRenderEngine(root string, eng core.Engine) *RenderEngine {
 	e := &RenderEngine{root: root, eng: eng, funcs: template.FuncMap{}}
-	for k, v := range e.queryFuncs() {
-		e.funcs[k] = v
-	}
+	maps.Copy(e.funcs, e.queryFuncs())
 	return e
 }
 
@@ -335,9 +335,7 @@ func (e *RenderEngine) funcMap() template.FuncMap {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	m := template.FuncMap{}
-	for k, v := range sprig.HermeticHtmlFuncMap() {
-		m[k] = v
-	}
+	maps.Copy(m, sprig.HermeticHtmlFuncMap())
 	builtins := template.FuncMap{
 		"safeHTML": func(v any) template.HTML { return template.HTML(fmt.Sprint(v)) },
 		// img 图片裁剪 URL: 本地 /uploads/ 才拼 ?w=&h=&mode=&fmt=（CDN/外部 URL 原样返回）。
@@ -402,11 +400,8 @@ func (e *RenderEngine) funcMap() template.FuncMap {
 			return strings.TrimSpace(text)
 		},
 	}
-	for k, v := range builtins { // 内置覆盖 sprig 同名 (如有)
-		m[k] = v
-	}
-	for k, v := range e.funcs {
-		m[k] = v
-	}
+	// 内置覆盖 sprig 同名 (如有)
+	maps.Copy(m, builtins)
+	maps.Copy(m, e.funcs)
 	return m
 }

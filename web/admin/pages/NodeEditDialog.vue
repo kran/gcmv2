@@ -2,7 +2,7 @@
     <el-dialog append-to-body v-model="visibleModel" :title="isEdit ? '编辑 #' + node.id : '新建 ' + (typeName || '')"
                width="80vw" :close-on-click-modal="false" :close-on-press-escape="false">
         <el-form>
-            <el-form-item label="显示名 *">
+            <el-form-item label="显示">
                 <el-input v-model="form.display" placeholder="公共显示文本（列表/搜索/导航显示）" />
             </el-form-item>
             <el-form-item label="slug">

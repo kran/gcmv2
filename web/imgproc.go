@@ -96,7 +96,7 @@ func imgCachePath(uploads string, p imgParams, reqPath string) string {
 // 其他 process 类型（crop/format 等）→ 报错（不支持 — fail-loud）。
 func parseOSSProcess(proc string) (imgParams, bool, error) {
 	p := imgParams{Mode: "cover"}
-	for _, seg := range strings.Split(proc, ",") {
+	for seg := range strings.SplitSeq(proc, ",") {
 		seg = strings.TrimSpace(seg)
 		if seg == "" {
 			continue
