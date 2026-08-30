@@ -81,6 +81,9 @@ func NewSite(spec SiteSpec) (*Site, error) {
 	if err := defineAuthHooks(svc); err != nil {
 		return nil, err
 	}
+	if err := defineNodeHooks(svc); err != nil {
+		return nil, err
+	}
 	// admin 账号引导（固定密码优先, 否则随机打印一次）
 	if dc, err := EnsureDefaults(db); err != nil {
 		return nil, err
@@ -121,9 +124,11 @@ func (s *Site) Func(name string, fn any) {
 	s.rend.Func(name, fn)
 }
 
-// Get/Post 自定义路由（handler 即 cho.Handler — 无返回, 错误内部处理）。
-func (s *Site) Get(path string, h func(*CmsCtx))  { s.r.Get(path, h) }
-func (s *Site) Post(path string, h func(*CmsCtx)) { s.r.Post(path, h) }
+// Get / Post 自定义路由（handler 即 cho.Handler — 无返回, 错误内部处理）。
+func (s *Site) Get(path string, h func(*CmsCtx))    { s.r.Get(path, h) }
+func (s *Site) Post(path string, h func(*CmsCtx))   { s.r.Post(path, h) }
+func (s *Site) Put(path string, h func(*CmsCtx))    { s.r.Put(path, h) }
+func (s *Site) Delete(path string, h func(*CmsCtx)) { s.r.Delete(path, h) }
 
 // Group 路由组（中间件/子组 — admin 挂载用）。
 func (s *Site) Group(prefix string, fn func(*cho.Cho[*CmsCtx])) { s.r.Group(prefix, fn) }
@@ -150,7 +155,8 @@ func openDB(path string) (*dba.SQL, error) {
 			return nil, err
 		}
 	}
-	return dba.Open("sqlite", path)
+	// SQLite 外键默认关 — 每连接开启（级联删除 auth 等依赖 FK 生效）
+	return dba.Open("sqlite", path+"?_pragma=foreign_keys(1)")
 }
 
 // loadTypes 加载类型定义（yaml 文件; Kinds 先注册 — 类型定义引用到才校验通过）。
@@ -218,7 +224,7 @@ func (s *Site) mount(spec SiteSpec) {
 	}
 	// 记录 API（公开只读; Lisp filter 直通）+ 公开创建（create 规则校验）
 	s.Get("/api/nodes/{type}", s.apiNodes)
-	s.Post("/api/nodes/{type}", s.apiCreateNode)
+	s.mountNodeAPI()
 	// 认证 API（注册/登录/登出/me/bind）
 	s.mountAuth()
 	// 内容路由 + 404 统一出口

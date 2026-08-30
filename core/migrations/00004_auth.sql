@@ -5,7 +5,7 @@
 CREATE TABLE auth_methods (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   type TEXT NOT NULL,                -- 认证类型名（nodes.type — 站点可多 auth 类型）
-  node_id INTEGER NOT NULL,          -- 关联节点
+  node_id INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,  -- 关联节点（级联删）
   method TEXT NOT NULL,              -- 登录方式: email / phone / wechat / github ...
   identifier TEXT NOT NULL,          -- 登录标识: 邮箱 / 手机号 / openid / oauth sub
   secret TEXT NOT NULL,              -- 凭据: bcrypt 密码 hash / oauth refresh token
@@ -17,7 +17,7 @@ CREATE INDEX idx_auth_methods_node ON auth_methods(node_id);
 
 CREATE TABLE sessions (
   token TEXT PRIMARY KEY,            -- 随机 32 字节（cookie 值 = Bearer 值 — 双轨）
-  node_id INTEGER NOT NULL,          -- 会话主体（node 级 — 与登录方式无关）
+  node_id INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,  -- 会话主体（级联删）
   expires_at DATETIME NOT NULL,      -- 服务端过期（滑动 — 过半刷新）
   created_at DATETIME NOT NULL
 );
