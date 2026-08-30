@@ -403,8 +403,8 @@ func (b *backend) types(ctx *CmsCtx) {
 // listNodes 按 type 分页列表（管理通道: 含草稿, 全部状态）。
 func (b *backend) listNodes(ctx *CmsCtx) {
 	typ := ctx.Query("type")
-	page := ctx.QueryInt("page", 1)
-	size := ctx.QueryInt("size", 20)
+	page := int(ctx.QueryNum("page", 1))
+	size := int(ctx.QueryNum("size", 20))
 	if size > 100 {
 		size = 100
 	}
@@ -509,8 +509,8 @@ func (b *backend) createNode(ctx *CmsCtx) {
 }
 
 func (b *backend) getNode(ctx *CmsCtx) {
-	id, err := strconv.ParseInt(ctx.PathValue("id"), 10, 64)
-	if err != nil {
+	id := ctx.PathNum("id", 0)
+	if id == 0 {
 		ctx.Error(http.StatusBadRequest, "invalid id")
 		return
 	}
@@ -534,8 +534,8 @@ func (b *backend) getNode(ctx *CmsCtx) {
 }
 
 func (b *backend) updateNode(ctx *CmsCtx) {
-	id, err := strconv.ParseInt(ctx.PathValue("id"), 10, 64)
-	if err != nil {
+	id := ctx.PathNum("id", 0)
+	if id == 0 {
 		ctx.Error(http.StatusBadRequest, "invalid id")
 		return
 	}
@@ -563,8 +563,8 @@ func (b *backend) updateNode(ctx *CmsCtx) {
 }
 
 func (b *backend) deleteNode(ctx *CmsCtx) {
-	id, err := strconv.ParseInt(ctx.PathValue("id"), 10, 64)
-	if err != nil {
+	id := ctx.PathNum("id", 0)
+	if id == 0 {
 		ctx.Error(http.StatusBadRequest, "invalid id")
 		return
 	}
@@ -638,13 +638,13 @@ func toAny(ids []int64) []any {
 // 参数: node(分支节点), subtree=1(含子树), page, size
 // 返回: {items: [{id, type, title, slug, via_field}], total}
 func (b *backend) inbound(ctx *CmsCtx) {
-	nodeID := int64(ctx.QueryInt("node", 0))
+	nodeID := ctx.QueryNum("node", 0)
 	if nodeID == 0 {
 		ctx.Error(http.StatusBadRequest, "node required")
 		return
 	}
-	page := ctx.QueryInt("page", 1)
-	size := ctx.QueryInt("size", 20)
+	page := int(ctx.QueryNum("page", 1))
+	size := int(ctx.QueryNum("size", 20))
 	ids := []int64{nodeID}
 	if ctx.Query("subtree") == "1" {
 		// 分支节点类型 → Subtree（图原语）
@@ -701,7 +701,7 @@ func (b *backend) inbound(ctx *CmsCtx) {
 
 // expand 引用展开预览（ExpandPath）: expr 为空 = 该类型全部 ref 字段一层全景。
 func (b *backend) expand(ctx *CmsCtx) {
-	nodeID := int64(ctx.QueryInt("node", 0))
+	nodeID := ctx.QueryNum("node", 0)
 	expr := ctx.Query("expr")
 	if nodeID <= 0 {
 		ctx.Error(http.StatusBadRequest, "node required")
@@ -783,8 +783,8 @@ func (b *backend) rebuildSearch(ctx *CmsCtx) {
 func (b *backend) search(ctx *CmsCtx) {
 	q := strings.TrimSpace(ctx.Query("q"))
 	typ := ctx.Query("type")
-	page := ctx.QueryInt("page", 1)
-	size := ctx.QueryInt("size", 10)
+	page := int(ctx.QueryNum("page", 1))
+	size := int(ctx.QueryNum("size", 10))
 	// Lisp 合成: type 可选过滤 + title/slug 模糊
 	f := ""
 	params := map[string]any{}

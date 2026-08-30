@@ -5,7 +5,7 @@ go 1.27.0
 require (
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/disintegration/imaging v1.6.2
-	github.com/kran/cho v0.8.0
+	github.com/kran/cho v0.9.0
 	github.com/kran/dba v0.15.0
 	github.com/pressly/goose/v3 v3.27.3
 	golang.org/x/crypto v0.55.0

@@ -90,8 +90,8 @@ func (s *Site) apiNodes(ctx *CmsCtx) {
 		ctx.String(http.StatusBadRequest, "api: type required")
 		return
 	}
-	page := ctx.QueryInt("page", 1)
-	size := min(ctx.QueryInt("size", 20), 100)
+	page := int(ctx.QueryNum("page", 1))
+	size := min(int(ctx.QueryNum("size", 20)), 100)
 	filter := ctx.Query("filter")
 	sort := ctx.Query("sort")
 	expand := ctx.Query("expand")

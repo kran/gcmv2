@@ -2,7 +2,6 @@ package web
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/kran/gcmv2/core"
 )
@@ -79,8 +78,8 @@ func (s *Site) apiCreateNode(ctx *CmsCtx) {
 
 // apiViewNode GET /api/nodes/{type}/{id} — 公开读（可 hook 扩展）。
 func (s *Site) apiViewNode(ctx *CmsCtx) {
-	id, err := strconv.ParseInt(ctx.PathValue("id"), 10, 64)
-	if err != nil {
+	id := ctx.PathNum("id", 0)
+	if id == 0 {
 		ctx.Error(http.StatusBadRequest, "invalid id")
 		return
 	}
@@ -99,8 +98,8 @@ func (s *Site) apiViewNode(ctx *CmsCtx) {
 // apiUpdateNode PUT /api/nodes/{type}/{id} — Fire HookBeforeUpdate（归属/角色）。
 func (s *Site) apiUpdateNode(ctx *CmsCtx) {
 	typ := ctx.PathValue("type")
-	id, err := strconv.ParseInt(ctx.PathValue("id"), 10, 64)
-	if err != nil {
+	id := ctx.PathNum("id", 0)
+	if id == 0 {
 		ctx.Error(http.StatusBadRequest, "invalid id")
 		return
 	}
@@ -132,8 +131,8 @@ func (s *Site) apiUpdateNode(ctx *CmsCtx) {
 
 // apiDeleteNode DELETE /api/nodes/{type}/{id} — Fire HookBeforeDelete。
 func (s *Site) apiDeleteNode(ctx *CmsCtx) {
-	id, err := strconv.ParseInt(ctx.PathValue("id"), 10, 64)
-	if err != nil {
+	id := ctx.PathNum("id", 0)
+	if id == 0 {
 		ctx.Error(http.StatusBadRequest, "invalid id")
 		return
 	}
