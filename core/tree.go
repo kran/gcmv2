@@ -70,6 +70,26 @@ func (t *Tree) Get(ref any) *Node {
 	return nil
 }
 
+// TreeNode 树节点 — Node 组合 + Children（树关系; Node 值模型不含树字段）。
+type TreeNode struct {
+	Node
+	Children []*TreeNode `json:"children"`
+}
+
+// JsonNodes 嵌套树序列化（TreeNode — 完整 node 内联 + children）— API 返回用。
+// 只含树内节点; 排序沿 LoadTree 的 sort,id 序。
+func (t *Tree) JsonNodes() []*TreeNode {
+	return t.walk(t.roots)
+}
+
+func (t *Tree) walk(nodes []*Node) []*TreeNode {
+	var out []*TreeNode
+	for _, n := range nodes {
+		out = append(out, &TreeNode{Node: *n, Children: t.walk(t.children[n.ID])})
+	}
+	return out
+}
+
 // Roots 顶级节点列表（sort, id 序）。
 func (t *Tree) Roots() []*Node { return t.roots }
 

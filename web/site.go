@@ -25,6 +25,7 @@ type Site struct {
 	funcs      map[string]any
 	debug      bool
 	config     map[string]any    // 站点自定义配置（插件读约定 key）
+	uploadsDir string            // 上传目录（前台上传 API 用 — 空 = 禁用）
 	adminGroup *cho.Cho[*CmsCtx] // 后台认证组（插件受保护端点挂载 — AdminGroup）
 }
 
@@ -99,7 +100,7 @@ func NewSite(spec SiteSpec) (*Site, error) {
 	// ④ 渲染引擎
 	rend := NewRenderEngine(spec.Templates, svc)
 	// ⑤ Site（先建 — cho 工厂引用同一 site）
-	site := &Site{eng: svc, db: db, rend: rend, funcs: map[string]any{}, debug: spec.Debug, config: spec.Config}
+	site := &Site{eng: svc, db: db, rend: rend, funcs: map[string]any{}, debug: spec.Debug, config: spec.Config, uploadsDir: spec.Uploads}
 	r := cho.New(func(w http.ResponseWriter, r *http.Request) *CmsCtx {
 		return &CmsCtx{BaseContext: cho.MakeBaseContext(w, r), site: site}
 	})

@@ -151,6 +151,56 @@ func (s *Site) apiDeleteNode(ctx *CmsCtx) {
 	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
 }
 
+// apiUpload POST /api/upload — 前台上传（图片/头像/相册）。
+// 登录策略待定（当前公开 — 可配合 hook 在创建时校验; 防滥用可加登录）。
+func (s *Site) apiUpload(ctx *CmsCtx) {
+	saveUpload(s.uploadsDir, ctx)
+}
+
+// apiMine GET /api/nodes/mine?type=&page=&size= — 当前用户发布的节点
+// （author = ctx.User().ID; 含草稿 — 作者可见自己的）。
+func (s *Site) apiMine(ctx *CmsCtx) {
+	u := ctx.User()
+	if u == nil {
+		ctx.Error(http.StatusUnauthorized, "login required")
+		return
+	}
+	typ := ctx.Query("type")
+	page := int(ctx.QueryNum("page", 1))
+	size := int(ctx.QueryNum("size", 20))
+	if typ != "" {
+		f := `(and (= type {:typ}) (in ->author {:uid}))`
+		list, total, err := s.eng.QueryPage(core.ListQuery{Filter: f, Page: page, Size: size},
+			map[string]any{"typ": typ, "uid": u.ID})
+		if err != nil {
+			ctx.Error(http.StatusInternalServerError, err.Error())
+			return
+		}
+		_ = ctx.Json(http.StatusOK, map[string]any{"items": list, "total": total, "page": page, "size": size})
+		return
+	}
+	// 全部类型（当前用户所有发布）
+	list, err := s.eng.Query(core.ListQuery{
+		Filter: `(in ->author {:uid})`, Size: size}, map[string]any{"uid": u.ID})
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = ctx.Json(http.StatusOK, map[string]any{"items": list, "total": len(list), "page": 1, "size": len(list)})
+}
+
+// apiTree GET /api/tree/{type} — tree 类型数据（行业/地区/分类/组织机构）:
+// 返回嵌套树 [{id, slug, display, children}]。前端组树或直接渲染。
+func (s *Site) apiTree(ctx *CmsCtx) {
+	typ := ctx.PathValue("type")
+	tree, err := s.eng.LoadTree(typ, "parent")
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = ctx.Json(http.StatusOK, map[string]any{"items": tree.JsonNodes()})
+}
+
 // ── mount（route 注册 — 单独 mountNodeAPI） ──
 
 // mountNodeAPI 挂载内容 node CRUD 路由。
@@ -159,4 +209,8 @@ func (s *Site) mountNodeAPI() {
 	s.Post("/api/nodes/{type}", s.apiCreateNode)
 	s.Put("/api/nodes/{type}/{id}", s.apiUpdateNode)
 	s.Delete("/api/nodes/{type}/{id}", s.apiDeleteNode)
+	// 通用: 上传 / 我的发布 / 树数据
+	s.Post("/api/upload", s.apiUpload)
+	s.Get("/api/nodes/mine", s.apiMine)
+	s.Get("/api/tree/{type}", s.apiTree)
 }
