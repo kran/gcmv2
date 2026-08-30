@@ -224,7 +224,13 @@ var uploadAllowExt = map[string]bool{
 
 // upload 处理 multipart 上传: 大小上限 → 扩展名白名单 → 随机文件名 → 落 uploads。
 func (b *backend) upload(ctx *CmsCtx) {
-	if b.uploadDir == "" {
+	saveUpload(b.uploadDir, ctx)
+}
+
+// saveUpload 处理 multipart 上传: 大小上限 → 扩展名白名单 → 随机文件名 →
+// 落 uploads。admin 后台上传与前台 API 上传共用。
+func saveUpload(uploadDir string, ctx *CmsCtx) {
+	if uploadDir == "" {
 		ctx.Error(http.StatusBadRequest, "uploads disabled")
 		return
 	}
@@ -249,23 +255,23 @@ func (b *backend) upload(ctx *CmsCtx) {
 	base = strings.ReplaceAll(base, " ", "-")
 	rand4 := make([]byte, 4)
 	if _, err := rand.Read(rand4); err != nil {
-		b.internal(ctx, err)
+		ctx.Error(http.StatusInternalServerError, "upload failed")
 		return
 	}
 	name := fmt.Sprintf("%d-%s-%s%s", time.Now().Unix(), hex.EncodeToString(rand4), base, ext)
-	if err := os.MkdirAll(b.uploadDir, 0755); err != nil {
-		b.internal(ctx, err)
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		ctx.Error(http.StatusInternalServerError, "upload failed")
 		return
 	}
-	dst, err := os.Create(filepath.Join(b.uploadDir, name))
+	dst, err := os.Create(filepath.Join(uploadDir, name))
 	if err != nil {
-		b.internal(ctx, err)
+		ctx.Error(http.StatusInternalServerError, "upload failed")
 		return
 	}
 	if _, err := io.Copy(dst, f); err != nil {
 		dst.Close()
 		os.Remove(dst.Name())
-		b.internal(ctx, err)
+		ctx.Error(http.StatusInternalServerError, "upload failed")
 		return
 	}
 	dst.Close()
