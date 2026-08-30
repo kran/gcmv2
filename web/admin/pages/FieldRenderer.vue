@@ -26,6 +26,8 @@
                         @change="uploadImage(f.name, $event)" />
                     <el-button size="small" @click="pickFile(f.name)">上传</el-button>
                 </div>
+                <gallery-editor v-else-if="f.kind === 'gallery'" :model-value="get(f.name) || []"
+                    @update:model-value="set(f.name, $event)" />
                 <div v-else-if="f.kind === 'ref'" class="fr-ref">
                     <el-select :model-value="get(f.name)" filterable remote clearable
                                :remote-method="(q) => searchRef(f, q)"
@@ -55,6 +57,10 @@
                 </el-select>
                 <el-input-number v-else-if="f.kind === 'number'" :model-value="get(f.name)"
                     @update:model-value="set(f.name, $event)" style="width:200px;" />
+                <el-date-picker v-else-if="f.kind === 'timestamp'" type="datetime"
+                    :model-value="toMs(get(f.name))" :clearable="true"
+                    value-format="x" placeholder="选择时间" style="width:230px;"
+                    @update:model-value="set(f.name, fromMs($event))" />
                 <el-switch v-else-if="f.kind === 'bool'" :model-value="!!get(f.name)"
                     @update:model-value="set(f.name, $event)" />
 
@@ -113,7 +119,10 @@
 // 自引用经 name: 'FieldRenderer' 实现 (SFC 运行时编译无法自 import)。
 export default {
     name: 'FieldRenderer',
-    components: { RichEditor: Vue.defineAsyncComponent(() => window.Panel.loadComponent('pages/RichEditor.vue')) },
+    components: {
+        RichEditor: Vue.defineAsyncComponent(() => window.Panel.loadComponent('pages/RichEditor.vue')),
+        GalleryEditor: Vue.defineAsyncComponent(() => window.Panel.loadComponent('pages/GalleryEditor.vue')),
+    },
     props: {
         fields: { type: Array, default: () => [] },
         modelValue: { type: Object, default: () => ({}) },
@@ -139,7 +148,7 @@ export default {
     methods: {
         // 内置控件分支集合（其余 kind → 站点扩展组件动态加载）
         builtinWidgets() {
-            return ['text', 'textarea', 'richtext', 'number', 'bool',
+            return ['text', 'textarea', 'richtext', 'number', 'timestamp', 'gallery', 'bool',
                 'upload-image', 'upload-file', 'ref', 'ref[]', 'array', 'object']
         },
         resolveExtraWidgets() {
@@ -206,6 +215,9 @@ export default {
             }
             this.refLoading = { ...(this.refLoading || {}), [f.name]: false }
         },
+        // timestamp 秒 ↔ 毫秒（el-date-picker 用 ms — 后端存秒）
+        toMs(v) { return v ? v * 1000 : null },
+        fromMs(ms) { return ms ? Math.floor(ms / 1000) : null },
         async uploadImage(name, ev) {
             const file = ev.target.files && ev.target.files[0]
             if (!file) return
