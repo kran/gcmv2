@@ -1,8 +1,8 @@
 package web
 
 import (
-	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,7 +16,7 @@ import (
 //   - register/login 成功: Set-Cookie + 响应 {token, user}（web 端自动带 cookie,
 //     API 客户端用响应里的 token 字段）
 //   - 认证中间件: cookie 优先, Authorization: Bearer 兜底 — 查同一 sessions 表
-//   - 权限: 类型 create 规则（Lisp 表达式 — core.EvalRule）; admin 通道不受限
+//   - 站点模板: 前台/API 展示
 
 const authCookie = "gcm_auth"
 
@@ -245,71 +245,11 @@ func (c *CmsCtx) RequireLogin() bool {
 func (c *CmsCtx) RequireRole(roles ...string) bool {
 	if u := c.User(); u != nil {
 		if r, ok := u.Fields["role"].(string); ok {
-			for _, want := range roles {
-				if r == want {
-					return true
-				}
+			if slices.Contains(roles, r) {
+				return true
 			}
 		}
 	}
 	c.Error(http.StatusForbidden, "permission denied")
 	return false
-}
-
-// ── 公开创建 API（create 规则校验） ─────────────
-
-// apiCreateNode POST /api/nodes/{type}: 公开创建（规则允许的类型）—
-// 权限: 类型 create 表达式（空 = 公开; 求值假 = 403）; admin 通道不受限。
-func (s *Site) apiCreateNode(ctx *CmsCtx) {
-	typ := ctx.PathValue("type")
-	td, ok := s.eng.Types().Type(typ)
-	if !ok {
-		ctx.Error(http.StatusBadRequest, "type not found")
-		return
-	}
-	// create 规则（空 = 公开）
-	if td.Create != "" {
-		if !s.allowCreate(ctx, td.Create) {
-			ctx.Error(http.StatusForbidden, "permission denied")
-			return
-		}
-	}
-	var in struct {
-		Slug    string         `json:"slug"`
-		Status  int            `json:"status"`
-		Sort    int            `json:"sort"`
-		Display string         `json:"display"` // 公共显示文本（固有列 — 必传）
-		Fields  map[string]any `json:"fields"`
-	}
-	if err := ctx.BindJson(&in); err != nil {
-		ctx.Error(http.StatusBadRequest, err.Error())
-		return
-	}
-	id, err := s.eng.CreateNode(&core.Node{
-		Type: typ, Slug: in.Slug, Status: in.Status, Sort: in.Sort,
-		Display: in.Display, Fields: in.Fields,
-	})
-	if err != nil {
-		ctx.Error(http.StatusBadRequest, err.Error())
-		return
-	}
-	_ = ctx.Json(http.StatusCreated, map[string]any{"id": id})
-}
-
-// allowCreate 求值 create 规则（auth 上下文: 当前用户或 nil）。
-func (s *Site) allowCreate(ctx *CmsCtx, rule string) bool {
-	ctxMap := map[string]any{"auth": nil}
-	if u := ctx.User(); u != nil {
-		auth := map[string]any{"id": u.ID, "type": u.Type, "slug": u.Slug}
-		for k, v := range u.Fields {
-			auth[k] = v
-		}
-		ctxMap["auth"] = auth
-	}
-	ok, err := core.EvalRule(rule, ctxMap)
-	if err != nil {
-		slog.Error("create rule eval failed", "rule", rule, "err", err)
-		return false
-	}
-	return ok
 }

@@ -3,11 +3,14 @@ package web
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/kran/gcmv2/core"
 )
 
 // testSite 临时站点（真实 DB + 最小类型）。
@@ -159,47 +162,32 @@ func TestAuthRegisterDup(t *testing.T) {
 
 func TestAuthCreateRule(t *testing.T) {
 	s := testSite(t)
-	// guestbook: create 'auth != nil' — 未登录拒绝
-	w := do(s, "POST", "/api/nodes/guestbook", map[string]any{
-		"fields": map[string]any{"title": "hi"},
-	})
+	// 无 hook = 默认拒绝（安全）
+	w := do(s, "POST", "/api/nodes/guestbook", map[string]any{"display": "hi"})
 	if w.Code != http.StatusForbidden {
-		t.Fatalf("anon create guestbook = %d", w.Code)
+		t.Fatalf("no hook create = %d", w.Code)
 	}
-	// article: create 'false' — 任何人拒绝（含登录）
-	w = do(s, "POST", "/api/nodes/article", map[string]any{
-		"fields": map[string]any{"title": "x"},
+	// AddHook 放行（站点深度权限 — 按类型）
+	s.Engine().Hooks().AddHook(HookBeforeCreate, func(ctx *CmsCtx, node *core.Node) error {
+		if node.Type == "article" {
+			return errors.New("article not allowed")
+		}
+		return nil
 	})
+	// guestbook 放行 → 201
+	w = do(s, "POST", "/api/nodes/guestbook", map[string]any{"display": "hi"})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("allowed create = %d: %s", w.Code, w.Body.String())
+	}
+	// article 被 hook 拒绝 → 403
+	w = do(s, "POST", "/api/nodes/article", map[string]any{"display": "x"})
 	if w.Code != http.StatusForbidden {
-		t.Fatalf("anon create article = %d", w.Code)
+		t.Fatalf("deny create = %d", w.Code)
 	}
-	// 登录后 guestbook 可创建
-	w = do(s, "POST", "/api/auth/register", map[string]any{
-		"method": "email", "identifier": "a@x.com", "secret": "password123",
-		"display": "a",
-	})
-	var out struct {
-		Token string `json:"token"`
-	}
-	_ = json.Unmarshal(w.Body.Bytes(), &out)
-	req := httptest.NewRequest("POST", "/api/nodes/guestbook", bytes.NewReader(
-		[]byte(`{"display":"留言","fields":{"title":"留言"}}`)))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+out.Token)
-	w2 := httptest.NewRecorder()
-	s.Handler().ServeHTTP(w2, req)
-	if w2.Code != http.StatusCreated {
-		t.Fatalf("authed create guestbook = %d: %s", w2.Code, w2.Body.String())
-	}
-	// 登录后 article 仍拒绝（create 'false'）
-	req = httptest.NewRequest("POST", "/api/nodes/article", bytes.NewReader(
-		[]byte(`{"fields":{"title":"x"}}`)))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+out.Token)
-	w3 := httptest.NewRecorder()
-	s.Handler().ServeHTTP(w3, req)
-	if w3.Code != http.StatusForbidden {
-		t.Fatalf("authed create article = %d", w3.Code)
+	// 无 hook 更新/default 拒绝
+	w = do(s, "PUT", "/api/nodes/guestbook/1", map[string]any{"display": "x"})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("no hook update = %d", w.Code)
 	}
 }
 

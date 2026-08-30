@@ -1,4 +1,4 @@
-// Package hook 通用 hook 总线 (WP 字符串模型 × Go 类型安全的交点):
+// Package core 通用 hook 总线 (WP 字符串模型 × Go 类型安全的交点):
 //
 //	DefineHook 声明名字与签名 (proto 必须 func(...) error)
 //	AddHook    注册 handler, 运行时校验签名可赋值 (注册即报错, 不留到触发)
@@ -17,7 +17,7 @@ import (
 	"sync"
 )
 
-var errorType = reflect.TypeOf((*error)(nil)).Elem()
+var errorType = reflect.TypeFor[error]()
 
 type entry struct {
 	priority int
@@ -47,6 +47,14 @@ type HookBus struct {
 
 func NewHookBus() *HookBus {
 	return &HookBus{hooks: map[string]*Hook{}}
+}
+
+// HasHook 事件是否注册了 handler（权限类 hook — 无 handler = 默认拒绝）。
+func (b *HookBus) HasHook(name string) bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	h, ok := b.hooks[name]
+	return ok && len(h.handlers) > 0
 }
 
 // Define 批量声明 hook (语义同 DefineHook): 单条失败即报错停止。
