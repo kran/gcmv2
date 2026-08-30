@@ -1,4 +1,4 @@
-// admin 管理后端（web 包内 — 登录 + 节点管理 API + 引用编辑）。: 登录（accounts + bcrypt + session cookie）+
+// Package web admin 管理后端（web 包内 — 登录 + 节点管理 API + 引用编辑）。: 登录（accounts + bcrypt + session cookie）+
 // 按 type 分组的实体管理 API + 引用编辑（ref 字段经 fields 提交, 引擎落边）。
 // 单账号每库（accounts 表, 每站一库无 site 列）。
 package web
@@ -25,7 +25,6 @@ import (
 	"github.com/kran/cho"
 	"github.com/kran/dba"
 	"github.com/kran/gcmv2/core"
-	"github.com/kran/gcmv2/types"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -484,42 +483,24 @@ func (b *backend) expandMany(nodes []core.Node) ([]core.Node, error) {
 	return out, nil
 }
 
-// nodeInput 创建/更新输入: 列字段 + 类型字段（含 ref 字段 — 引擎落边）。
-// Status/Sort 指针: nil = 未提交（保持现值）, 非 nil = 提交（0 合法 — 草稿）。
-type nodeInput struct {
-	Slug    string      `json:"slug"`
-	Status  *int        `json:"status"`
-	Sort    *int        `json:"sort"`
-	Display *string     `json:"display"` // 公共显示文本（固有列）
-	Fields  core.Fields `json:"fields"`
-}
-
 func (b *backend) createNode(ctx *CmsCtx) {
 	typ := ctx.Query("type")
 	if typ == "" {
 		ctx.Error(http.StatusBadRequest, "type required")
 		return
 	}
-	var in nodeInput
-	if err := ctx.BindJson(&in); err != nil {
+	// admin 与 API 统一: create 用 core.Node（全程量 — display 必填; core 宽松清洗）
+	var node core.Node
+	if err := ctx.BindJson(&node); err != nil {
 		b.bad(ctx, err)
 		return
 	}
-	status, sort := 0, 0
-	if in.Status != nil {
-		status = *in.Status
+	node.Type = typ
+	if node.Display == "" {
+		b.bad(ctx, errors.New("display required"))
+		return
 	}
-	if in.Sort != nil {
-		sort = *in.Sort
-	}
-	display := ""
-	if in.Display != nil {
-		display = *in.Display
-	}
-	id, err := b.eng.CreateNode(&core.Node{
-		Type: typ, Slug: in.Slug, Status: status, Sort: sort,
-		Display: display, Fields: in.Fields,
-	})
+	id, err := b.eng.CreateNode(&node)
 	if err != nil {
 		b.bad(ctx, err)
 		return
@@ -567,36 +548,14 @@ func (b *backend) updateNode(ctx *CmsCtx) {
 		ctx.Error(http.StatusNotFound, "not found")
 		return
 	}
-	var in nodeInput
-	if err := ctx.BindJson(&in); err != nil {
+	// admin 与 API 统一: 直接用 NodePatch（差量 — nil=不改）。
+	// fields 清洗由 core 丢弃未知字段 — admin 无需特殊处理。
+	var patch core.NodePatch
+	if err := ctx.BindJson(&patch); err != nil {
 		b.bad(ctx, err)
 		return
 	}
-	// 全量语义: PatchFromNode 快照现值 → 按提交覆盖（未传列保持现值）
-	patch := core.PatchFromNode(existing)
-	if in.Slug != "" {
-		patch.Slug = &in.Slug
-	}
-	if in.Status != nil {
-		patch.Status = in.Status
-	}
-	if in.Sort != nil {
-		patch.Sort = in.Sort
-	}
-	if in.Display != nil {
-		patch.Display = in.Display
-	}
-	// 全量语义下 fields 可能带回历史脏数据（类型收敛前的遗留字段）—
-	// 提交前清洗: 只保留类型声明的字段（保存即自愈）
-	td, _ := b.eng.Types().Type(existing.Type)
-	clean := map[string]any{}
-	for name, v := range in.Fields {
-		if _, ok := types.FieldByName(td, name); ok {
-			clean[name] = v
-		}
-	}
-	patch.Fields = clean
-	if err := b.eng.PatchNode(id, patch); err != nil {
+	if err := b.eng.PatchNode(id, &patch); err != nil {
 		b.bad(ctx, err)
 		return
 	}

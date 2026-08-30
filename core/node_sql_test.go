@@ -36,7 +36,7 @@ types:
 
 func testDB(t *testing.T) *dba.SQL {
 	t.Helper()
-	db, err := dba.Open("sqlite", filepath.Join(t.TempDir(), "test.db"))
+	db, err := dba.Open("sqlite", filepath.Join(t.TempDir(), "test.db")+"?_pragma=foreign_keys(1)")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -25,7 +25,6 @@ type TypeDef struct {
 	View   string     `yaml:"view" json:"view"`     // 展示形态: tree / list（空 = list）
 	Icon   string     `yaml:"icon" json:"icon"`     // 管理端图标名（Element Plus icon）; 空 = 默认
 	Auth   bool       `yaml:"auth" json:"auth"`     // 可认证类型（认证信息存 auth_methods 表 — 节点 1:N 登录方式）
-	Create string     `yaml:"create" json:"create"` // 创建权限规则（Lisp 表达式 — 空 = 公开; 假 = 前台禁创建; admin 通道不受限）
 	Fields []FieldDef `yaml:"fields" json:"fields"`
 }
 
@@ -246,7 +245,7 @@ func (t *Types) validate(defs map[string]TypeDef) error {
 	return nil
 }
 
-// fieldByName 按名取字段。
+// FieldByName 按名取字段。
 func FieldByName(td TypeDef, name string) (FieldDef, bool) {
 	for _, f := range td.Fields {
 		if f.Name == name {
