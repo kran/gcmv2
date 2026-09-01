@@ -17,15 +17,25 @@ func NewHostMux() *HostMux {
 }
 
 // Add 注册站点 — hosts 匹配 Host 头（"example.com" 或 "example.com:8080"）。
-// New（define hooks + 建 router）→ Setup（mount 路由 — 幂等带锁）; 返回 setup 后 site。
-// 站点业务（Hook/UseCtx）应在新之前/Add 前完成 — Add 即 setup, 之后不可再改配置期。
+// New（define hooks + 建 router — 不挂路由）; 返回 *Site 供站点业务配置期
+// Hook/插件/模板函数。全部 Add + 配置后调 Start()（各站点 Setup 幂等）。
 func (m *HostMux) Add(hosts []string, basedir string) *Site {
 	site := New(basedir)
-	site.Setup()
 	for _, h := range hosts {
 		m.routes[normalizeHost(h)] = site
 	}
 	return site
+}
+
+// Start 全部站点 Setup（挂载路由 — 幂等带锁）; 返回 mux 自身（http.Handler）。
+func (m *HostMux) Start() http.Handler {
+	for _, site := range m.routes {
+		site.Setup()
+	}
+	if m.fallback != nil {
+		m.fallback.Setup()
+	}
+	return m
 }
 
 // SetFallback 兜底站点（未匹配 Host 时; 可选）。
