@@ -2,7 +2,7 @@
 //
 //	DefineHook 声明名字与签名 (proto 必须 func(...) error)
 //	AddHook    注册 handler, 运行时校验签名可赋值 (注册即报错, 不留到触发)
-//	Fire       按优先级+注册序调用, 首个 error 中止; 调用前校验实参防反射 panic
+//	Fire       按优先级+注册序调用, panic 中断剩余; 业务 err 继续（收集语义）, 返回第一个 err; 调用前校验实参防反射 panic
 //
 // 变换 (filter) 没有特殊机制 — handler 传指针就地修改, C 语言的地址语义。
 // 每站点一个 HookBus 实例 (挂在 SiteCtx), 隔离是结构性的。
@@ -131,27 +131,31 @@ func (b *HookBus) Fire(name string, args ...any) error {
 	b.mu.RLock()
 	handlers := append([]entry(nil), h.handlers...)
 	b.mu.RUnlock()
+	// panic 中断（崩溃级不可预期）; 业务 err 继续执行剩余 hook（收集语义 —
+	// 一个失败不阻断其他）, Fire 返回第一个业务 err（fail-closed 调用方照拒）。
+	var firstErr error
 	for _, hd := range handlers {
-		if err := b.call(hd.fn, callArgs, name); err != nil {
-			return err // 首个 err / panic 中止（不继续剩余 hook）
+		err, panicked := func() (err error, panicked bool) {
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("hook %q panicked: %v", name, r)
+					panicked = true
+				}
+			}()
+			rets := reflect.ValueOf(hd.fn).Call(callArgs)
+			if e, ok := rets[0].Interface().(error); ok && e != nil {
+				return e, false
+			}
+			return nil, false
+		}()
+		if panicked {
+			return err
+		}
+		if err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
-	return nil
-}
-
-// call 调用单个 handler — recover 捕获 panic（崩级错误 — 包装 err 返回, 不继续）。
-// err 短路保留（校验 hook 拒绝即止）; panic 总是停止（不可预期）。
-func (b *HookBus) call(fn any, args []reflect.Value, name string) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("hook %q panicked: %v", name, r)
-		}
-	}()
-	rets := reflect.ValueOf(fn).Call(args)
-	if e, ok := rets[0].Interface().(error); ok && e != nil {
-		return e
-	}
-	return nil
+	return firstErr
 }
 
 // checkHookArgs 实参与 proto 参数逐项可赋值校验; nil 实参按对应参数类型的

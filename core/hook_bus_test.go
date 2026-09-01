@@ -40,8 +40,8 @@ func TestOrdering(t *testing.T) {
 	}
 }
 
-// 首个 error 中止。
-func TestAbort(t *testing.T) {
+// 业务 err 继续执行剩余 hook（收集语义）; Fire 返回第一个 err。
+func TestErrContinue(t *testing.T) {
 	b := NewHookBus()
 	b.DefineHook("e", func() error { return nil })
 	var called []string
@@ -50,10 +50,10 @@ func TestAbort(t *testing.T) {
 	b.AddHook("e", func() error { called = append(called, "c"); return nil })
 	err := b.Fire("e")
 	if err == nil || !strings.Contains(err.Error(), "stop") {
-		t.Fatalf("must abort with error, got %v", err)
+		t.Fatalf("must return first err, got %v", err)
 	}
-	if len(called) != 2 {
-		t.Fatalf("abort after 2, got %v", called)
+	if len(called) != 3 {
+		t.Fatalf("err must not stop others, got %v", called)
 	}
 }
 
