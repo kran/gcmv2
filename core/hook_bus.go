@@ -115,7 +115,7 @@ func (b *HookBus) AddHook(name string, fn any, priority ...int) error {
 
 // Fire 触发 hook: 实参与 proto 校验 (防反射 panic) → 按优先级+注册序调用
 // → 首个 error 中止并返回。
-func (b *HookBus) Fire(name string, args ...any) error {
+func (b *HookBus) Fire(name string, args ...any) (err error) {
 	b.mu.RLock()
 	h, ok := b.hooks[name]
 	b.mu.RUnlock()
@@ -127,32 +127,23 @@ func (b *HookBus) Fire(name string, args ...any) error {
 		return fmt.Errorf("hook: %q: %w", name, err)
 	}
 
+	// panic 打断循环（剩余 hook 不执行）→ defer recover 返回 panic err;
+	// 业务 err 不 panic — 循环继续, Fire 返回第一个业务 err（fail-closed）。
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("hook %q panicked: %v", name, r)
+		}
+	}()
+
 	// 顺序在 AddHook 已排好（priority + 注册序稳定）, 触发路径零排序
 	b.mu.RLock()
 	handlers := append([]entry(nil), h.handlers...)
 	b.mu.RUnlock()
-	// panic 中断（崩溃级不可预期）; 业务 err 继续执行剩余 hook（收集语义 —
-	// 一个失败不阻断其他）, Fire 返回第一个业务 err（fail-closed 调用方照拒）。
 	var firstErr error
 	for _, hd := range handlers {
-		err, panicked := func() (err error, panicked bool) {
-			defer func() {
-				if r := recover(); r != nil {
-					err = fmt.Errorf("hook %q panicked: %v", name, r)
-					panicked = true
-				}
-			}()
-			rets := reflect.ValueOf(hd.fn).Call(callArgs)
-			if e, ok := rets[0].Interface().(error); ok && e != nil {
-				return e, false
-			}
-			return nil, false
-		}()
-		if panicked {
-			return err
-		}
-		if err != nil && firstErr == nil {
-			firstErr = err
+		rets := reflect.ValueOf(hd.fn).Call(callArgs)
+		if e, ok := rets[0].Interface().(error); ok && e != nil && firstErr == nil {
+			firstErr = e
 		}
 	}
 	return firstErr
