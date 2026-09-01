@@ -207,7 +207,7 @@ func (s *Site) apiTree(ctx *CmsCtx) {
 
 // ── mount（route 注册 — 单独 mountNodeAPI） ──
 
-// mountNodeApi 挂载内容 node CRUD 路由（到传入 Group — 已带 CORS）。
+// mountNodeApi 挂载内容 node CRUD 路由（到传入 /api Group; CORS 由 cors 插件挂）。
 func (s *Site) mountNodeApi(g *cho.Cho[*CmsCtx]) {
 	g.Get("/nodes/{type}", s.apiNodes)
 	g.Get("/nodes/{type}/{id}", s.apiViewNode)

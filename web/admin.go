@@ -285,20 +285,17 @@ type AdminPanel struct {
 	Vue   string `json:"vue"`   // 面板组件完整 URL（认证路由, 站点自己挂）
 }
 
-// AdminPanel 后台面板菜单事件（/admin/panels 每次请求 Fire — 响应式）:
-// 原型 func(ctx *CmsCtx, panels *[]AdminPanel) error — 插件 hook 只返回菜单数据。
+// HookAdminPanel 后台面板菜单事件（/admin/panels 每次请求 Fire — 响应式）:
+// 原型 func(ctx *CmsCtx, panels *core.List[AdminPanel]) error — 插件只返回菜单数据。
 const HookAdminPanel = "admin.panel"
 
 // HookAdminMount 后台受保护端点挂载事件（Start 时 Fire 一次 — 传 admin 认证组）:
 // 原型 func(g *cho.Cho[*CmsCtx]) error — 插件拿组挂受保护端点（替代 Site.Admin）。
 const HookAdminMount = "admin.mount"
 
-// Mount 挂载 /admin 组到站点（登录保护; 公开入口: login/ui/upload）。
-// uploadDir 是上传落盘目录（可为空 = 禁用上传）; /uploads/* 服务由站点
-// 装配层挂载（gcm.NewApp — 前台资源不依赖 admin 是否启用）。
-// svc/ts 从 site 上下文取（site.Service() / svc.Types()）— 装配参数最小化。
-// DefineHooks 声明后台事件（AdminMount — 装配早期调用, 站点 Setup/AddHook 前）;
-// 与 defineWebHooks 同位置（New 装配 — 事件先声明）。
+// HookAdminMount 挂载 /admin 受保护端点事件（Setup 时 Fire 一次 — 传认证组）;
+// 内置 admin 路由（login/ui/upload/nodes/settings...）在此挂载。
+// uploadDir 用站点 uploadsDir（可为空 = 禁用上传）; /uploads/* 服务由装配层挂载。
 func defineAdminHooks(svc core.Engine) {
 	err := svc.Hooks().Define(map[string]any{
 		HookAdminPanel: func(*CmsCtx, *core.List[AdminPanel]) error { return nil },
@@ -311,7 +308,13 @@ func defineAdminHooks(svc core.Engine) {
 
 // setupAdmin 后台模块: 账号引导 + /admin 组（建认证组 → fire HookAdminMount 传组）。
 func (s *Site) setupAdmin() {
-	EnsureDefaults(s.DB()) // 失败 panic
+	dc, err := EnsureDefaults(s.DB())
+	if err != nil {
+		panic("web: ensure admin defaults: " + err.Error())
+	}
+	if dc != nil {
+		slog.Info("admin created", "username", dc.Username, "password", dc.Password)
+	}
 	s.mountAdmin()
 }
 

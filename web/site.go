@@ -69,7 +69,7 @@ func New(basedir string) *Site {
 	defineNodeHooks(engine)
 	defineAuthHooks(engine)
 	defineAdminHooks(engine)
-	// ⑦ 建 router（空 — 不挂路由; 配置期 UseCtx/Get/Post 先于 Start 的 mount）
+	// ⑦ 建 router（空 — 不挂路由; 配置期 Hook 与 Router() 挂载先于 Setup 的 mount）
 	site.router = cho.New(site.CmsCtxMaker)
 	return site
 }
@@ -184,7 +184,7 @@ func (s *Site) setupWeb() {
 }
 
 // homeHandler 默认首页（渲染 home.html; HookRender 已注入页面上下文 — 站点
-// home 区块经 hook 注入数据）。站点自定义 home 直接 site.Get("/") 覆盖（先注册先匹配）。
+// home 区块经 hook 注入数据）。站点自定义 home 经 HookBeforeMount 挂 Router().Get("/") 覆盖。
 func (s *Site) homeHandler(ctx *CmsCtx) {
 	ctx.Render([]string{"home.html"}, map[string]any{})
 }
@@ -193,6 +193,10 @@ func (s *Site) homeHandler(ctx *CmsCtx) {
 func (s *Site) serveFiles(pattern, baseDir, prefix string) {
 	s.router.Get(pattern, func(ctx *CmsCtx) {
 		rel := strings.TrimPrefix(ctx.R.URL.Path, prefix)
+		if strings.Contains(rel, "..") {
+			ctx.String(http.StatusNotFound, "404 not found")
+			return
+		}
 		filePath := filepath.Join(baseDir, filepath.FromSlash(rel))
 		// Fire — 插件（imgproc 等）可改 filePath（处理）
 		if err := s.engine.Hooks().Fire(HookServeFile, ctx, &filePath); err != nil {

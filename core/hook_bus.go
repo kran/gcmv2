@@ -113,8 +113,9 @@ func (b *HookBus) AddHook(name string, fn any, priority ...int) error {
 	return nil
 }
 
-// Fire 触发 hook: 实参与 proto 校验 (防反射 panic) → 按优先级+注册序调用
-// → 首个 error 中止并返回。
+// Fire 触发 hook: 实参与 proto 校验（防反射 panic）→ 按优先级+注册序调用。
+// panic 天然打断循环（剩余 handler 不执行）→ defer recover 包装 err 返回;
+// 业务 err 不 panic — 循环继续, 返回第一个业务 err（fail-closed）。
 func (b *HookBus) Fire(name string, args ...any) (err error) {
 	b.mu.RLock()
 	h, ok := b.hooks[name]

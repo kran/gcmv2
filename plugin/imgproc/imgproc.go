@@ -36,8 +36,7 @@ func Mount(s *web.Site) {
 func ServeFile(ctx *web.CmsCtx, filePath *string) error {
 	p, ok, err := parseImgParams(ctx.R)
 	if err != nil {
-		ctx.String(http.StatusBadRequest, "img: "+err.Error())
-		return nil
+		return fmt.Errorf("img: %w", err) // 不写响应 — serveFiles 统一错误出口（防双写）
 	}
 	if !ok {
 		return nil // 无参数 — 原图直出（不改 filePath）
