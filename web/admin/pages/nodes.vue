@@ -60,7 +60,7 @@
       <el-table v-if="treeMode" :data="treeNodes" v-loading="loading" row-key="id"
                 :tree-props="{ children: 'children' }" default-expand-all >
         <el-table-column label="标题" min-width="360" show-overflow-tooltip>
-          <template #default="{ row: r }"><span style="">{{ titleOf(r) }}</span></template>
+          <template #default="{ row: r }"><a class="node-title-link" @click.prevent="openEdit(r)">{{ titleOf(r) }}</a></template>
         </el-table-column>
         <el-table-column label="slug" min-width="160" show-overflow-tooltip>
           <template #default="{ row: r }"><code>{{ r.slug || '#' + r.id }}</code></template>
@@ -83,7 +83,7 @@
       <el-table v-else :data="rows" v-loading="loading">
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column label="标题" min-width="360" show-overflow-tooltip>
-          <template #default="{ row: r }"><span style="">{{ titleOf(r) }}</span></template>
+          <template #default="{ row: r }"><a class="node-title-link" @click.prevent="openEdit(r)">{{ titleOf(r) }}</a></template>
         </el-table-column>
         <el-table-column label="slug" min-width="160" show-overflow-tooltip>
           <template #default="{ row: r }"><code>{{ r.slug || '#' + r.id }}</code></template>
@@ -114,6 +114,9 @@
       <!-- 页面级新建（行编辑走 NodeOps） -->
       <node-edit-dialog v-model:visible="createVisible" :type-name="query.type" :defs="typeDefs"
                         @changed="refresh" />
+      <!-- 标题链接编辑（列表标题点击 → 编辑对话框） -->
+      <node-edit-dialog v-model:visible="editVisible" :node="editNode" :type-name="query.type"
+                        :is-edit="true" :defs="typeDefs" @changed="refresh" />
     </div>
 
 
@@ -145,10 +148,17 @@ export default {
             query: { type: '', status: null, q: '', page: 1, size: 25 },
             rebuilding: false,
             createVisible: false,
+            editVisible: false,
+            editNode: null,
         }
     },
     async mounted() { await this.loadTypes() },
     methods: {
+        // 标题链接 → 编辑对话框
+        openEdit(node) {
+            this.editNode = node
+            this.editVisible = true
+        },
         // 图标来自类型配置（icon 字段）; 空 = 默认
         typeIcon(t) {
             const def = this.typeDefs[t] || {}

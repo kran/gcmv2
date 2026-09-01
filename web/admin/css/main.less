@@ -630,3 +630,11 @@ html, body {
     &:hover { color: #000 !important; }
 }
 .op-btn + .op-btn { margin-left: 0 !important; }
+// 列表标题链接（点击 → 编辑）— 下划线 link 风格（同 op-btn）
+.node-title-link {
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
+    &:hover { color: var(--el-color-primary); }
+}
