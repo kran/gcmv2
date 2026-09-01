@@ -95,6 +95,8 @@
 }
 .el-textarea__inner { border: none; }
 .el-select-dropdown__item { font-size: 1em; }
+// 顶部菜单 hover 子菜单（类型树/扩展）— 字体放大
+.el-dropdown-menu__item { font-size: 15px; }
 
 // ── Layout ──────────────────────────────────────
 html, body {
@@ -161,6 +163,7 @@ html, body {
             color: #5c5c66;
             cursor: pointer;
             text-decoration: none;
+            outline: none; // 去浏览器默认 focus outline
             transition: color .15s ease;
 
             &:hover { color: #16161a; }

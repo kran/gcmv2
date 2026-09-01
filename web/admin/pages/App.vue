@@ -53,7 +53,7 @@
                         <el-dropdown-menu>
                             <el-dropdown-item v-for="item in treeMenu" :key="item.key"
                                 @click="router.push({ name: item.route, params: item.params })">
-                                <el-icon :size="14"><Share /></el-icon>{{ item.label }}
+                                {{ item.label }}
                             </el-dropdown-item>
                         </el-dropdown-menu>
                     </template>
@@ -68,7 +68,7 @@
                         <el-dropdown-menu>
                             <el-dropdown-item v-for="item in panelMenu" :key="item.key"
                                 @click="router.push({ name: item.route, params: item.params })">
-                                <el-icon :size="14"><Grid /></el-icon>{{ item.label }}
+                                {{ item.label }}
                             </el-dropdown-item>
                         </el-dropdown-menu>
                     </template>
