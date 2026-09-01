@@ -36,12 +36,43 @@
                 <span class="topbar-brand-name">GCM</span>
             </div>
             <nav class="topbar-menu">
-                <a v-for="item in menuData" :key="item.key" class="topbar-menu-item"
+                <!-- 普通菜单（内置类型） -->
+                <a v-for="item in mainMenu" :key="item.key" class="topbar-menu-item"
                    :class="{ active: route.name === item.route }"
                    @click.prevent="router.push({ name: item.route, params: item.params })">
                     <el-icon :size="15"><component :is="item.icon" /></el-icon>
                     <span>{{ item.label }}</span>
                 </a>
+                <!-- 类型树（tree 类型菜单 — hover 子菜单） -->
+                <el-dropdown v-if="treeMenu.length" trigger="hover">
+                    <a class="topbar-menu-item" :class="{ active: isTreeActive }">
+                        <el-icon :size="15"><Share /></el-icon>
+                        <span>类型树</span>
+                    </a>
+                    <template #dropdown>
+                        <el-dropdown-menu>
+                            <el-dropdown-item v-for="item in treeMenu" :key="item.key"
+                                @click="router.push({ name: item.route, params: item.params })">
+                                <el-icon :size="14"><Share /></el-icon>{{ item.label }}
+                            </el-dropdown-item>
+                        </el-dropdown-menu>
+                    </template>
+                </el-dropdown>
+                <!-- 扩展（插件面板菜单 — hover 子菜单） -->
+                <el-dropdown v-if="panelMenu.length" trigger="hover">
+                    <a class="topbar-menu-item" :class="{ active: isPanelActive }">
+                        <el-icon :size="15"><Grid /></el-icon>
+                        <span>扩展</span>
+                    </a>
+                    <template #dropdown>
+                        <el-dropdown-menu>
+                            <el-dropdown-item v-for="item in panelMenu" :key="item.key"
+                                @click="router.push({ name: item.route, params: item.params })">
+                                <el-icon :size="14"><Grid /></el-icon>{{ item.label }}
+                            </el-dropdown-item>
+                        </el-dropdown-menu>
+                    </template>
+                </el-dropdown>
             </nav>
             <div class="topbar-right">
                 <button class="topbar-icon-btn" @click="globalQ && globalSearch()"><el-icon><Search /></el-icon></button>
@@ -82,7 +113,11 @@ export default {
         var defaultPage = window.AppConfig.defaultPage
         // 固定菜单（内置）与动态菜单（tree/面板）— 动态项由 section 标记
         var mainMenu = computed(function () { return menuData.value.filter(function (m) { return !m.section }) })
-        var extraMenu = computed(function () { return menuData.value.filter(function (m) { return m.section }) })
+        var treeMenu = computed(function () { return menuData.value.filter(function (m) { return m.section === 'tree' }) })
+        var panelMenu = computed(function () { return menuData.value.filter(function (m) { return m.section === 'panel' }) })
+        // 子菜单入口高亮: 当前路由属于该分组时
+        var isTreeActive = computed(function () { return treeMenu.value.some(function (m) { return m.route === route.name }) })
+        var isPanelActive = computed(function () { return panelMenu.value.some(function (m) { return m.route === route.name }) })
         var globalQ = ref('')
         // 分组菜单（TokenHub 风格）— 静态项按 group 归组; 动态项（tree/panel）归"管理"
         var menuGroups = computed(function () {
@@ -211,7 +246,9 @@ export default {
         return {
             phase: phase, user: user, siteName: siteName, pageTitle: pageTitle,
             menuData: menuData, menuGroups: menuGroups, globalQ: globalQ, globalSearch: globalSearch,
-            mainMenu: mainMenu, extraMenu: extraMenu, loginForm: loginForm,
+            mainMenu: mainMenu, treeMenu: treeMenu, panelMenu: panelMenu,
+            isTreeActive: isTreeActive, isPanelActive: isPanelActive,
+            loginForm: loginForm,
             route: route, router: router,
             doLogin: doLogin, doLogout: doLogout,
         }
