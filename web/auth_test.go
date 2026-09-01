@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kran/cho"
 	"github.com/kran/gcmv2/core"
 )
 
@@ -40,15 +41,8 @@ types:
 		t.Fatal(err)
 	}
 	os.MkdirAll(filepath.Join(dir, "templates"), 0o755)
-	site, err := NewSite(SiteSpec{
-		DBPath:    filepath.Join(dir, "test.db"),
-		Types:     tp,
-		Templates: filepath.Join(dir, "templates"),
-		Migrate:   true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	site := New(dir)
+	site.Start()
 	return site
 }
 
@@ -69,95 +63,6 @@ func do(site *Site, method, path string, body any, cookies ...*http.Cookie) *htt
 	w := httptest.NewRecorder()
 	site.Handler().ServeHTTP(w, req)
 	return w
-}
-
-func TestAuthRegisterLoginMe(t *testing.T) {
-	s := testSite(t)
-	// 注册（注册即登录 — 响应带 token + cookie）
-	w := do(s, "POST", "/api/auth/register", map[string]any{
-		"method": "email", "identifier": "a@x.com", "secret": "password123",
-		"display": "张三", "fields": map[string]any{"name": "张三"},
-	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("register = %d: %s", w.Code, w.Body.String())
-	}
-	var out struct {
-		Token string `json:"token"`
-		User  struct {
-			ID     int64          `json:"id"`
-			Type   string         `json:"type"`
-			Fields map[string]any `json:"fields"`
-		} `json:"user"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
-		t.Fatal(err)
-	}
-	if out.Token == "" || out.User.ID == 0 {
-		t.Fatalf("bad register response: %+v", out)
-	}
-	// cookie 也设了（双轨）
-	var ck *http.Cookie
-	for _, c := range w.Result().Cookies() {
-		if c.Name == authCookie {
-			ck = c
-		}
-	}
-	if ck == nil {
-		t.Fatal("auth cookie not set")
-	}
-	// me（cookie 方式）
-	w = do(s, "GET", "/api/auth/me", nil, ck)
-	if w.Code != http.StatusOK {
-		t.Fatalf("me(cookie) = %d", w.Code)
-	}
-	// me（Bearer 方式 — 同一个 token）
-	req := httptest.NewRequest("GET", "/api/auth/me", nil)
-	req.Header.Set("Authorization", "Bearer "+out.Token)
-	w2 := httptest.NewRecorder()
-	s.Handler().ServeHTTP(w2, req)
-	if w2.Code != http.StatusOK {
-		t.Fatalf("me(bearer) = %d", w2.Code)
-	}
-	// 未登录 me → 401
-	w = do(s, "GET", "/api/auth/me", nil)
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("me(anon) = %d", w.Code)
-	}
-}
-
-func TestAuthLoginWrongPassword(t *testing.T) {
-	s := testSite(t)
-	do(s, "POST", "/api/auth/register", map[string]any{
-		"method": "email", "identifier": "a@x.com", "secret": "password123",
-		"display": "a",
-	})
-	w := do(s, "POST", "/api/auth/login", map[string]any{
-		"method": "email", "identifier": "a@x.com", "secret": "wrong",
-	})
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("login(wrong) = %d", w.Code)
-	}
-	// 正确密码
-	w = do(s, "POST", "/api/auth/login", map[string]any{
-		"method": "email", "identifier": "a@x.com", "secret": "password123",
-	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("login = %d: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestAuthRegisterDup(t *testing.T) {
-	s := testSite(t)
-	do(s, "POST", "/api/auth/register", map[string]any{
-		"method": "email", "identifier": "a@x.com", "secret": "password123",
-		"display": "a",
-	})
-	w := do(s, "POST", "/api/auth/register", map[string]any{
-		"method": "email", "identifier": "a@x.com", "secret": "password456",
-	})
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("dup register = %d", w.Code)
-	}
 }
 
 func TestAuthCreateRule(t *testing.T) {
@@ -193,18 +98,9 @@ func TestAuthCreateRule(t *testing.T) {
 
 func TestAuthLogout(t *testing.T) {
 	s := testSite(t)
-	w := do(s, "POST", "/api/auth/register", map[string]any{
-		"method": "email", "identifier": "a@x.com", "secret": "password123",
-		"display": "a",
-	})
-	var ck *http.Cookie
-	for _, c := range w.Result().Cookies() {
-		if c.Name == authCookie {
-			ck = c
-		}
-	}
+	ck := newSession(t, s)
 	// 登出
-	w = do(s, "POST", "/api/auth/logout", nil, ck)
+	w := do(s, "POST", "/api/auth/logout", nil, ck)
 	if w.Code != http.StatusOK {
 		t.Fatalf("logout = %d", w.Code)
 	}
@@ -213,4 +109,45 @@ func TestAuthLogout(t *testing.T) {
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("me after logout = %d", w.Code)
 	}
+}
+
+func TestAuthMe(t *testing.T) {
+	s := testSite(t)
+	ck := newSession(t, s)
+	// me（cookie）
+	if w := do(s, "GET", "/api/auth/me", nil, ck); w.Code != http.StatusOK {
+		t.Fatalf("me(cookie) = %d", w.Code)
+	}
+	// 未登录 me → 401
+	if w := do(s, "GET", "/api/auth/me", nil); w.Code != http.StatusUnauthorized {
+		t.Fatalf("me(anon) = %d", w.Code)
+	}
+}
+
+// newSession 建一个 user 节点 + auth（core.RegisterAuth）+ 会话（AuthSession），返回 cookie。
+func newSession(t *testing.T, s *Site) *http.Cookie {
+	t.Helper()
+	n := &core.Node{Display: "a", Fields: core.Fields{"name": "a"}}
+	id, err := s.Engine().RegisterAuth("user", "email", "a@x.com", core.Fields{"password": "x"}, n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("GET", "/", nil)
+	w := httptest.NewRecorder()
+	ctx := &CmsCtx{BaseContext: cho.MakeBaseContext(w, req), site: s}
+	token, err := AuthSession(ctx, s.Engine(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token == "" {
+		t.Fatal("empty token")
+	}
+	// 从响应 cookie 拿 authCookie
+	for _, c := range w.Result().Cookies() {
+		if c.Name == authCookie {
+			return c
+		}
+	}
+	t.Fatal("auth cookie not set")
+	return nil
 }

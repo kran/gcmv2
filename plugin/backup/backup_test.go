@@ -13,6 +13,15 @@ import (
 	"github.com/kran/gcmv2/web"
 )
 
+// admPass admin 登录密码（EnsureDefaults 随机 — testSite 里捕获）。
+var admPass string
+
+// MountAdm 装 backup 插件 + Start。
+func MountAdm(s *web.Site, baseDir string) {
+	Mount(s, Options{BackupsDir: filepath.Join(baseDir, "backups")})
+	s.Start()
+}
+
 // testSite 建站点 + 装 backup 插件 + admin 登录。
 func testSite(t *testing.T) (*web.Site, string) {
 	t.Helper()
@@ -26,22 +35,21 @@ types:
 `), 0o644)
 	tdir := filepath.Join(dir, "templates")
 	os.MkdirAll(tdir, 0o755)
-	site, err := web.NewSite(web.SiteSpec{
-		DBPath: filepath.Join(dir, "test.db"), Types: tp,
-		Templates: tdir, Migrate: true, AdminPass: "cmx12345",
-		Config: map[string]any{"backups_dir": filepath.Join(dir, "backups")},
-	})
-	if err != nil {
-		t.Fatal(err)
+	site := web.New(dir)
+	// 先建 admin（Start 前 — 拿到随机密码; setupAdmin 里 EnsureDefaults 已建则不重复）
+	dc, _ := web.EnsureDefaults(site.DB())
+	if dc != nil {
+		admPass = dc.Password
 	}
-	Mount(site)
+	Mount(site, Options{BackupsDir: filepath.Join(dir, "backups")})
+	site.Start()
 	return site, filepath.Join(dir, "backups")
 }
 
 // login 登录拿 cookie。
 func login(t *testing.T, s *web.Site) *http.Cookie {
 	t.Helper()
-	w := do(s, "POST", "/admin/login", map[string]any{"username": "admin", "password": "cmx12345"})
+	w := do(s, "POST", "/admin/login", map[string]any{"username": "admin", "password": admPass})
 	if w.Code != http.StatusOK {
 		t.Fatalf("login = %d", w.Code)
 	}

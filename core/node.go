@@ -4,9 +4,11 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/kran/gcmv2/types"
+	"github.com/spf13/cast"
 )
 
 // ── 底表列（固定 8 个 — nodes 表固有列） ──────────
@@ -26,7 +28,30 @@ import (
 //
 // Fields 类型字段（动态 — 类型定义声明; ref 引用在 edges, 不在此）。
 // Scan/Value: DB JSON 字符串 ↔ map 自动转换（dba 扫/插直接可用）。
+//
+// ── cast 快捷方法（容错取值 — 字段值类型多变: JSON float64/int64/string） ──
 type Fields map[string]any
+
+// Str 取字符串（nil→""; 数字→字符串）。
+func (f Fields) Str(name string) string { return cast.ToString(f[name]) }
+
+// Int 取整数（字符串/float64→int64; 非法→0）。
+func (f Fields) Int(name string) int64 { return cast.ToInt64(f[name]) }
+
+// Float 取浮点。
+func (f Fields) Float(name string) float64 { return cast.ToFloat64(f[name]) }
+
+// Bool 取布尔。
+func (f Fields) Bool(name string) bool { return cast.ToBool(f[name]) }
+
+// Has 字段是否存在（含 null 值）。
+func (f Fields) Has(name string) bool { _, ok := f[name]; return ok }
+
+// Map 取嵌套 map。
+func (f Fields) Map(name string) map[string]any { return cast.ToStringMap(f[name]) }
+
+// Slice 取数组（nil→空切片）。
+func (f Fields) Slice(name string) []any { return cast.ToSlice(f[name]) }
 
 // Scan 从 DB JSON 还原。
 func (f *Fields) Scan(v any) error {
@@ -99,9 +124,7 @@ func (s *Service) FullFields(id int64) (map[string]any, error) {
 		return nil, ErrNotFound
 	}
 	out := map[string]any{}
-	for k, v := range n.Fields {
-		out[k] = v
-	}
+	maps.Copy(out, n.Fields)
 	td, ok := s.types.Type(n.Type)
 	if !ok {
 		return nil, fmt.Errorf("core: type %q not defined", n.Type)

@@ -1,12 +1,20 @@
 // Package web 站点层 — 装配（Router + 渲染 + 函数）+ 内置路由 + 多站分发。
+//
+// 三阶段装配（解决插件时序 — 中间件先于路由）:
+//
+//	app := site.New(basedir)   // ① 初始化: db/types/templates/static/uploads 固定路径 + define 全部 hook + 建 router（不挂路由）
+//	app.Hook(name, fn)         // ② 配置期: addhook（事件已定义 — 无时序问题）
+//	app.UseCtx(mw)             //     挂中间件（CORS 等 — 先于 Start 的路由 mount）
+//	app.Start()                // ③ 启动: mount 全部路由 + fire AdminMount（传认证组）→ http.Handler
 package web
 
 import (
-	"bytes"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 
 	"github.com/kran/cho"
 	"github.com/kran/dba"
@@ -18,219 +26,188 @@ import (
 // 一个 Site = 一个引擎 + 一个路由器 + 模板函数表。
 // 多站 = 多个 Site + HostMux 分发。
 type Site struct {
-	eng        core.Engine
+	basedir    string
+	engine     core.Engine
 	db         *dba.SQL
-	rend       *RenderEngine
-	r          *cho.Cho[*CmsCtx]
-	funcs      map[string]any
-	debug      bool
-	config     map[string]any    // 站点自定义配置（插件读约定 key）
-	uploadsDir string            // 上传目录（前台上传 API 用 — 空 = 禁用）
-	adminGroup *cho.Cho[*CmsCtx] // 后台认证组（插件受保护端点挂载 — AdminGroup）
+	render     *Render
+	router     *cho.Cho[*CmsCtx]
+	uploadsDir string
+	debug      bool      // 开发模式: 渲染错误显示详情页
+	once       sync.Once // Setup 幂等 — 带锁不重复 mount 路由
+	started    bool      // Setup 已执行（Handler() 检查 — 防未 Setup）
 }
 
-// SiteSpec 站点装配配置（纯数据 — 业务由调用方在 NewSite 后直接写）。
-// yaml tag: 站点项目可用 YAML 声明多站（sites.yaml 直解）。
-type SiteSpec struct {
-	DBPath    string `yaml:"db" json:"db"`               // SQLite 库文件路径
-	Types     string `yaml:"types" json:"types"`         // types.yaml 路径
-	Templates string `yaml:"templates" json:"templates"` // 模板目录
-	Static    string `yaml:"static" json:"static"`       // 静态资源目录（空 = 跳过）
-	Uploads   string `yaml:"uploads" json:"uploads"`     // 上传目录（空 = 跳过）
-	Migrate   bool   `yaml:"migrate" json:"migrate"`     // 是否自动跑引擎迁移（默认 true）
-	// Debug 开发模式: 渲染失败显示错误详情页（模板名/行号/候选/数据 keys）。
-	Debug bool `yaml:"debug" json:"debug"`
-	// AdminPass 管理后台固定密码（空 = 首次生成随机密码并打印一次）。
-	AdminPass string `yaml:"admin_pass" json:"admin_pass"`
-	// Config 站点自定义配置（插件读约定 key — 如 sitemap 的 base_url）。
-	// 站点代码经 site.Config() 读取; 引擎不解释内容。
-	Config map[string]any `yaml:"config" json:"config"`
-	// SQLLogger dba SQL 日志器（nil = 默认 — dba.NewLogger(slog.Default, 1s, true)）。
-	SQLLogger dba.LogFunc
-	// Kinds 站点自定义 kind（types.Load 之前注册 — 类型定义里用到才需要）。
-	Kinds []types.Kind
+// New 站点初始化（两阶段第 ① 步）。basedir 下固定路径:
+//
+//	gcm.sqlite  数据库（slog.Default 日志）
+//	types.yaml  类型定义
+//	templates/  模板
+//	static/     静态（自动建）
+//	uploads/    上传（自动建）
+//
+// New 定义全部内置 hook（Web/Node/Auth/Admin）+ 建 router（不挂路由）。
+// 失败（db/types/目录）panic — fail loud。
+func New(basedir string) *Site {
+	// ① 存储（固定 gcm.sqlite — slog.Default 日志）
+	db := openDB(filepath.Join(basedir, "gcm.sqlite"))
+	// ② 类型
+	ts := loadTypes(filepath.Join(basedir, "types.yaml"))
+	// ③ 引擎（New 已跑内置迁移）
+	engine := core.New(db, ts)
+	// ④ 渲染
+	render := NewRender(filepath.Join(basedir, "templates"), engine)
+	// ⑤ Site（先建 — 工厂复用）
+	site := &Site{
+		basedir:    basedir,
+		engine:     engine,
+		db:         db,
+		render:     render,
+		uploadsDir: filepath.Join(basedir, "uploads"),
+	}
+	// ⑥ 定义全部内置 hook（事件先声明 — 配置期 AddHook 无时序问题）
+	defineWebHooks(engine)
+	defineNodeHooks(engine)
+	defineAuthHooks(engine)
+	defineAdminHooks(engine)
+	// ⑦ 建 router（空 — 不挂路由; 配置期 UseCtx/Get/Post 先于 Start 的 mount）
+	site.router = cho.New(site.CmsCtxMaker)
+	return site
 }
 
-// NewSite 站点装配: 迁移 → 建引擎 → 渲染引擎 → 路由 + 内置路由。
-func NewSite(spec SiteSpec) (*Site, error) {
-	// ① 存储 + 迁移
-	db, err := openDB(spec.DBPath)
-	if err != nil {
-		return nil, err
+// Hook 配置期注册 handler（事件已在 New 定义 — 无时序问题）。
+func (s *Site) Hook(name string, fn any) {
+	if err := s.engine.Hooks().AddHook(name, fn); err != nil {
+		panic("web: add hook: " + err.Error())
 	}
-	if spec.SQLLogger != nil {
-		db = db.SetLogger(spec.SQLLogger)
-	}
-	// ② 类型系统
-	ts, err := loadTypes(spec.Types, spec.Kinds)
-	if err != nil {
-		return nil, err
-	}
-	// ③ 引擎（New 不碰 DB — 迁移可在其后）
-	svc := core.New(db, ts)
-	if spec.Migrate {
-		if _, err := svc.MigrateUp(); err != nil {
-			return nil, err
+}
+
+// Start 两阶段第 ② 步 — mount 全部路由 + fire HookAdminMount（传认证组）→ http.Handler。
+// Setup 挂载全部路由（两阶段第 ② 步）。幂等 — sync.Once 带锁, 重复调用安全;
+// 返回 http.Handler（HostMux 多站 / 单站 Start 共用）。
+func (s *Site) Setup() http.Handler {
+	s.once.Do(func() {
+		s.started = true
+		// HookBeforeMount — 插件挂中间件/普通路由（先于内置路由 — 中间件时序）
+		if err := s.engine.Hooks().Fire(HookBeforeMount, s); err != nil {
+			panic("web: before mount: " + err.Error())
 		}
-	}
-	if err := DefineWebHooks(svc); err != nil {
-		return nil, err
-	}
-	if err := defineAdminHooks(svc); err != nil {
-		return nil, err
-	}
-	if err := defineAuthHooks(svc); err != nil {
-		return nil, err
-	}
-	if err := defineNodeHooks(svc); err != nil {
-		return nil, err
-	}
-	// admin 账号引导（固定密码优先, 否则随机打印一次）
-	if dc, err := EnsureDefaults(db); err != nil {
-		return nil, err
-	} else if dc != nil {
-		log.Printf("web: %s: admin created: %s / %s", spec.DBPath, dc.Username, dc.Password)
-		if spec.AdminPass != "" {
-			if err := NewService(db).SetPassword(spec.AdminPass); err != nil {
-				return nil, err
-			}
-			log.Printf("web: %s: admin password set to fixed", spec.DBPath)
-		}
-	}
-	// ④ 渲染引擎
-	rend := NewRenderEngine(spec.Templates, svc)
-	// ⑤ Site（先建 — cho 工厂引用同一 site）
-	site := &Site{eng: svc, db: db, rend: rend, funcs: map[string]any{}, debug: spec.Debug, config: spec.Config, uploadsDir: spec.Uploads}
-	r := cho.New(func(w http.ResponseWriter, r *http.Request) *CmsCtx {
-		return &CmsCtx{BaseContext: cho.MakeBaseContext(w, r), site: site}
+		// 静态/uploads 文件服务
+		s.setupFiles(filepath.Join(s.basedir, "static"), "/static/*", "/static/")
+		s.setupFiles(s.uploadsDir, "/uploads/*", "/uploads/")
+		// API（nodes + auth 通用）
+		s.setupApi()
+		// 内容路由 + 404
+		s.setupWeb()
+		// admin（建认证组 → 内置 admin 路由 → fire AdminMount 传组）
+		s.setupAdmin()
 	})
-	site.r = r
-	// ⑥ 内置路由（含 admin）
-	site.mount(spec)
-	return site, nil
+	return s.router
+}
+
+// Start 单站便捷 — 等价 Setup。返回 http.Handler（直接 serve）。
+func (s *Site) Start() http.Handler { return s.Setup() }
+
+// CmsCtxMaker cho 工厂（建请求 ctx）。
+func (s *Site) CmsCtxMaker(w http.ResponseWriter, r *http.Request) *CmsCtx {
+	return &CmsCtx{BaseContext: cho.MakeBaseContext(w, r), site: s}
 }
 
 // Engine 引擎（AddHook/Query/...）。
-func (s *Site) Engine() core.Engine { return s.eng }
+func (s *Site) Engine() core.Engine { return s.engine }
 
 // DB 底层数据库句柄（逃生舱 — admin 账号表等）。
 func (s *Site) DB() *dba.SQL { return s.db }
 
-// Config 站点自定义配置（YAML config 段 — 插件读约定 key; nil = 未配置）。
-func (s *Site) Config() map[string]any { return s.config }
+// BaseDir 站点根目录（固定路径派生 — 插件/站点自查）。
+func (s *Site) BaseDir() string { return s.basedir }
 
 // Func 注册模板函数。
 func (s *Site) Func(name string, fn any) {
-	s.funcs[name] = fn
-	s.rend.Func(name, fn)
+	s.render.Func(name, fn)
 }
 
-// Get / Post 自定义路由（handler 即 cho.Handler — 无返回, 错误内部处理）。
-func (s *Site) Get(path string, h func(*CmsCtx))    { s.r.Get(path, h) }
-func (s *Site) Post(path string, h func(*CmsCtx))   { s.r.Post(path, h) }
-func (s *Site) Put(path string, h func(*CmsCtx))    { s.r.Put(path, h) }
-func (s *Site) Delete(path string, h func(*CmsCtx)) { s.r.Delete(path, h) }
+// Router 路由器（cho 实例 — 站点/插件挂路由/中间件: Router().Get/Post/UseCtx/Group）。
+func (s *Site) Router() *cho.Cho[*CmsCtx] { return s.router }
 
-// Group 路由组（中间件/子组 — admin 挂载用）。
-func (s *Site) Group(prefix string, fn func(*cho.Cho[*CmsCtx])) { s.r.Group(prefix, fn) }
+// Debug 开发模式（配置期调 — 渲染错误显示详情页）。
+func (s *Site) Debug(on bool) { s.debug = on }
 
-// Admin 后台认证组（自动登录守卫）— 插件/站点在 NewSite 之后直接注册
-// 受保护端点（静态注册 — 无 hook 无时序; hook 只做响应式数据查询）。
-func (s *Site) Admin() *cho.Cho[*CmsCtx] {
-	if s.adminGroup == nil {
-		panic("web: admin group not mounted (NewSite first)")
+// Handler 路由器（Start 后有效; HostMux 用）。
+func (s *Site) Handler() http.Handler {
+	if !s.started {
+		panic("web: Handler before Start")
 	}
-	return s.adminGroup
+	return s.router
 }
 
-// Handler 路由器（HostMux 用）。
-func (s *Site) Handler() http.Handler { return s.r }
-
-// SetNotFound 404 处理器（cho 转发）。
-func (s *Site) SetNotFound(h func(*CmsCtx)) { s.r.SetNotFound(h) }
-
-// openDB 打开 SQLite（路径自动建目录）。
-func openDB(path string) (*dba.SQL, error) {
+// openDB 打开 SQLite（固定路径 + slog.Default 日志）— panic 失败。
+func openDB(path string) *dba.SQL {
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return nil, err
+			panic("web: mkdir db dir: " + err.Error())
 		}
 	}
 	// SQLite 外键默认关 — 每连接开启（级联删除 auth 等依赖 FK 生效）
-	return dba.Open("sqlite", path+"?_pragma=foreign_keys(1)")
+	db, err := dba.Open("sqlite", path+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		panic("web: open db: " + err.Error())
+	}
+	return db.SetLogger(dba.NewLogger(slog.Default(), 0, false))
 }
 
-// loadTypes 加载类型定义（yaml 文件; Kinds 先注册 — 类型定义引用到才校验通过）。
-func loadTypes(path string, kinds []types.Kind) (*types.Types, error) {
+// loadTypes 加载类型定义（yaml; 失败 panic — fail loud）。
+func loadTypes(path string) *types.Types {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		panic("web: read types: " + err.Error())
 	}
 	ts := types.New()
-	for _, k := range kinds {
-		ts.RegisterKind(k)
-	}
 	if err := ts.Load(data); err != nil {
-		return nil, err
+		panic("web: load types: " + err.Error())
 	}
-	return ts, nil
+	return ts
 }
 
-// CmsCtx 请求上下文（渲染 + 响应方法 + 引擎访问 + 当前用户）。
-type CmsCtx struct {
-	*cho.BaseContext
-	site       *Site
-	user       *core.Node // 当前登录用户（惰性解析 — 每请求缓存）
-	userLoaded bool
+// setupApi 内容/认证 API 模块: /api 组（节点 CRUD/tree/upload/mine/auth 通用）。
+func (s *Site) setupApi() {
+	s.router.Group("/api", func(g *cho.Cho[*CmsCtx]) {
+		s.mountNodeApi(g)
+		s.mountAuth(g)
+	})
 }
 
-// Engine 引擎访问（handler 里查数据）。
-func (c *CmsCtx) Engine() core.Engine { return c.site.eng }
-
-// Render 按候选渲染（node--{type} 级联 → 数据注入）。
-func (c *CmsCtx) Render(candidates []string, data map[string]any) {
-	if c.site.rend == nil {
-		c.String(http.StatusInternalServerError, "render engine not ready")
-		return
-	}
-	// 页面上下文注入（HookRender — 站点放 Page/导航等; 与自定义路由页一致）
-	if err := c.site.eng.Hooks().Fire(HookRender, c, data); err != nil {
-		c.String(http.StatusInternalServerError, "render hook: "+err.Error())
-		return
-	}
-	// buffer 先行: 渲染成功才写（失败不留半截页面 + 状态码正确）
-	var buf bytes.Buffer
-	if err := c.site.rend.Render(&buf, candidates, data); err != nil {
-		c.site.renderError(c, candidates, data, err)
-		return
-	}
-	c.SetHeader("Content-Type", "text/html; charset=utf-8")
-	_, _ = c.W.Write(buf.Bytes())
+// setupWeb 内容渲染模块: 默认首页 + 节点路由 + 404 出口。
+func (s *Site) setupWeb() {
+	s.router.Get("/", s.homeHandler)
+	s.router.Get("/node/{id}", s.nodeHandler)
+	s.router.SetNotFound(s.render404)
 }
 
-// Func 模板函数（站点 hook 内注册 — 等价 site.Func）。
-func (c *CmsCtx) Func(name string, fn any) { c.site.Func(name, fn) }
+// homeHandler 默认首页（渲染 home.html; HookRender 已注入页面上下文 — 站点
+// home 区块经 hook 注入数据）。站点自定义 home 直接 site.Get("/") 覆盖（先注册先匹配）。
+func (s *Site) homeHandler(ctx *CmsCtx) {
+	ctx.Render([]string{"home.html"}, map[string]any{})
+}
 
-// mount 绑定全部前台路由（静态/上传/API/内容）+ admin — 目录配置空则跳过。
-func (s *Site) mount(spec SiteSpec) {
-	// 静态资源（带 ?w=/h=/mode= 参数 = 图片裁剪）
-	if spec.Static != "" {
-		fs := http.StripPrefix("/static", http.FileServer(http.Dir(spec.Static)))
-		s.Get("/static/*", func(ctx *CmsCtx) { serveImg(spec.Static, "/static/", ctx, fs) })
+// serveFiles 服务文件端点: Fire HookServeFile（插件可改路径）+ ServeFile 兜底。
+func (s *Site) serveFiles(pattern, baseDir, prefix string) {
+	s.router.Get(pattern, func(ctx *CmsCtx) {
+		rel := strings.TrimPrefix(ctx.R.URL.Path, prefix)
+		filePath := filepath.Join(baseDir, filepath.FromSlash(rel))
+		// Fire — 插件（imgproc 等）可改 filePath（处理）
+		if err := s.engine.Hooks().Fire(HookServeFile, ctx, &filePath); err != nil {
+			ctx.String(http.StatusInternalServerError, "serve file: "+err.Error())
+			return
+		}
+		// 兜底 — 用（可能被插件改的）filePath 服务
+		http.ServeFile(ctx.W, ctx.R, filePath)
+	})
+}
+
+// setupFiles 建目录（不存在自动建）+ 挂文件服务端点。
+func (s *Site) setupFiles(dir, pattern, prefix string) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		panic("web: mkdir: " + err.Error())
 	}
-	// 上传文件服务（图片裁剪同静态）
-	if spec.Uploads != "" {
-		fs := http.StripPrefix("/uploads", http.FileServer(http.Dir(spec.Uploads)))
-		s.Get("/uploads/*", func(ctx *CmsCtx) { serveImg(spec.Uploads, "/uploads/", ctx, fs) })
-	}
-	// 记录 API（公开只读; Lisp filter 直通）+ 公开创建（create 规则校验）
-	s.Get("/api/nodes/{type}", s.apiNodes)
-	s.mountNodeAPI()
-	// 认证 API（注册/登录/登出/me/bind）
-	s.mountAuth()
-	// 内容路由 + 404 统一出口
-	s.Get("/node/{id}", s.nodeHandler)
-	s.SetNotFound(s.render404)
-	// admin 后台（/admin 组 — 登录保护; 上传目录空 = 禁用上传）
-	s.mountAdmin(spec.Uploads)
+	s.serveFiles(pattern, dir, prefix)
 }

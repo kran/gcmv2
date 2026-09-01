@@ -27,7 +27,7 @@ type AuthMethod struct {
 	NodeID     int64     `db:"node_id" json:"node_id"`
 	Method     string    `db:"method" json:"method"`
 	Identifier string    `db:"identifier" json:"identifier"`
-	Secret     string    `db:"secret" json:"-"` // bcrypt hash — 永不输出
+	Data       Fields    `db:"data" json:"-"` // 凭证 JSON（各方式自定义 — password hash/oauth token...; 永不输出）
 	CreatedAt  time.Time `db:"created_at" json:"created_at"`
 	UpdatedAt  time.Time `db:"updated_at" json:"updated_at"`
 }
@@ -47,7 +47,7 @@ const SessionTTL = 7 * 24 * time.Hour
 
 // RegisterAuth 注册: 事务内建 auth 类型节点 + 认证方式（原子）。
 // 返回节点 id。identifier 冲突 → 报错（UNIQUE 兜底 + 提前查重给友好错误）。
-func (s *Service) RegisterAuth(typeName, method, identifier, secret string, n *Node) (int64, error) {
+func (s *Service) RegisterAuth(typeName, method, identifier string, data Fields, n *Node) (int64, error) {
 	td, ok := s.types.Type(typeName)
 	if !ok {
 		return 0, fmt.Errorf("core: auth: type %q not defined", typeName)
@@ -58,9 +58,6 @@ func (s *Service) RegisterAuth(typeName, method, identifier, secret string, n *N
 	if method == "" || identifier == "" {
 		return 0, errors.New("core: auth: method and identifier required")
 	}
-	if len(secret) < 8 {
-		return 0, errors.New("core: auth: secret must be at least 8 characters")
-	}
 	// 查重（提前 — 友好错误; UNIQUE 兜底并发）
 	ex, err := s.FindAuth(typeName, method, identifier)
 	if err != nil {
@@ -68,10 +65,6 @@ func (s *Service) RegisterAuth(typeName, method, identifier, secret string, n *N
 	}
 	if ex != nil {
 		return 0, fmt.Errorf("core: auth: %s %q already registered", method, identifier)
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.DefaultCost)
-	if err != nil {
-		return 0, err
 	}
 	// 类型补全（n.Type 可能为空 — 以 typeName 为准）
 	if n == nil {
@@ -90,7 +83,7 @@ func (s *Service) RegisterAuth(typeName, method, identifier, secret string, n *N
 		now := time.Now()
 		if _, err := tx.Insert("auth_methods", &AuthMethod{
 			Type: typeName, NodeID: id, Method: method, Identifier: identifier,
-			Secret: string(hash), CreatedAt: now, UpdatedAt: now,
+			Data: data, CreatedAt: now, UpdatedAt: now,
 		}).Exec(); err != nil {
 			return fmt.Errorf("core: auth: insert method: %w", err)
 		}
@@ -109,21 +102,22 @@ func (s *Service) FindAuth(typeName, method, identifier string) (*AuthMethod, er
 		typeName, method, identifier).FetchOne[AuthMethod]()
 }
 
-// VerifyPassword 验密（bcrypt 比对 — 与用户名/方式同查）。
+// VerifyPassword 验密（password 方式 — 比较 Data["password"] 与输入; bcrypt）。
 func (s *Service) VerifyPassword(am *AuthMethod, secret string) bool {
 	if am == nil {
 		return false
 	}
-	return bcrypt.CompareHashAndPassword([]byte(am.Secret), []byte(secret)) == nil
+	hash := am.Data.Str("password")
+	if hash == "" {
+		return false
+	}
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(secret)) == nil
 }
 
 // AddAuthMethod 给已有节点加登录方式（bind — 登录后绑定新方式）。
-func (s *Service) AddAuthMethod(typeName string, nodeID int64, method, identifier, secret string) error {
+func (s *Service) AddAuthMethod(typeName string, nodeID int64, method, identifier string, data Fields) error {
 	if method == "" || identifier == "" {
 		return errors.New("core: auth: method and identifier required")
-	}
-	if len(secret) < 8 {
-		return errors.New("core: auth: secret must be at least 8 characters")
 	}
 	ex, err := s.FindAuth(typeName, method, identifier)
 	if err != nil {
@@ -132,14 +126,10 @@ func (s *Service) AddAuthMethod(typeName string, nodeID int64, method, identifie
 	if ex != nil {
 		return fmt.Errorf("core: auth: %s %q already registered", method, identifier)
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.DefaultCost)
-	if err != nil {
-		return err
-	}
 	now := time.Now()
 	if _, err := s.db.Insert("auth_methods", &AuthMethod{
 		Type: typeName, NodeID: nodeID, Method: method, Identifier: identifier,
-		Secret: string(hash), CreatedAt: now, UpdatedAt: now,
+		Data: data, CreatedAt: now, UpdatedAt: now,
 	}).Exec(); err != nil {
 		return err
 	}

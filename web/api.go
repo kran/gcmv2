@@ -3,6 +3,7 @@ package web
 import (
 	"net/http"
 
+	"github.com/kran/cho"
 	"github.com/kran/gcmv2/core"
 )
 
@@ -29,13 +30,16 @@ const (
 	HookBeforeDelete = "web.before_delete"
 )
 
-// defineNodeHooks 声明 node CRUD hook（NewSite 装配调用）。
-func defineNodeHooks(svc core.Engine) error {
-	return svc.Hooks().Define(
-		core.HookSpec{Name: HookBeforeCreate, Proto: func(*CmsCtx, *core.Node) error { return nil }},
-		core.HookSpec{Name: HookBeforeUpdate, Proto: func(*CmsCtx, int64, *core.NodePatch) error { return nil }},
-		core.HookSpec{Name: HookBeforeDelete, Proto: func(*CmsCtx, int64) error { return nil }},
-	)
+// defineNodeHooks 声明 node CRUD hook（New 装配调用）。
+func defineNodeHooks(svc core.Engine) {
+	err := svc.Hooks().Define(map[string]any{
+		HookBeforeCreate: func(*CmsCtx, *core.Node) error { return nil },
+		HookBeforeUpdate: func(*CmsCtx, int64, *core.NodePatch) error { return nil },
+		HookBeforeDelete: func(*CmsCtx, int64) error { return nil },
+	})
+	if err != nil {
+		panic("web: define node hooks: " + err.Error())
+	}
 }
 
 // ── 路由 handler ──
@@ -44,7 +48,7 @@ func defineNodeHooks(svc core.Engine) error {
 // 站点 hook 校验后 CreateNode。
 func (s *Site) apiCreateNode(ctx *CmsCtx) {
 	typ := ctx.PathValue("type")
-	if _, ok := s.eng.Types().Type(typ); !ok {
+	if _, ok := s.engine.Types().Type(typ); !ok {
 		ctx.Error(http.StatusBadRequest, "type not found")
 		return
 	}
@@ -60,15 +64,15 @@ func (s *Site) apiCreateNode(ctx *CmsCtx) {
 		return
 	}
 	// 权限: 无 hook 定义 = 默认拒绝（安全 — 站点必须显式放行该类型）
-	if !s.eng.Hooks().HasHook(HookBeforeCreate) {
+	if !s.engine.Hooks().HasHook(HookBeforeCreate) {
 		ctx.Error(http.StatusForbidden, "create not allowed")
 		return
 	}
-	if err := s.eng.Hooks().Fire(HookBeforeCreate, ctx, &node); err != nil {
+	if err := s.engine.Hooks().Fire(HookBeforeCreate, ctx, &node); err != nil {
 		ctx.Error(http.StatusForbidden, err.Error())
 		return
 	}
-	id, err := s.eng.CreateNode(&node)
+	id, err := s.engine.CreateNode(&node)
 	if err != nil {
 		ctx.Error(http.StatusBadRequest, err.Error())
 		return
@@ -83,7 +87,7 @@ func (s *Site) apiViewNode(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, "invalid id")
 		return
 	}
-	n, err := s.eng.GetNodeById(id)
+	n, err := s.engine.GetNodeById(id)
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, err.Error())
 		return
@@ -103,7 +107,7 @@ func (s *Site) apiUpdateNode(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, "invalid id")
 		return
 	}
-	if _, ok := s.eng.Types().Type(typ); !ok {
+	if _, ok := s.engine.Types().Type(typ); !ok {
 		ctx.Error(http.StatusBadRequest, "type not found")
 		return
 	}
@@ -114,15 +118,15 @@ func (s *Site) apiUpdateNode(ctx *CmsCtx) {
 		return
 	}
 	// 权限: 无 hook 默认拒绝
-	if !s.eng.Hooks().HasHook(HookBeforeUpdate) {
+	if !s.engine.Hooks().HasHook(HookBeforeUpdate) {
 		ctx.Error(http.StatusForbidden, "update not allowed")
 		return
 	}
-	if err := s.eng.Hooks().Fire(HookBeforeUpdate, ctx, id, &patch); err != nil {
+	if err := s.engine.Hooks().Fire(HookBeforeUpdate, ctx, id, &patch); err != nil {
 		ctx.Error(http.StatusForbidden, err.Error())
 		return
 	}
-	if err := s.eng.PatchNode(id, &patch); err != nil {
+	if err := s.engine.PatchNode(id, &patch); err != nil {
 		ctx.Error(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -136,15 +140,15 @@ func (s *Site) apiDeleteNode(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, "invalid id")
 		return
 	}
-	if !s.eng.Hooks().HasHook(HookBeforeDelete) {
+	if !s.engine.Hooks().HasHook(HookBeforeDelete) {
 		ctx.Error(http.StatusForbidden, "delete not allowed")
 		return
 	}
-	if err := s.eng.Hooks().Fire(HookBeforeDelete, ctx, id); err != nil {
+	if err := s.engine.Hooks().Fire(HookBeforeDelete, ctx, id); err != nil {
 		ctx.Error(http.StatusForbidden, err.Error())
 		return
 	}
-	if err := s.eng.DeleteNode(id); err != nil {
+	if err := s.engine.DeleteNode(id); err != nil {
 		ctx.Error(http.StatusNotFound, err.Error())
 		return
 	}
@@ -170,7 +174,7 @@ func (s *Site) apiMine(ctx *CmsCtx) {
 	size := int(ctx.QueryNum("size", 20))
 	if typ != "" {
 		f := `(and (= type {:typ}) (in ->author {:uid}))`
-		list, total, err := s.eng.QueryPage(core.ListQuery{Filter: f, Page: page, Size: size},
+		list, total, err := s.engine.QueryPage(core.ListQuery{Filter: f, Page: page, Size: size},
 			map[string]any{"typ": typ, "uid": u.ID})
 		if err != nil {
 			ctx.Error(http.StatusInternalServerError, err.Error())
@@ -180,7 +184,7 @@ func (s *Site) apiMine(ctx *CmsCtx) {
 		return
 	}
 	// 全部类型（当前用户所有发布）
-	list, err := s.eng.Query(core.ListQuery{
+	list, err := s.engine.Query(core.ListQuery{
 		Filter: `(in ->author {:uid})`, Size: size}, map[string]any{"uid": u.ID})
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, err.Error())
@@ -193,7 +197,7 @@ func (s *Site) apiMine(ctx *CmsCtx) {
 // 返回嵌套树 [{id, slug, display, children}]。前端组树或直接渲染。
 func (s *Site) apiTree(ctx *CmsCtx) {
 	typ := ctx.PathValue("type")
-	tree, err := s.eng.LoadTree(typ, "parent")
+	tree, err := s.engine.LoadTree(typ, "parent")
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, err.Error())
 		return
@@ -203,14 +207,15 @@ func (s *Site) apiTree(ctx *CmsCtx) {
 
 // ── mount（route 注册 — 单独 mountNodeAPI） ──
 
-// mountNodeAPI 挂载内容 node CRUD 路由。
-func (s *Site) mountNodeAPI() {
-	s.Get("/api/nodes/{type}/{id}", s.apiViewNode)
-	s.Post("/api/nodes/{type}", s.apiCreateNode)
-	s.Put("/api/nodes/{type}/{id}", s.apiUpdateNode)
-	s.Delete("/api/nodes/{type}/{id}", s.apiDeleteNode)
+// mountNodeApi 挂载内容 node CRUD 路由（到传入 Group — 已带 CORS）。
+func (s *Site) mountNodeApi(g *cho.Cho[*CmsCtx]) {
+	g.Get("/nodes/{type}", s.apiNodes)
+	g.Get("/nodes/{type}/{id}", s.apiViewNode)
+	g.Post("/nodes/{type}", s.apiCreateNode)
+	g.Put("/nodes/{type}/{id}", s.apiUpdateNode)
+	g.Delete("/nodes/{type}/{id}", s.apiDeleteNode)
 	// 通用: 上传 / 我的发布 / 树数据
-	s.Post("/api/upload", s.apiUpload)
-	s.Get("/api/nodes/mine", s.apiMine)
-	s.Get("/api/tree/{type}", s.apiTree)
+	g.Post("/upload", s.apiUpload)
+	g.Get("/nodes/mine", s.apiMine)
+	g.Get("/tree/{type}", s.apiTree)
 }

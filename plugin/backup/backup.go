@@ -22,6 +22,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kran/cho"
+	"github.com/kran/gcmv2/core"
 	"github.com/kran/gcmv2/web"
 )
 
@@ -32,10 +34,16 @@ type backupItem struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// Mount 安装备份插件（后台面板）。备份目录读 site.Config()["backups_dir"]
-// （缺省 "backups"）。
-func Mount(s *web.Site) {
-	dir, _ := s.Config()["backups_dir"].(string)
+// Options 备份插件配置（站点侧负责 — 结构体传参）。
+type Options struct {
+	// BackupsDir 备份目录（缺省 "backups"; 相对基于目录）。
+	BackupsDir string
+}
+
+// Mount 安装备份插件（后台面板）。经 AdminMount hook 挂受保护端点;
+// AdminPanel hook 提供面板菜单。
+func Mount(s *web.Site, opts Options) {
+	dir := opts.BackupsDir
 	if dir == "" {
 		dir = "backups"
 	}
@@ -44,24 +52,22 @@ func Mount(s *web.Site) {
 	}
 	b := &backend{site: s, dir: dir}
 
-	// 受保护端点: Site.Admin() 认证组静态注册（自动登录守卫 — 无 hook 无时序）
-	s.Admin().Post("/backup", b.create)
-	s.Admin().Get("/backup", b.list)
-	s.Admin().Get("/backup/download/{name}", b.download)
-	s.Admin().Delete("/backup/{name}", b.delete)
-	// 面板组件（插件自己的 Vue SFC — 运行时编译）
-	s.Admin().Get("/backup/panel.vue", b.panel)
-
-	// 面板菜单: hook 只返回数据 — /admin/panels 每次请求 Fire（响应式）
-	if err := s.Engine().Hooks().AddHook(web.AdminMount,
-		func(ctx *web.CmsCtx, panels *[]web.AdminPanel) error {
-			*panels = append(*panels, web.AdminPanel{
-				Path: "/backup", Title: "备份管理", Vue: "/admin/backup/panel.vue",
-			})
-			return nil
-		}); err != nil {
-		panic("backup: panel hook: " + err.Error())
-	}
+	// 受保护端点: AdminMount hook — Start 时 fire 传认证组, 插件拿组挂（替代 Site.Admin）
+	s.Hook(web.HookAdminMount, func(g *cho.Cho[*web.CmsCtx]) error {
+		g.Post("/backup", b.create)
+		g.Get("/backup", b.list)
+		g.Get("/backup/download/{name}", b.download)
+		g.Delete("/backup/{name}", b.delete)
+		g.Get("/backup/panel.vue", b.panel)
+		return nil
+	})
+	// 面板菜单: AdminPanel hook（/admin/panels 每次请求 Fire — 响应式）
+	s.Hook(web.HookAdminPanel, func(ctx *web.CmsCtx, panels *core.List[web.AdminPanel]) error {
+		panels.Append(web.AdminPanel{
+			Path: "/backup", Title: "备份管理", Vue: "/admin/backup/panel.vue",
+		})
+		return nil
+	})
 }
 
 // backend 备份 handler 组。

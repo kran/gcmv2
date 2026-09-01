@@ -71,3 +71,20 @@ func TestAddValidation(t *testing.T) {
 		t.Fatalf("valid add: %v", err)
 	}
 }
+
+// hook panic 被 recover — 返回包装 err, 不继续剩余 handler。
+func TestPanicRecover(t *testing.T) {
+	b := NewHookBus()
+	b.DefineHook("e", func() error { return nil })
+	var called []string
+	b.AddHook("e", func() error { called = append(called, "a"); return nil })
+	b.AddHook("e", func() error { panic("boom") })
+	b.AddHook("e", func() error { called = append(called, "c"); return nil })
+	err := b.Fire("e")
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("must recover panic, got %v", err)
+	}
+	if len(called) != 1 || called[0] != "a" {
+		t.Fatalf("must stop after panic, got %v", called)
+	}
+}

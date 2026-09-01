@@ -36,14 +36,22 @@ types:
 		[]byte(`node:{{ .Node.Display }}|{{ .Node.ID }}`), 0o644)
 	os.WriteFile(filepath.Join(tdir, "404.html"),
 		[]byte(`404:{{ .Path }}`), 0o644)
-	site, err := NewSite(SiteSpec{
-		DBPath: filepath.Join(dir, "test.db"), Types: tp,
-		Templates: tdir, Migrate: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	os.WriteFile(filepath.Join(tdir, "home.html"),
+		[]byte(`home`), 0o644)
+	site := New(dir)
+	site.Start()
 	return site
+}
+
+func TestDefaultHome(t *testing.T) {
+	s := testSiteWithTemplates(t)
+	w := do(s, "GET", "/", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("home = %d: %s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != "home" {
+		t.Fatalf("home body = %q", w.Body.String())
+	}
 }
 
 func TestNodeHandlerByID(t *testing.T) {
@@ -106,7 +114,7 @@ func TestNodeHandlerMissing404(t *testing.T) {
 func TestNodeHandlerCandidates(t *testing.T) {
 	// node--{type}.html 优先于 node.html
 	s := testSiteWithTemplates(t)
-	tdir := s.rend.root
+	tdir := s.render.root
 	os.WriteFile(filepath.Join(tdir, "node--article.html"),
 		[]byte(`article-tpl:{{ .Node.Display }}`), 0o644)
 	id, _ := s.Engine().CreateNode(&core.Node{Type: "article", Display: "候选", Status: 1})
@@ -124,7 +132,7 @@ func TestDebugErrorPage(t *testing.T) {
 	s := testSiteWithTemplates(t)
 	s.debug = true
 	// 破坏模板（语法错误）→ debug 详情页
-	tdir := s.rend.root
+	tdir := s.render.root
 	os.WriteFile(filepath.Join(tdir, "node.html"), []byte(`{{ bad syntax`), 0o644)
 	id, _ := s.Engine().CreateNode(&core.Node{Type: "article", Display: "x", Status: 1})
 	w := do(s, "GET", "/node/"+itoa(id), nil)

@@ -26,19 +26,22 @@ func New(db *dba.SQL, ts *types.Types) *Service {
 	}
 
 	//define hooks
-	err := s.hooks.Define(
-		HookSpec{Name: HookNodeBeforeCreate, Proto: func(*dba.SQL, *Node) error { return nil }},
-		HookSpec{Name: HookNodeAfterCreate, Proto: func(*dba.SQL, *Node) error { return nil }},
-		HookSpec{Name: HookNodeBeforeUpdate, Proto: func(*dba.SQL, *NodePatch) error { return nil }},
-		HookSpec{Name: HookNodeAfterUpdate, Proto: func(*dba.SQL, *Node) error { return nil }},
-		HookSpec{Name: HookNodeBeforeDelete, Proto: func(*dba.SQL, int64) error { return nil }},
-		HookSpec{Name: HookNodeAfterDelete, Proto: func(*dba.SQL, int64) error { return nil }},
-	)
+	err := s.hooks.Define(map[string]any{
+		HookNodeBeforeCreate: func(*dba.SQL, *Node) error { return nil },
+		HookNodeAfterCreate:  func(*dba.SQL, *Node) error { return nil },
+		HookNodeBeforeUpdate: func(*dba.SQL, *NodePatch) error { return nil },
+		HookNodeAfterUpdate:  func(*dba.SQL, *Node) error { return nil },
+		HookNodeBeforeDelete: func(*dba.SQL, int64) error { return nil },
+		HookNodeAfterDelete:  func(*dba.SQL, int64) error { return nil },
+	})
 	if err != nil {
 		panic("core: define standard hooks: " + err.Error())
 	}
 
-	s.MigrateUp()
+	if _, err = s.MigrateUp(); err != nil {
+		panic("core: migrate error: " + err.Error())
+	}
+
 	s.initSearch()
 	return s
 }

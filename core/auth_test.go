@@ -2,6 +2,8 @@ package core
 
 import (
 	"testing"
+
+	"golang.org/x/crypto/bcrypt"
 	"time"
 )
 
@@ -27,7 +29,8 @@ func newAuthService(t *testing.T) *Service {
 
 func TestRegisterAuth(t *testing.T) {
 	s := newAuthService(t)
-	id, err := s.RegisterAuth("user", "email", "a@x.com", "password123",
+	hash, _ := bcrypt.GenerateFromPassword([]byte("password123"), bcrypt.DefaultCost)
+	id, err := s.RegisterAuth("user", "email", "a@x.com", Fields{"password": string(hash)},
 		&Node{Display: "张三", Fields: map[string]any{"name": "张三"}})
 	if err != nil {
 		t.Fatal(err)
@@ -52,44 +55,49 @@ func TestRegisterAuth(t *testing.T) {
 		t.Fatal("wrong password should not match")
 	}
 	// secret 列不可 JSON 输出（json:"-"）— 字段检查
-	if am.Secret == "password123" {
-		t.Fatal("secret must be hashed")
+	if am.Data.Str("password") == "password123" {
+		t.Fatal("password must be hashed")
 	}
 }
 
 func TestRegisterAuthDupIdentifier(t *testing.T) {
 	s := newAuthService(t)
-	if _, err := s.RegisterAuth("user", "email", "a@x.com", "password123", &Node{Display: "a"}); err != nil {
+	if _, err := s.RegisterAuth("user", "email", "a@x.com", Fields{"password": "x"}, &Node{Display: "a"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RegisterAuth("user", "email", "a@x.com", "password456", &Node{Display: "a"}); err == nil {
+	if _, err := s.RegisterAuth("user", "email", "a@x.com", Fields{"password": "x"}, &Node{Display: "a"}); err == nil {
 		t.Fatal("duplicate identifier should fail")
 	}
 	// 不同类型同 identifier 允许
-	if _, err := s.RegisterAuth("user", "phone", "13800138000", "password123", &Node{Display: "a"}); err != nil {
+	if _, err := s.RegisterAuth("user", "phone", "13800138000", Fields{"password": "x"}, &Node{Display: "a"}); err != nil {
 		t.Fatalf("different method should work: %v", err)
 	}
 }
 
 func TestRegisterAuthNotAuthType(t *testing.T) {
 	s := newAuthService(t)
-	if _, err := s.RegisterAuth("article", "email", "a@x.com", "password123", &Node{Display: "a"}); err == nil {
+	if _, err := s.RegisterAuth("article", "email", "a@x.com", Fields{"password": "x"}, &Node{Display: "a"}); err == nil {
 		t.Fatal("non-auth type should be rejected")
 	}
 }
 
-func TestRegisterAuthShortSecret(t *testing.T) {
+func TestRegisterAuthWechatNoPassword(t *testing.T) {
 	s := newAuthService(t)
-	if _, err := s.RegisterAuth("user", "email", "a@x.com", "short", &Node{Display: "a"}); err == nil {
-		t.Fatal("short secret should be rejected")
+	// wechat 方式无密码（data 空/任意）— 可注册
+	if _, err := s.RegisterAuth("user", "wechat", "openid_1", Fields{}, &Node{Display: "a"}); err != nil {
+		t.Fatalf("wechat no-password should register: %v", err)
+	}
+	am, _ := s.FindAuth("user", "wechat", "openid_1")
+	if am == nil || am.Data.Str("password") != "" {
+		t.Fatalf("wechat data should be empty password: %+v", am)
 	}
 }
 
 func TestAddRemoveAuthMethod(t *testing.T) {
 	s := newAuthService(t)
-	id, _ := s.RegisterAuth("user", "email", "a@x.com", "password123", &Node{Display: "a"})
+	id, _ := s.RegisterAuth("user", "email", "a@x.com", Fields{"password": "x"}, &Node{Display: "a"})
 	// 绑定第二种方式
-	if err := s.AddAuthMethod("user", id, "phone", "13800138000", "password456"); err != nil {
+	if err := s.AddAuthMethod("user", id, "phone", "13800138000", Fields{"password": "x"}); err != nil {
 		t.Fatal(err)
 	}
 	am, _ := s.FindAuth("user", "phone", "13800138000")
@@ -108,7 +116,7 @@ func TestAddRemoveAuthMethod(t *testing.T) {
 
 func TestSessionLifecycle(t *testing.T) {
 	s := newAuthService(t)
-	id, _ := s.RegisterAuth("user", "email", "a@x.com", "password123", &Node{Display: "a"})
+	id, _ := s.RegisterAuth("user", "email", "a@x.com", Fields{"password": "x"}, &Node{Display: "a"})
 	token, err := s.CreateSession(id)
 	if err != nil {
 		t.Fatal(err)
@@ -138,7 +146,7 @@ func TestSessionLifecycle(t *testing.T) {
 
 func TestSessionExpiry(t *testing.T) {
 	s := newAuthService(t)
-	id, _ := s.RegisterAuth("user", "email", "a@x.com", "password123", &Node{Display: "a"})
+	id, _ := s.RegisterAuth("user", "email", "a@x.com", Fields{"password": "x"}, &Node{Display: "a"})
 	token, _ := s.CreateSession(id)
 	// 手动过期
 	if _, err := s.db.Update("sessions", map[string]any{"expires_at": time.Now().Add(-time.Hour)},

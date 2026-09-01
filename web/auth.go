@@ -8,6 +8,7 @@ import (
 
 	"github.com/kran/cho"
 	"github.com/kran/gcmv2/core"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // ── 前台用户认证（cookie + Bearer 双轨 — 同一个 token 字符串） ──
@@ -55,23 +56,25 @@ type authBackend struct {
 	eng core.Engine
 }
 
-// defineAuthHooks 声明认证事件（NewSite 装配调用 — 站点 AddHook 前）。
-func defineAuthHooks(svc core.Engine) error {
-	return svc.Hooks().Define(
-		core.HookSpec{Name: HookAuthRegister, Proto: func(*CmsCtx, *RegisterInput, *core.Node) error { return nil }},
-		core.HookSpec{Name: HookAuthLogin, Proto: func(*CmsCtx, int64) error { return nil }},
-	)
+// defineAuthHooks 声明认证事件（New 装配调用 — 站点 AddHook 前）。
+func defineAuthHooks(svc core.Engine) {
+	err := svc.Hooks().Define(map[string]any{
+		HookAuthRegister: func(*CmsCtx, *RegisterInput, *core.Node) error { return nil },
+		HookAuthLogin:    func(*CmsCtx, int64) error { return nil },
+	})
+	if err != nil {
+		panic("web: define auth hooks: " + err.Error())
+	}
 }
 
-// mountAuth 挂载认证路由（公开）。
-func (s *Site) mountAuth() {
-	b := &authBackend{eng: s.eng}
-	s.Group("/api/auth", func(g *cho.Cho[*CmsCtx]) {
-		g.Post("/register", b.register)
-		g.Post("/login", b.login)
-		g.Post("/logout", b.logout)
-		g.Get("/me", b.me)
-		g.Post("/bind", b.bind)
+// mountAuth 挂载通用认证路由（到传入 Group — 已带 CORS; 子组 /auth）。
+// 只含方式无关的登录态操作（logout/me/bind）; register/login 由各登录插件挂载。
+func (s *Site) mountAuth(g *cho.Cho[*CmsCtx]) {
+	b := &authBackend{eng: s.engine}
+	g.Group("/auth", func(ag *cho.Cho[*CmsCtx]) {
+		ag.Post("/logout", b.logout)
+		ag.Get("/me", b.me)
+		ag.Post("/bind", b.bind)
 	})
 }
 
@@ -90,86 +93,31 @@ func (c *CmsCtx) authToken() string {
 
 // ── handlers ───────────────────────────────────
 
-// register 注册（一个事务: 节点 + 认证方式 + 会话 — core.RegisterAuth）;
-// HookAuthRegister 在落库前触发（站点改 fields/角色）。
-func (b *authBackend) register(ctx *CmsCtx) {
-	var in RegisterInput
-	if err := ctx.BindJson(&in); err != nil {
-		ctx.Error(http.StatusBadRequest, err.Error())
-		return
-	}
-	if in.Type == "" {
-		in.Type = "user"
-	}
-	if in.Method == "" || in.Identifier == "" {
-		ctx.Error(http.StatusBadRequest, "method and identifier required")
-		return
-	}
-	n := &core.Node{Display: in.Display, Fields: in.Fields}
-	// 站点敏感字段兜底（hook 可改 fields/拒绝）
-	if err := ctx.site.eng.Hooks().Fire(HookAuthRegister, ctx, &in, n); err != nil {
-		ctx.Error(http.StatusBadRequest, err.Error())
-		return
-	}
-	id, err := ctx.site.eng.RegisterAuth(in.Type, in.Method, in.Identifier, in.Secret, n)
+// AuthSession 发会话（token + cookie 双轨）— 登录插件（password/wechat）登录成功后复用。
+// 返回 token; 响应已写 {token, user}。
+func AuthSession(ctx *CmsCtx, eng core.Engine, nodeID int64) (string, error) {
+	token, err := eng.CreateSession(nodeID)
 	if err != nil {
-		ctx.Error(http.StatusBadRequest, err.Error())
-		return
-	}
-	// 注册即登录
-	b.issueSession(ctx, id)
-}
-
-// login 登录（FindAuth + 验密 → 会话）。
-func (b *authBackend) login(ctx *CmsCtx) {
-	var in LoginInput
-	if err := ctx.BindJson(&in); err != nil {
-		ctx.Error(http.StatusBadRequest, err.Error())
-		return
-	}
-	if in.Type == "" {
-		in.Type = "user"
-	}
-	am, err := ctx.site.eng.FindAuth(in.Type, in.Method, in.Identifier)
-	if err != nil {
-		ctx.Error(http.StatusInternalServerError, "internal error")
-		return
-	}
-	if am == nil || !ctx.site.eng.VerifyPassword(am, in.Secret) {
-		ctx.Error(http.StatusUnauthorized, "invalid credentials")
-		return
-	}
-	if err := ctx.site.eng.Hooks().Fire(HookAuthLogin, ctx, am.NodeID); err != nil {
-		ctx.Error(http.StatusInternalServerError, err.Error())
-		return
-	}
-	b.issueSession(ctx, am.NodeID)
-}
-
-// issueSession 建会话 + 双轨下发（cookie + 响应 token）。
-func (b *authBackend) issueSession(ctx *CmsCtx, nodeID int64) {
-	token, err := ctx.site.eng.CreateSession(nodeID)
-	if err != nil {
-		ctx.Error(http.StatusInternalServerError, "internal error")
-		return
+		return "", err
 	}
 	http.SetCookie(ctx.W, &http.Cookie{
 		Name: authCookie, Value: token,
 		Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
 		Expires: time.Now().Add(core.SessionTTL),
 	})
-	u, err := ctx.site.eng.GetNodeById(nodeID)
-	if err != nil || u == nil {
+	u, err := eng.GetNodeById(nodeID)
+	if err == nil && u != nil {
+		_ = ctx.Json(http.StatusOK, map[string]any{"token": token, "user": u})
+	} else {
 		_ = ctx.Json(http.StatusOK, map[string]any{"token": token})
-		return
 	}
-	_ = ctx.Json(http.StatusOK, map[string]any{"token": token, "user": u})
+	return token, nil
 }
 
 // logout 登出（删 session — cookie/Bearer 同时失效）。
 func (b *authBackend) logout(ctx *CmsCtx) {
 	if t := ctx.authToken(); t != "" {
-		_ = ctx.site.eng.DeleteSession(t)
+		_ = ctx.site.engine.DeleteSession(t)
 	}
 	http.SetCookie(ctx.W, &http.Cookie{Name: authCookie, Value: "", Path: "/", MaxAge: -1})
 	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
@@ -200,7 +148,14 @@ func (b *authBackend) bind(ctx *CmsCtx) {
 	if in.Type == "" {
 		in.Type = "user"
 	}
-	if err := ctx.site.eng.AddAuthMethod(in.Type, u.ID, in.Method, in.Identifier, in.Secret); err != nil {
+	data := core.Fields{}
+	if in.Method == "email" || in.Method == "phone" {
+		hash, _ := bcrypt.GenerateFromPassword([]byte(in.Secret), bcrypt.DefaultCost)
+		data["password"] = string(hash)
+	} else {
+		data["password"] = in.Secret
+	}
+	if err := ctx.site.engine.AddAuthMethod(in.Type, u.ID, in.Method, in.Identifier, data); err != nil {
 		ctx.Error(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -220,11 +175,11 @@ func (c *CmsCtx) User() *core.Node {
 	if t == "" {
 		return nil
 	}
-	id, err := c.site.eng.ValidSession(t)
+	id, err := c.site.engine.ValidSession(t)
 	if err != nil || id == 0 {
 		return nil
 	}
-	u, err := c.site.eng.GetNodeById(id)
+	u, err := c.site.engine.GetNodeById(id)
 	if err != nil {
 		return nil
 	}

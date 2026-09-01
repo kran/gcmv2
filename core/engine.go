@@ -40,10 +40,10 @@ type Engine interface {
 	ExpandPathMany(ids []int64, expr string) ([]*Node, error)
 
 	// ── 认证（前台用户 — 多登录方式 + 会话） ──
-	RegisterAuth(typeName, method, identifier, secret string, n *Node) (int64, error)
+	RegisterAuth(typeName, method, identifier string, data Fields, n *Node) (int64, error)
 	FindAuth(typeName, method, identifier string) (*AuthMethod, error)
 	VerifyPassword(am *AuthMethod, secret string) bool
-	AddAuthMethod(typeName string, nodeID int64, method, identifier, secret string) error
+	AddAuthMethod(typeName string, nodeID int64, method, identifier string, data Fields) error
 	RemoveAuthMethod(typeName, method, identifier string) error
 	CreateSession(nodeID int64) (string, error)
 	ValidSession(token string) (int64, error)

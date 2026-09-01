@@ -17,17 +17,15 @@ func NewHostMux() *HostMux {
 }
 
 // Add 注册站点 — hosts 匹配 Host 头（"example.com" 或 "example.com:8080"）。
-// 内部 NewSite 装配（迁移 → 引擎 → 路由）, 失败返回 error（不吞）;
-// 返回的 *Site 供站点业务直接挂函数/路由。
-func (m *HostMux) Add(hosts []string, spec SiteSpec) (*Site, error) {
-	site, err := NewSite(spec)
-	if err != nil {
-		return nil, err
-	}
+// New（define hooks + 建 router）→ Setup（mount 路由 — 幂等带锁）; 返回 setup 后 site。
+// 站点业务（Hook/UseCtx）应在新之前/Add 前完成 — Add 即 setup, 之后不可再改配置期。
+func (m *HostMux) Add(hosts []string, basedir string) *Site {
+	site := New(basedir)
+	site.Setup()
 	for _, h := range hosts {
 		m.routes[normalizeHost(h)] = site
 	}
-	return site, nil
+	return site
 }
 
 // SetFallback 兜底站点（未匹配 Host 时; 可选）。

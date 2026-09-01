@@ -35,8 +35,16 @@ import (
 //
 //	{{ $n.Fields.cover | oss 600 450 }}   → args = [600 450 url] — url 在最后
 //	{{ oss $n.Fields.cover 600 450 }}     → args = [url 600 450] — url 在首位
-func Mount(s *web.Site) {
-	bucket, _ := s.Config()["oss_bucket"].(string)
+//
+// Options OSS 插件配置（站点侧负责）。
+type Options struct {
+	// Bucket OSS 桶（空 = 本地模式 — 同一 x-oss-process 参数走 imgproc）。
+	Bucket string
+}
+
+// Mount 安装 OSS 插件。
+func Mount(s *web.Site, opts Options) {
+	bucket := opts.Bucket
 	bucket = strings.TrimSuffix(bucket, "/")
 	s.Func("oss", func(args ...any) string {
 		if len(args) == 0 {

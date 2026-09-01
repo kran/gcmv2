@@ -19,9 +19,9 @@ func (s *Site) nodeHandler(ctx *CmsCtx) {
 	var n *core.Node
 	var err error
 	if id, e := strconv.ParseInt(raw, 10, 64); e == nil {
-		n, err = s.eng.GetNodeById(id)
+		n, err = s.engine.GetNodeById(id)
 	} else {
-		n, err = s.eng.GetNodeBySlug(raw)
+		n, err = s.engine.GetNodeBySlug(raw)
 	}
 	if err != nil {
 		slog.Error("node lookup failed", "path", raw, "err", err)
@@ -33,20 +33,21 @@ func (s *Site) nodeHandler(ctx *CmsCtx) {
 		return
 	}
 	// 节点数据增强（站点 hook — url 注入等）
-	if err := s.eng.Hooks().Fire(HookNodeEnrich, ctx, n); err != nil {
+	if err := s.engine.Hooks().Fire(HookNodeEnrich, ctx, n); err != nil {
 		slog.Error("node enrich hook failed", "path", raw, "err", err)
 		ctx.String(http.StatusInternalServerError, "500 internal server error")
 		return
 	}
 	data := map[string]any{"Node": n, "ID": n.ID}
 	// 渲染候选（节点级联 + 站点 hook 追加）
-	cands := nodeCandidates(n)
-	if err := s.eng.Hooks().Fire(HookCandidates, ctx, n, &cands); err != nil {
+	cands := core.NewList[string]()
+	cands.Append(nodeCandidates(n)...)
+	if err := s.engine.Hooks().Fire(HookCandidates, ctx, n, cands); err != nil {
 		slog.Error("candidates hook failed", "path", raw, "err", err)
 		ctx.String(http.StatusInternalServerError, "500 internal server error")
 		return
 	}
-	ctx.Render(cands, data)
+	ctx.Render(cands.Items(), data)
 }
 
 // render404 统一 404 出口（404.html 或纯文本）。
@@ -54,8 +55,8 @@ func (s *Site) render404(ctx *CmsCtx) {
 	// buffer 先行: 渲染成功才写状态 + body（失败走纯文本, 不残留半截页面）
 	var buf bytes.Buffer
 	data := map[string]any{"Path": ctx.R.URL.Path}
-	_ = s.eng.Hooks().Fire(HookRender, ctx, data) // 404 上下文失败不阻断 404 页
-	err := s.rend.Render(&buf, []string{"404.html"}, data)
+	_ = s.engine.Hooks().Fire(HookRender, ctx, data) // 404 上下文失败不阻断 404 页
+	err := s.render.Render(&buf, []string{"404.html"}, data)
 	if err == nil {
 		ctx.SetHeader("Content-Type", "text/html; charset=utf-8")
 		ctx.W.WriteHeader(http.StatusNotFound)
@@ -101,7 +102,7 @@ func (s *Site) apiNodes(ctx *CmsCtx) {
 		f = `(and (= type {:typ}) ` + filter + `)`
 	}
 	q := core.ListQuery{Filter: f, Sort: sort, Expand: expand, Page: page, Size: size}
-	list, total, err := s.eng.QueryPage(q, map[string]any{"typ": typ})
+	list, total, err := s.engine.QueryPage(q, map[string]any{"typ": typ})
 	if err != nil {
 		// filter 编译错误 → 400（客户端参数）
 		ctx.String(http.StatusBadRequest, "api: "+err.Error())

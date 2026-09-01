@@ -32,30 +32,30 @@ import (
 	"jaytaylor.com/html2text"
 )
 
-// RenderEngine 渲染引擎: 模板根目录 + 函数表 + 核心服务（查询注入源）。
-type RenderEngine struct {
+// Render 渲染引擎: 模板根目录 + 函数表 + 核心服务（查询注入源）。
+type Render struct {
 	mu    sync.RWMutex
 	root  string
 	funcs template.FuncMap // 自定义函数（查询函数 + 站点业务函数）
 	eng   core.Engine
 }
 
-// NewRenderEngine 建渲染引擎。root 是模板目录; svc 提供查询函数。
-func NewRenderEngine(root string, eng core.Engine) *RenderEngine {
-	e := &RenderEngine{root: root, eng: eng, funcs: template.FuncMap{}}
+// NewRender 建渲染引擎。root 是模板目录; svc 提供查询函数。
+func NewRender(root string, eng core.Engine) *Render {
+	e := &Render{root: root, eng: eng, funcs: template.FuncMap{}}
 	maps.Copy(e.funcs, e.queryFuncs())
 	return e
 }
 
 // Func 注册自定义模板函数（站点项目扩展, 如业务查询）。
-func (e *RenderEngine) Func(name string, fn any) {
+func (e *Render) Func(name string, fn any) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.funcs[name] = fn
 }
 
 // Render 按候选序取第一个存在的模板执行（级联: node--{type}.html → node.html）。
-func (e *RenderEngine) Render(w io.Writer, candidates []string, data any) error {
+func (e *Render) Render(w io.Writer, candidates []string, data any) error {
 	for _, name := range candidates {
 		full := filepath.Join(e.root, name)
 		if _, err := os.Stat(full); err != nil {
@@ -69,23 +69,6 @@ func (e *RenderEngine) Render(w io.Writer, candidates []string, data any) error 
 	return fmt.Errorf("render: no template for %q (candidates: %s)", e.root, strings.Join(candidates, ", "))
 }
 
-// Candidates 节点级联候选名:
-// node--{type}--{slug}.html → node--{type}.html → node.html（viicn 专属页模式）。
-// slug 白名单校验: 非法 slug（含 / . 等）不进文件名 — 候选名经 filepath.Join
-// 拼到模板根, 防路径穿越; 非法时回落类型级。
-func Candidates(n *core.Node) []string {
-	if n != nil && n.Type != "" {
-		if n.Slug != "" && safeSlug(n.Slug) {
-			return []string{"node--" + n.Type + "--" + n.Slug + ".html", "node--" + n.Type + ".html", "node.html"}
-		}
-		return []string{"node--" + n.Type + ".html", "node.html"}
-	}
-	return []string{"node.html"}
-}
-
-// safeSlug slug 是否 URL/文件名安全 — 与写入期约束统一（types.ValidSlug）。
-func safeSlug(s string) bool { return types.ValidSlug(s) }
-
 // fail 查询错误 → panic（html/template 捕获为 Execute 错误, fail-loud）。
 func fail(err error) {
 	if err != nil {
@@ -96,7 +79,7 @@ func fail(err error) {
 // queryFuncs 查询原语（Go 层实现）+ 展示工具。
 // 返回 1 值 — 模板一行调用; 错误走 panic。模板执行时经 funcMap()
 // （tpl.go）合并 sprig + 内置函数后整体注入。
-func (e *RenderEngine) queryFuncs() template.FuncMap {
+func (e *Render) queryFuncs() template.FuncMap {
 	eng := e.eng
 	return template.FuncMap{
 		// ── 查询原语 ─────────────────────────
@@ -263,7 +246,7 @@ func nodeIDs(nodes []core.Node) []int64 {
 // targets 边 → 端点节点列表（保持边序; N+1 顶着, 页面量小毫秒级）。
 // wantTo: 取 to_node（出边目标）; false 取 from_node（入边来源）。
 // graph 模板函数桥: 查节点类型（模板场景只有 id）后转发图原语。
-func (e *RenderEngine) graph(start int64, field string, maxHops int, fn func(string, int64, string, int) ([]int64, error)) []int64 {
+func (e *Render) graph(start int64, field string, maxHops int, fn func(string, int64, string, int) ([]int64, error)) []int64 {
 	n, err := e.eng.GetNodeById(start)
 	if err != nil || n == nil {
 		fail(fmt.Errorf("graph: node %d not found", start))
@@ -274,7 +257,7 @@ func (e *RenderEngine) graph(start int64, field string, maxHops int, fn func(str
 	return ids
 }
 
-func (e *RenderEngine) targets(wantTo bool, q func() ([]core.Edge, int64, error)) []core.Node {
+func (e *Render) targets(wantTo bool, q func() ([]core.Edge, int64, error)) []core.Node {
 	edges, _, err := q()
 	fail(err)
 	nodes := make([]core.Node, 0, len(edges))
@@ -294,7 +277,7 @@ func (e *RenderEngine) targets(wantTo bool, q func() ([]core.Edge, int64, error)
 
 // execute 单个模板文件独立解析执行 (无隐式布局 — 页面结构由模板自行
 // 经 partial 引入)。
-func (e *RenderEngine) execute(w io.Writer, name, full string, data any) error {
+func (e *Render) execute(w io.Writer, name, full string, data any) error {
 	tpl, err := template.New(filepath.Base(full)).Funcs(e.funcMap()).ParseFiles(full)
 	if err != nil {
 		return fmt.Errorf("render: parse %s: %w", name, err)
@@ -304,7 +287,7 @@ func (e *RenderEngine) execute(w io.Writer, name, full string, data any) error {
 
 // Partial 渲染片段模板 (独立解析执行; 不参与布局)。
 // 无缓存, 每次渲染读当前文件 — 片段也热重载。
-func (e *RenderEngine) Partial(name string, data any) (template.HTML, error) {
+func (e *Render) Partial(name string, data any) (template.HTML, error) {
 	clean := filepath.Clean(name)
 	if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
 		return "", fmt.Errorf("render: partial %q escapes templates root", name)
@@ -331,7 +314,7 @@ var errPartialNotFound = errors.New("render: partial not found")
 // sprig: HermeticHtmlFuncMap — 无 env/expandenv 等环境访问的安全子集
 // (dict/default/trunc 等常用模板工具函数)。
 // safeHTML: 受信富文本原样输出 (匿名提交内容禁用, XSS)。
-func (e *RenderEngine) funcMap() template.FuncMap {
+func (e *Render) funcMap() template.FuncMap {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	m := template.FuncMap{}

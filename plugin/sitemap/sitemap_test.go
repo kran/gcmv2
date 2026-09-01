@@ -24,15 +24,9 @@ types:
 `), 0o644)
 	tdir := filepath.Join(dir, "templates")
 	os.MkdirAll(tdir, 0o755)
-	site, err := web.NewSite(web.SiteSpec{
-		DBPath: filepath.Join(dir, "test.db"), Types: tp,
-		Templates: tdir, Migrate: true,
-		Config: map[string]any{"base_url": "https://example.com"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	Mount(site)
+	site := web.New(dir)
+	Mount(site, Options{BaseURL: "https://example.com"})
+	site.Start()
 	return site
 }
 

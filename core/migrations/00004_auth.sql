@@ -8,7 +8,7 @@ CREATE TABLE auth_methods (
   node_id INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,  -- 关联节点（级联删）
   method TEXT NOT NULL,              -- 登录方式: email / phone / wechat / github ...
   identifier TEXT NOT NULL,          -- 登录标识: 邮箱 / 手机号 / openid / oauth sub
-  secret TEXT NOT NULL,              -- 凭据: bcrypt 密码 hash / oauth refresh token
+  secret TEXT NOT NULL,  -- 凭据(00007 迁移为 data JSON)
   created_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL,
   UNIQUE(type, method, identifier)   -- 类型内唯一（不同类型互不冲突）

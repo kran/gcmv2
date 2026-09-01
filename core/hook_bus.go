@@ -31,13 +31,6 @@ type Hook struct {
 	handlers []entry
 }
 
-// HookSpec 一条 hook 定义 (名字 + 原型函数)。标准事件定义见各语义包的
-// StandardHooks 列表 (如 node.StandardHooks), 自定义事件自己拼。
-type HookSpec struct {
-	Name  string
-	Proto any
-}
-
 // HookBus 站点级 hook 总线。
 type HookBus struct {
 	mu    sync.RWMutex
@@ -57,10 +50,11 @@ func (b *HookBus) HasHook(name string) bool {
 	return ok && len(h.handlers) > 0
 }
 
-// Define 批量声明 hook (语义同 DefineHook): 单条失败即报错停止。
-func (b *HookBus) Define(specs ...HookSpec) error {
-	for _, s := range specs {
-		if err := b.DefineHook(s.Name, s.Proto); err != nil {
+// Define 批量声明 hook (语义同 DefineHook): 一个 map, key=事件名, value=proto 函数。
+// 单条失败即报错停止。
+func (b *HookBus) Define(specs map[string]any) error {
+	for name, proto := range specs {
+		if err := b.DefineHook(name, proto); err != nil {
 			return err
 		}
 	}
@@ -138,10 +132,24 @@ func (b *HookBus) Fire(name string, args ...any) error {
 	handlers := append([]entry(nil), h.handlers...)
 	b.mu.RUnlock()
 	for _, hd := range handlers {
-		rets := reflect.ValueOf(hd.fn).Call(callArgs)
-		if err, ok := rets[0].Interface().(error); ok && err != nil {
-			return err
+		if err := b.call(hd.fn, callArgs, name); err != nil {
+			return err // 首个 err / panic 中止（不继续剩余 hook）
 		}
+	}
+	return nil
+}
+
+// call 调用单个 handler — recover 捕获 panic（崩级错误 — 包装 err 返回, 不继续）。
+// err 短路保留（校验 hook 拒绝即止）; panic 总是停止（不可预期）。
+func (b *HookBus) call(fn any, args []reflect.Value, name string) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("hook %q panicked: %v", name, r)
+		}
+	}()
+	rets := reflect.ValueOf(fn).Call(args)
+	if e, ok := rets[0].Interface().(error); ok && e != nil {
+		return e
 	}
 	return nil
 }

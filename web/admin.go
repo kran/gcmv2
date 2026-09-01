@@ -285,35 +285,46 @@ type AdminPanel struct {
 	Vue   string `json:"vue"`   // 面板组件完整 URL（认证路由, 站点自己挂）
 }
 
-// AdminMount 后台面板查询事件（/admin/panels 每次请求 Fire — 响应式）:
-// 原型 func(ctx *CmsCtx, panels *[]AdminPanel) error — 插件 hook 只返回
-// 菜单数据（无副作用）; 受保护端点用 Site.Admin() 静态注册（无时序）。
-const AdminMount = "admin.mount"
+// AdminPanel 后台面板菜单事件（/admin/panels 每次请求 Fire — 响应式）:
+// 原型 func(ctx *CmsCtx, panels *[]AdminPanel) error — 插件 hook 只返回菜单数据。
+const HookAdminPanel = "admin.panel"
+
+// HookAdminMount 后台受保护端点挂载事件（Start 时 Fire 一次 — 传 admin 认证组）:
+// 原型 func(g *cho.Cho[*CmsCtx]) error — 插件拿组挂受保护端点（替代 Site.Admin）。
+const HookAdminMount = "admin.mount"
 
 // Mount 挂载 /admin 组到站点（登录保护; 公开入口: login/ui/upload）。
 // uploadDir 是上传落盘目录（可为空 = 禁用上传）; /uploads/* 服务由站点
 // 装配层挂载（gcm.NewApp — 前台资源不依赖 admin 是否启用）。
 // svc/ts 从 site 上下文取（site.Service() / svc.Types()）— 装配参数最小化。
 // DefineHooks 声明后台事件（AdminMount — 装配早期调用, 站点 Setup/AddHook 前）;
-// 与 defineWebHooks 同位置（NewSite 装配序列）。
-func defineAdminHooks(svc *core.Service) error {
-	return svc.Hooks().Define(core.HookSpec{Name: AdminMount,
-		Proto: func(*CmsCtx, *[]AdminPanel) error { return nil }})
+// 与 defineWebHooks 同位置（New 装配 — 事件先声明）。
+func defineAdminHooks(svc core.Engine) {
+	err := svc.Hooks().Define(map[string]any{
+		HookAdminPanel: func(*CmsCtx, *core.List[AdminPanel]) error { return nil },
+		HookAdminMount: func(*cho.Cho[*CmsCtx]) error { return nil },
+	})
+	if err != nil {
+		panic("web: define admin hooks: " + err.Error())
+	}
 }
 
-func (s *Site) mountAdmin(uploadDir string) {
-	b := &backend{acct: NewService(s.DB()), eng: s.eng, db: s.DB(), uploadDir: uploadDir}
+// setupAdmin 后台模块: 账号引导 + /admin 组（建认证组 → fire HookAdminMount 传组）。
+func (s *Site) setupAdmin() {
+	EnsureDefaults(s.DB()) // 失败 panic
+	s.mountAdmin()
+}
+
+func (s *Site) mountAdmin() {
+	b := &backend{acct: NewService(s.DB()), eng: s.engine, db: s.DB(), uploadDir: s.uploadsDir}
 
 	// /admin 组: 公开 login/logout/ui/upload, 其余登录保护
-	s.Group("/admin", func(g *cho.Cho[*CmsCtx]) {
+	s.router.Group("/admin", func(g *cho.Cho[*CmsCtx]) {
 		g.Post("/login", b.login)
 		g.Post("/logout", b.logout)
 		g.Get("/ui/*", b.uiFile)
 		g.Post("/upload", b.upload)
 		g.Group("", func(authed *cho.Cho[*CmsCtx]) {
-			// 懒 Fire AdminMount 挂 router 级（路由匹配前 — 未注册路径也能触发
-			// 挂载; 组内中间件在匹配后跑, 未注册路径 404 不会触发 — 鸡生蛋）
-			s.adminGroup = authed // 插件受保护端点挂载入口（site.Admin()）
 			authed.UseCtx(b.requireAuth)
 			authed.Get("/panels", b.listPanels)
 			authed.Get("/me", b.me)
@@ -332,6 +343,10 @@ func (s *Site) mountAdmin(uploadDir string) {
 			authed.Post("/settings", b.setSetting)
 			authed.Delete("/settings/{key}", b.deleteSetting)
 			authed.Post("/search/rebuild", b.rebuildSearch)
+			// fire AdminMount（传 authed 组 — 插件挂受保护端点; 组件已建）
+			if err := s.engine.Hooks().Fire(HookAdminMount, authed); err != nil {
+				panic("web: fire admin mount: " + err.Error())
+			}
 		})
 	})
 }
@@ -371,15 +386,14 @@ func (b *backend) logout(ctx *CmsCtx) {
 	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
 }
 
-// listPanels 站点面板列表 — 每次请求 Fire(AdminMount)（hook 响应式查询:
-// 每次调用都触发 — 注册晚于定义也无时序问题; hook 只返回数据无副作用）。
+// listPanels 站点面板列表 — 每次请求 Fire(AdminPanel)（hook 响应式查询）。
 func (b *backend) listPanels(ctx *CmsCtx) {
-	panels := &[]AdminPanel{}
-	if err := b.eng.Hooks().Fire(AdminMount, ctx, panels); err != nil {
+	panels := core.NewList[AdminPanel]()
+	if err := b.eng.Hooks().Fire(HookAdminPanel, ctx, panels); err != nil {
 		b.internal(ctx, err)
 		return
 	}
-	_ = ctx.Json(http.StatusOK, map[string]any{"items": *panels})
+	_ = ctx.Json(http.StatusOK, map[string]any{"items": panels.Items()})
 }
 
 // requireAuth 会话校验中间件（cho 类型化中间件: 校验失败短路）。
