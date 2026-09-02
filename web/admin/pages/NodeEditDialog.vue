@@ -1,6 +1,6 @@
 <template>
-    <el-dialog append-to-body v-model="visibleModel" :title="isEdit ? '编辑 #' + node.id : '新建 ' + (typeName || '')"
-               width="80vw" :close-on-click-modal="false" :close-on-press-escape="false">
+    <el-drawer append-to-body v-model="visibleModel" :title="isEdit ? '编辑 #' + node.id : '新建 ' + (typeName || '')"
+               size="42%" :close-on-click-modal="false" :close-on-press-escape="false">
         <el-form>
             <el-form-item label="显示">
                 <el-input v-model="form.display" placeholder="公共显示文本（列表/搜索/导航显示）" />
@@ -22,10 +22,12 @@
                             :ref-preset="form.refPreset || {}" :defs="defs" />
         </el-form>
         <template #footer>
-            <el-button @click="visibleModel = false">取消</el-button>
-            <el-button type="primary" :loading="saving" @click="save"><el-icon><Check /></el-icon>保存</el-button>
+            <div style="display:flex;justify-content:flex-end;gap:8px;">
+                <el-button @click="visibleModel = false">取消</el-button>
+                <el-button type="primary" :loading="saving" @click="save"><el-icon><Check /></el-icon>保存</el-button>
+            </div>
         </template>
-    </el-dialog>
+    </el-drawer>
 </template>
 <script>
 // NodeEditDialog: 节点新建/编辑共用表单。
