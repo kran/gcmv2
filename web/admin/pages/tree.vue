@@ -46,7 +46,7 @@
                         </template>
                     </el-table-column>
                     <el-table-column label="标题" min-width="360" show-overflow-tooltip>
-                        <template #default="{ row }">{{ row.display || row.slug || '#' + row.id }}</template>
+                        <template #default="{ row }"><a class="node-title-link" @click.prevent="openEdit(row)">{{ row.display || row.slug || '#' + row.id }}</a></template>
                     </el-table-column>
                     <el-table-column label="溯源" min-width="160" show-overflow-tooltip>
                         <template #default="{ row }">
@@ -72,6 +72,9 @@
     <node-edit-dialog v-model:visible="createVisible" :type-name="createType" :defs="defsByType"
                       :preset-field="createField" :preset-value="activeId"
                       @changed="loadInbound" />
+    <!-- 标题链接编辑（点击标题 → 编辑抽屉） -->
+    <node-edit-dialog v-model:visible="editVisible" :node="editNode" :defs="defsByType"
+                      :is-edit="true" @changed="loadInbound" />
 </template>
 <script>
 import { useRoute } from 'vue-router'
@@ -102,10 +105,17 @@ export default {
             createType: '',        // 当前新建的类型
             createField: '',       // 新建预置字段（指向本树的 ref 字段）
             createVisible: false,
+            editVisible: false,
+            editNode: null,
         }
     },
     mounted() { this.loadTypes() },
     methods: {
+        // 标题链接 → 编辑抽屉
+        openEdit(node) {
+            this.editNode = node
+            this.editVisible = true
+        },
         titleOf(n) {
             return n.display || n.slug || '#' + n.id
         },
