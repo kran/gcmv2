@@ -95,8 +95,12 @@
 }
 .el-textarea__inner { border: none; }
 .el-select-dropdown__item { font-size: 1em; }
-// 顶部菜单 hover 子菜单（类型树/扩展）— 字体放大
-.el-dropdown-menu__item { font-size: 15px; }
+// 顶部菜单 hover 子菜单（类型树/扩展）— Azure 浮层风格: 白底直角轻阴影, 行距舒服, hover 整行浅灰
+.el-dropdown__popper.el-dropdown__popper{box-shadow:0 4px 12px rgba(0,0,0,.12);border:none;padding:0;border-radius:0}
+.el-dropdown__popper.el-dropdown__popper .el-dropdown-menu{min-width:180px;padding:4px 0;background:#fff}
+.el-dropdown__popper.el-dropdown__popper .el-dropdown-menu__item{font-size:14px;line-height:1;padding:10px 16px;color:#242424;border-radius:0}
+.el-dropdown__popper.el-dropdown__popper .el-dropdown-menu__item:not(.is-disabled):hover,
+.el-dropdown__popper.el-dropdown__popper .el-dropdown-menu__item:not(.is-disabled):focus{background:#f3f2f1;color:#242424}
 
 // ── Layout ──────────────────────────────────────
 html, body {
