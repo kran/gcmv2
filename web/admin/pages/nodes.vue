@@ -29,6 +29,7 @@
                   clearable @change="refresh" />
         <!-- 树过滤（多个: 每个树引用字段一个 popover 下拉, 按目标类型名区分） -->
         <el-popover v-for="ft in filterTrees" :key="ft.field" trigger="click" placement="bottom-start"
+                    :show-timeout="0" :hide-timeout="0"
                     :width="200" style="margin-left:8px;" :ref="'tp-' + ft.field">
           <template #reference>
             <el-button link size="small" class="filter-link" :class="{ active: ft.active }">
