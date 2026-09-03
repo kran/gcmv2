@@ -64,7 +64,7 @@
           <template #default="{ row: r }"><a class="node-title-link" @click.prevent="openEdit(r)">{{ titleOf(r) }}</a></template>
         </el-table-column>
         <el-table-column label="slug" min-width="160" show-overflow-tooltip>
-          <template #default="{ row: r }"><code>{{ r.slug || '#' + r.id }}</code></template>
+          <template #default="{ row: r }">{{ r.slug || '#' + r.id }}</template>
         </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row: r }">
@@ -87,7 +87,7 @@
           <template #default="{ row: r }"><a class="node-title-link" @click.prevent="openEdit(r)">{{ titleOf(r) }}</a></template>
         </el-table-column>
         <el-table-column label="slug" min-width="160" show-overflow-tooltip>
-          <template #default="{ row: r }"><code>{{ r.slug || '#' + r.id }}</code></template>
+          <template #default="{ row: r }">{{ r.slug || '#' + r.id }}</template>
         </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row: r }">
