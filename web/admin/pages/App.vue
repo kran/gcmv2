@@ -44,7 +44,7 @@
                     <span>{{ item.label }}</span>
                 </a>
                 <!-- 类型树（tree 类型菜单 — hover 子菜单） -->
-                <el-dropdown v-if="treeMenu.length" trigger="hover">
+                <el-dropdown v-if="treeMenu.length" trigger="hover" :show-timeout="0" :hide-timeout="0">
                     <a class="topbar-menu-item" :class="{ active: isTreeActive }">
                         <el-icon :size="15"><Share /></el-icon>
                         <span>类型树</span>
@@ -59,7 +59,7 @@
                     </template>
                 </el-dropdown>
                 <!-- 扩展（插件面板菜单 — hover 子菜单） -->
-                <el-dropdown v-if="panelMenu.length" trigger="hover">
+                <el-dropdown v-if="panelMenu.length" trigger="hover" :show-timeout="0" :hide-timeout="0">
                     <a class="topbar-menu-item" :class="{ active: isPanelActive }">
                         <el-icon :size="15"><Grid /></el-icon>
                         <span>扩展</span>
