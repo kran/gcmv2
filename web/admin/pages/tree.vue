@@ -41,9 +41,7 @@
                 <el-table :data="rows" v-loading="loading" >
                     <el-table-column prop="id" label="ID" width="70" />
                     <el-table-column label="类型" width="110">
-                        <template #default="{ row }">
-                            <el-tag size="small">{{ row.type }}</el-tag>
-                        </template>
+                        <template #default="{ row }">{{ row.type }}</template>
                     </el-table-column>
                     <el-table-column label="标题" min-width="360" show-overflow-tooltip>
                         <template #default="{ row }"><a class="node-title-link" @click.prevent="openEdit(row)">{{ row.display || row.slug || '#' + row.id }}</a></template>
