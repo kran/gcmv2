@@ -1,7 +1,6 @@
 <template>
   <div style="padding:20px;">
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
-      <h2 style="font-size:18px;font-weight:700;">备份管理</h2>
       <el-button type="primary" size="small" :loading="busy" @click="create">立即备份</el-button>
     </div>
     <el-table :data="items" v-loading="busy" style="width:100%;">

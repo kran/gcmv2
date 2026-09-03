@@ -170,7 +170,7 @@ func TestBackupPanel(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("panel = %d", w.Code)
 	}
-	if !strings.Contains(w.Body.String(), "备份管理") {
+	if !strings.Contains(w.Body.String(), "立即备份") {
 		t.Fatal("panel content missing")
 	}
 }
