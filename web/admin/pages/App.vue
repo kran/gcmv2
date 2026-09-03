@@ -36,8 +36,8 @@
                 <span class="topbar-brand-name">GCM</span>
             </div>
             <nav class="topbar-menu">
-                <!-- 普通菜单（内置类型） -->
-                <a v-for="item in mainMenu" :key="item.key" class="topbar-menu-item"
+                <!-- 内容管理（第一个普通菜单 — 类型树/扩展插后边） -->
+                <a v-for="item in mainBefore" :key="item.key" class="topbar-menu-item"
                    :class="{ active: route.name === item.route }"
                    @click.prevent="router.push({ name: item.route, params: item.params })">
                     <el-icon :size="15"><component :is="item.icon" /></el-icon>
@@ -73,6 +73,13 @@
                         </el-dropdown-menu>
                     </template>
                 </el-dropdown>
+                <!-- 其余普通菜单（站点配置/账号...） -->
+                <a v-for="item in mainAfter" :key="item.key" class="topbar-menu-item"
+                   :class="{ active: route.name === item.route }"
+                   @click.prevent="router.push({ name: item.route, params: item.params })">
+                    <el-icon :size="15"><component :is="item.icon" /></el-icon>
+                    <span>{{ item.label }}</span>
+                </a>
             </nav>
             <div class="topbar-right">
                 <button class="topbar-icon-btn" @click="globalQ && globalSearch()"><el-icon><Search /></el-icon></button>
@@ -113,6 +120,9 @@ export default {
         var defaultPage = window.AppConfig.defaultPage
         // 固定菜单（内置）与动态菜单（tree/面板）— 动态项由 section 标记
         var mainMenu = computed(function () { return menuData.value.filter(function (m) { return !m.section }) })
+        // 内容管理（第一个普通菜单）单独 — 类型树/扩展插它后边
+        var mainBefore = computed(function () { return mainMenu.value.slice(0, 1) })
+        var mainAfter = computed(function () { return mainMenu.value.slice(1) })
         var treeMenu = computed(function () { return menuData.value.filter(function (m) { return m.section === 'tree' }) })
         var panelMenu = computed(function () { return menuData.value.filter(function (m) { return m.section === 'panel' }) })
         // 子菜单入口高亮: 当前路由属于该分组时
@@ -246,7 +256,7 @@ export default {
         return {
             phase: phase, user: user, siteName: siteName, pageTitle: pageTitle,
             menuData: menuData, menuGroups: menuGroups, globalQ: globalQ, globalSearch: globalSearch,
-            mainMenu: mainMenu, treeMenu: treeMenu, panelMenu: panelMenu,
+            mainMenu: mainMenu, mainBefore: mainBefore, mainAfter: mainAfter, treeMenu: treeMenu, panelMenu: panelMenu,
             isTreeActive: isTreeActive, isPanelActive: isPanelActive,
             loginForm: loginForm,
             route: route, router: router,
