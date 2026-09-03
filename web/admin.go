@@ -465,7 +465,12 @@ func (b *backend) listNodes(ctx *CmsCtx) {
 	if filter != "" {
 		f = `(and (= type {:typ}) ` + filter + `)`
 	}
-	list, total, err = b.eng.QueryPage(core.ListQuery{Filter: f, Page: page, Size: size}, params)
+	// 默认 id 降序（新节点在前）; sort 参数可选覆盖
+	sortQ := strings.TrimSpace(ctx.Query("sort"))
+	if sortQ == "" {
+		sortQ = "id DESC"
+	}
+	list, total, err = b.eng.QueryPage(core.ListQuery{Filter: f, Sort: sortQ, Page: page, Size: size}, params)
 	if err != nil {
 		// filter 编译错误（filter-lisp: 前缀）= 客户端参数 → 400; 其余 → 500
 		if strings.Contains(err.Error(), "filter-lisp:") {
