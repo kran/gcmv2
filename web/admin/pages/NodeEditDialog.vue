@@ -1,6 +1,6 @@
 <template>
     <el-drawer append-to-body v-model="visibleModel" :title="isEdit ? '编辑 #' + node.id : '新建 ' + (typeName || '')"
-               size="52%" :close-on-click-modal="false" :close-on-press-escape="false">
+               size="60%" :close-on-click-modal="false" :close-on-press-escape="false">
         <el-form>
             <el-form-item label="显示">
                 <el-input v-model="form.display" placeholder="公共显示文本（列表/搜索/导航显示）" />
