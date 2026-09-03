@@ -315,20 +315,22 @@ export default {
     padding: 16px 16px 16px 0;
     overflow: auto;
     border-right: 1px solid #eaeaee; /* 中间竖线分隔 */
+    font-family: 'Segoe UI', 'Segoe UI Web (West European)', -apple-system, 'system-ui', Roboto, 'Helvetica Neue', sans-serif;
 }
-.nodes-tree-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.nodes-tree-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 13px; color: #616161; }
 .nodes-list {
     flex: 1; min-width: 0;
     padding: 16px 0 16px 16px;
 }
-.type-list { display: flex; flex-direction: column; gap: 2px; }
+.type-list { display: flex; flex-direction: column; gap: 0; }
 .type-item {
     display: flex; align-items: center; gap: 8px;
-    padding: 6px 10px; border-radius: 6px; cursor: pointer;
-    font-size: 13px; color: #555;
+    padding: 7px 16px; border-radius: 0; cursor: pointer;
+    font-size: 13px; color: #242424; border-left: 2px solid transparent;
 }
-.type-item:hover { background: #ececec; }
-.type-item.active { background: #E1E1E1; color: #16161a; font-weight: 600; }
+.type-item:hover { background: #f3f2f1; }
+.type-item.active { background: #edebe9; border-left: 2px solid #0277d4; color: #242424; font-weight: 600; }
+.type-item.active:hover { background: #e1dfdd; }
 
 /* 树过滤按钮: link 下划线样式（非按钮框 — 看着轻） */
 .filter-link {
@@ -338,9 +340,13 @@ export default {
     &.active { color: #000 !important; font-weight: 600; }
 }
 
-/* el-tree 当前节点高亮: 蓝 → #E1E1E1（与类型列表一致） */
+/* el-tree 节点: 平时透明, hover 浅灰, current #edebe9 + 左 border */
 .el-tree--highlight-current .el-tree-node.is-current > .el-tree-node__content {
-    background: #E1E1E1 !important;
-    color: #16161a;
+    background: #edebe9 !important;
+    color: #242424;
+    border-left: 2px solid #0277d4;
+    padding-left: 14px;
 }
+.el-tree-node__content:hover{ background:#f3f2f1; }
+.el-tree-node__content{ color:#242424; font-size:13px; }
 </style>
