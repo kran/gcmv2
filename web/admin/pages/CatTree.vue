@@ -77,24 +77,28 @@ export default {
     align-items: center;
     gap: 5px;
     height: 28px;
-    padding: 0 6px;
-    border-radius: 3px;
+    padding: 0 8px;
+    border-radius: 0;
+    border-left: 2px solid transparent;
     cursor: pointer;
-    color: #42526E;
-    font-size: 13.5px;
+    color: #242424;
+    font-size: 13px;
+    font-family: 'Segoe UI', 'Segoe UI Web (West European)', -apple-system, 'system-ui', Roboto, 'Helvetica Neue', sans-serif;
     transition: background .12s ease;
 }
-.ctree-row:hover { background: #F4F5F7; }
+.ctree-row:hover { background: #f3f2f1; }
 .ctree-row.active {
-    background: #DEEBFF;
-    color: #0052CC;
-    font-weight: 500;
+    background: #edebe9;
+    border-left: 2px solid #0277d4;
+    color: #242424;
+    font-weight: 600;
 }
-.ctree-row.active .ctree-icon { color: #0052CC; }
+.ctree-row.active:hover { background: #e1dfdd; }
+.ctree-row.active .ctree-icon { color: #605e5c; }
 
-.ctree-icon { color: #6B778C; flex-shrink: 0; }
+.ctree-icon { color: #605e5c; flex-shrink: 0; }
 .ctree-icon.clickable { cursor: pointer; }
-.ctree-icon.clickable:hover { color: #0052CC; }
+.ctree-icon.clickable:hover { color: #0078d4; }
 .ctree-label {
     flex: 1;
     overflow: hidden;
