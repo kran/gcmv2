@@ -181,9 +181,10 @@ export default {
 }
 </script>
 <style>
+.rich-editor { max-height: 45vh; overflow-y: auto; }
 .rich-editor .ql-editor { min-height: 180px; font-size: 14px; }
-.rich-editor .ql-container { border-radius: 0; }
-.rich-editor .ql-toolbar { border-radius: 0; }
+.rich-editor .ql-container { border-radius: 0; overflow: visible; }
+.rich-editor .ql-toolbar { border-radius: 0; position: sticky; top: 0; z-index: 10; background: #fff; }
 /* audio 工具栏图标 */
 .rich-editor .ql-toolbar .ql-audio::after {
     content: "♪";
