@@ -2,6 +2,7 @@ package core
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -168,8 +169,8 @@ func TestExpandPathMany(t *testing.T) {
 	a1, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "甲", "categories": []any{cat}, "authors": []any{p1}}})
 	a2, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "乙", "categories": []any{cat}, "authors": []any{p2}}})
 
-	// 列表两篇, 一次展开 authors + categories
-	list, err := s.ExpandPathMany([]int64{a1, a2}, "authors, categories")
+	// 故意按 id 倒序传入，返回顺序必须与请求一致，不能依赖 SQL IN 的返回顺序。
+	list, err := s.ExpandPathMany([]int64{a2, a1}, "authors, categories")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,8 +187,8 @@ func TestExpandPathMany(t *testing.T) {
 			t.Fatalf("%s categories: %v", n.Fields["title"], cs)
 		}
 	}
-	// 列表展示: fields 标题可用（该测试类型未配 title 列声明）
-	if list[0].Fields["title"] != "甲" || list[1].Fields["title"] != "乙" {
+	// 列表展示: fields 标题可用，顺序与输入 ids 一致。
+	if list[0].Fields["title"] != "乙" || list[1].Fields["title"] != "甲" {
 		t.Fatalf("titles: %v %v", list[0].Fields["title"], list[1].Fields["title"])
 	}
 }
@@ -227,6 +228,14 @@ func TestExpandDeepPathFails(t *testing.T) {
 	_, err := s.ExpandPath(a, "authors.authors.authors.authors.authors")
 	if err == nil {
 		t.Fatal("5-segment path must fail (max 4)")
+	}
+	paths := make([]string, maxExpandPaths+1)
+	for i := range paths {
+		paths[i] = "authors"
+	}
+	_, err = s.ExpandPath(a, strings.Join(paths, ","))
+	if err == nil || !strings.Contains(err.Error(), "paths") {
+		t.Fatalf("too many expand paths must fail: %v", err)
 	}
 }
 

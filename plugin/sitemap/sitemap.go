@@ -46,7 +46,8 @@ func Mount(s *web.Site, opts Options) {
 	s.Hook(web.HookBeforeMount, func(site *web.Site) error {
 		site.Router().Get("/sitemap.xml", func(ctx *web.CmsCtx) {
 			list, _, err := s.Engine().QueryPage(core.ListQuery{
-				Filter: `(= status 1)`, Page: 1, Size: 10000, Sort: `id ASC`,
+				Filter: `(= status 1)`, Page: 1, Size: 10000,
+				Sort: []core.SortField{{Field: "id"}},
 			})
 			if err != nil {
 				ctx.Error(http.StatusInternalServerError, "sitemap: "+err.Error())

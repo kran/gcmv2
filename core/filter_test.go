@@ -1,6 +1,29 @@
 package core
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestFilterComplexityLimits(t *testing.T) {
+	if _, err := parseLisp(strings.Repeat("x", maxFilterBytes+1)); err == nil {
+		t.Fatal("oversized filter must fail")
+	}
+	deep := `(= status 1)`
+	for range maxFilterDepth + 1 {
+		deep = `(not ` + deep + `)`
+	}
+	if _, err := parseLisp(deep); err == nil {
+		t.Fatal("deep filter must fail")
+	}
+	items := make([]string, maxArrayItems+1)
+	for i := range items {
+		items[i] = "1"
+	}
+	if _, err := parseLisp(`(in id [` + strings.Join(items, " ") + `])`); err == nil {
+		t.Fatal("oversized array must fail")
+	}
+}
 
 // ── 列 / JSON 比较 ────────────────────────────
 
@@ -72,6 +95,17 @@ func TestFilterPlaceholder(t *testing.T) {
 	}
 	if len(list) != 1 {
 		t.Fatalf("placeholder: %d", len(list))
+	}
+	list, _, err = s.QueryPage(ListQuery{Filter: `(in status {:values})`, Page: 1, Size: 10},
+		map[string]any{"values": []int64{1}})
+	if err != nil || len(list) != 1 {
+		t.Fatalf("slice placeholder: list=%d err=%v", len(list), err)
+	}
+	tooMany := make([]int64, maxArrayItems+1)
+	_, _, err = s.QueryPage(ListQuery{Filter: `(in status {:values})`, Page: 1, Size: 10},
+		map[string]any{"values": tooMany})
+	if err == nil {
+		t.Fatal("oversized placeholder collection should fail")
 	}
 	// 未绑定 → 报错
 	_, _, err = s.QueryPage(ListQuery{Filter: `(= status {:nope})`, Page: 1, Size: 10})

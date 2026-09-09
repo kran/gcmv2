@@ -20,7 +20,6 @@ func newSite(t *testing.T) *web.Site {
 	typesYAML := `
 types:
   user:
-    title: name
     auth: true
     fields:
       - { name: name, kind: text }

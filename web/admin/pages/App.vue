@@ -99,7 +99,8 @@
                 <div class="panel-content">
                     <div class="page-title">{{ pageTitle }}</div>
                     <div class="content-card">
-                        <router-view />
+                        <!-- 同一路由不同 params（如 /tree/category → /tree/region）必须重建页面实例。 -->
+                        <router-view :key="routeViewKey" />
                     </div>
                 </div>
             </div>
@@ -155,11 +156,21 @@ export default {
 
         var siteName = computed(function () { return user.value?.site || '' })
 
+        var routeViewKey = computed(function () {
+            return String(route.name || '') + ':' + JSON.stringify(route.params || {})
+        })
+
         var pageTitle = computed(function () {
             var name = route.name
             var list = menuData.value
             for (var i = 0; i < list.length; i++) {
-                if (list[i].route === name) return list[i].label
+                var item = list[i]
+                if (item.route !== name) continue
+                var params = item.params || {}
+                var matches = Object.keys(params).every(function (key) {
+                    return String(params[key]) === String(route.params[key])
+                })
+                if (matches) return item.label
             }
             return name || '首页'
         })
@@ -254,7 +265,7 @@ export default {
         })
 
         return {
-            phase: phase, user: user, siteName: siteName, pageTitle: pageTitle,
+            phase: phase, user: user, siteName: siteName, pageTitle: pageTitle, routeViewKey: routeViewKey,
             menuData: menuData, menuGroups: menuGroups, globalQ: globalQ, globalSearch: globalSearch,
             mainMenu: mainMenu, mainBefore: mainBefore, mainAfter: mainAfter, treeMenu: treeMenu, panelMenu: panelMenu,
             isTreeActive: isTreeActive, isPanelActive: isPanelActive,

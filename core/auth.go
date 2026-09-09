@@ -119,6 +119,20 @@ func (s *Service) AddAuthMethod(typeName string, nodeID int64, method, identifie
 	if method == "" || identifier == "" {
 		return errors.New("core: auth: method and identifier required")
 	}
+	td, ok := s.types.Type(typeName)
+	if !ok || !td.Auth {
+		return fmt.Errorf("core: auth: type %q is not auth-enabled", typeName)
+	}
+	node, err := s.GetNodeById(nodeID)
+	if err != nil {
+		return err
+	}
+	if node == nil {
+		return ErrNotFound
+	}
+	if node.Type != typeName {
+		return fmt.Errorf("core: auth: node %d is type %q, not %q", nodeID, node.Type, typeName)
+	}
 	ex, err := s.FindAuth(typeName, method, identifier)
 	if err != nil {
 		return err

@@ -82,6 +82,11 @@ func (s *Site) apiCreateNode(ctx *CmsCtx) {
 
 // apiViewNode GET /api/nodes/{type}/{id} — 公开读（可 hook 扩展）。
 func (s *Site) apiViewNode(ctx *CmsCtx) {
+	typ := ctx.PathValue("type")
+	if _, ok := s.engine.Types().Type(typ); !ok {
+		ctx.Error(http.StatusBadRequest, "type not found")
+		return
+	}
 	id := ctx.PathNum("id", 0)
 	if id == 0 {
 		ctx.Error(http.StatusBadRequest, "invalid id")
@@ -92,7 +97,7 @@ func (s *Site) apiViewNode(ctx *CmsCtx) {
 		ctx.Error(http.StatusInternalServerError, err.Error())
 		return
 	}
-	if n == nil || n.Status != core.StatusPublished {
+	if n == nil || n.Type != typ || n.Status != core.StatusPublished {
 		ctx.Error(http.StatusNotFound, "not found")
 		return
 	}
@@ -109,6 +114,15 @@ func (s *Site) apiUpdateNode(ctx *CmsCtx) {
 	}
 	if _, ok := s.engine.Types().Type(typ); !ok {
 		ctx.Error(http.StatusBadRequest, "type not found")
+		return
+	}
+	existing, err := s.engine.GetNodeById(id)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "internal error")
+		return
+	}
+	if existing == nil || existing.Type != typ {
+		ctx.Error(http.StatusNotFound, "not found")
 		return
 	}
 	// 差量语义: client 提交 NodePatch（全指针 — nil = 不改字段; PATCH）
@@ -135,9 +149,23 @@ func (s *Site) apiUpdateNode(ctx *CmsCtx) {
 
 // apiDeleteNode DELETE /api/nodes/{type}/{id} — Fire HookBeforeDelete。
 func (s *Site) apiDeleteNode(ctx *CmsCtx) {
+	typ := ctx.PathValue("type")
+	if _, ok := s.engine.Types().Type(typ); !ok {
+		ctx.Error(http.StatusBadRequest, "type not found")
+		return
+	}
 	id := ctx.PathNum("id", 0)
 	if id == 0 {
 		ctx.Error(http.StatusBadRequest, "invalid id")
+		return
+	}
+	existing, err := s.engine.GetNodeById(id)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "internal error")
+		return
+	}
+	if existing == nil || existing.Type != typ {
+		ctx.Error(http.StatusNotFound, "not found")
 		return
 	}
 	if !s.engine.Hooks().HasHook(HookBeforeDelete) {
@@ -155,9 +183,11 @@ func (s *Site) apiDeleteNode(ctx *CmsCtx) {
 	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
 }
 
-// apiUpload POST /api/upload — 前台上传（图片/头像/相册）。
-// 登录策略待定（当前公开 — 可配合 hook 在创建时校验; 防滥用可加登录）。
+// apiUpload POST /api/upload — 前台上传（图片/头像/相册），必须登录。
 func (s *Site) apiUpload(ctx *CmsCtx) {
+	if !ctx.RequireLogin() {
+		return
+	}
 	saveUpload(s.uploadsDir, ctx)
 }
 

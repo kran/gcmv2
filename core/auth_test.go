@@ -11,11 +11,17 @@ import (
 const testAuthYAML = `
 types:
   user:
-    title: name
     auth: true
     fields:
       - { name: name, kind: text }
       - { name: role, kind: select, options: [member, editor] }
+  staff:
+    auth: true
+    fields:
+      - { name: name, kind: text }
+  plain:
+    fields:
+      - { name: name, kind: text }
 `
 
 func newAuthService(t *testing.T) *Service {
@@ -111,6 +117,27 @@ func TestAddRemoveAuthMethod(t *testing.T) {
 	// 解绑最后一种 — 拒绝
 	if err := s.RemoveAuthMethod("user", "email", "a@x.com"); err == nil {
 		t.Fatal("removing last method should fail")
+	}
+}
+
+func TestAddAuthMethodValidatesNodeType(t *testing.T) {
+	s := newAuthService(t)
+	userID, err := s.CreateNode(&Node{Type: "user", Display: "user", Fields: Fields{"name": "user"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plainID, err := s.CreateNode(&Node{Type: "plain", Display: "plain", Fields: Fields{"name": "plain"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddAuthMethod("staff", userID, "email", "staff@x.com", Fields{}); err == nil {
+		t.Fatal("node/type mismatch must fail")
+	}
+	if err := s.AddAuthMethod("plain", plainID, "email", "plain@x.com", Fields{}); err == nil {
+		t.Fatal("non-auth type must fail")
+	}
+	if err := s.AddAuthMethod("user", 999999, "email", "missing@x.com", Fields{}); err != ErrNotFound {
+		t.Fatalf("missing node error = %v, want ErrNotFound", err)
 	}
 }
 

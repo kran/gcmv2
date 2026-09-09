@@ -102,7 +102,7 @@ func AuthSession(ctx *CmsCtx, eng core.Engine, nodeID int64) (string, error) {
 	}
 	http.SetCookie(ctx.W, &http.Cookie{
 		Name: authCookie, Value: token,
-		Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		Path: "/", HttpOnly: true, Secure: ctx.site.secureCookies, SameSite: http.SameSiteLaxMode,
 		Expires: time.Now().Add(core.SessionTTL),
 	})
 	u, err := eng.GetNodeById(nodeID)
@@ -119,7 +119,10 @@ func (b *authBackend) logout(ctx *CmsCtx) {
 	if t := ctx.authToken(); t != "" {
 		_ = ctx.site.engine.DeleteSession(t)
 	}
-	http.SetCookie(ctx.W, &http.Cookie{Name: authCookie, Value: "", Path: "/", MaxAge: -1})
+	http.SetCookie(ctx.W, &http.Cookie{
+		Name: authCookie, Value: "", Path: "/", HttpOnly: true,
+		Secure: ctx.site.secureCookies, SameSite: http.SameSiteLaxMode, MaxAge: -1,
+	})
 	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -145,12 +148,15 @@ func (b *authBackend) bind(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, err.Error())
 		return
 	}
-	if in.Type == "" {
-		in.Type = "user"
-	}
+	// 绑定类型由当前 Session 节点决定，不接受客户端指定其他 NodeType。
+	in.Type = u.Type
 	data := core.Fields{}
 	if in.Method == "email" || in.Method == "phone" {
-		hash, _ := bcrypt.GenerateFromPassword([]byte(in.Secret), bcrypt.DefaultCost)
+		hash, err := bcrypt.GenerateFromPassword([]byte(in.Secret), bcrypt.DefaultCost)
+		if err != nil {
+			ctx.Error(http.StatusInternalServerError, "credential hashing failed")
+			return
+		}
 		data["password"] = string(hash)
 	} else {
 		data["password"] = in.Secret

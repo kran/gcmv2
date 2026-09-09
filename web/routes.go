@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/kran/gcmv2/core"
 	"github.com/kran/gcmv2/types"
@@ -83,25 +84,28 @@ func nodeCandidates(n *core.Node) []string {
 	return []string{"node.html"}
 }
 
-// apiNodes 记录 API: /api/nodes/{type}?filter=&sort=&page=&size=&expand=
-// 公开只读; Lisp filter 编译错误 → 400。
+// apiNodes 公开记录列表: /api/nodes/{type}?sort=&page=&size=。
+// 只返回已发布节点；不接受 Lisp filter 和 expand。复杂查询由站点业务 API
+// 或受信管理端使用 Engine.Query 构建，避免向公网暴露存储表达式。
 func (s *Site) apiNodes(ctx *CmsCtx) {
 	typ := ctx.PathValue("type")
-	if typ == "" {
-		ctx.String(http.StatusBadRequest, "api: type required")
+	if _, ok := s.engine.Types().Type(typ); !ok {
+		ctx.Error(http.StatusBadRequest, "type not found")
 		return
 	}
-	page := int(ctx.QueryNum("page", 1))
-	size := min(int(ctx.QueryNum("size", 20)), 100)
-	filter := ctx.Query("filter")
-	sort := ctx.Query("sort")
-	expand := ctx.Query("expand")
-
-	f := `(= type {:typ})`
-	if filter != "" {
-		f = `(and (= type {:typ}) ` + filter + `)`
+	page := max(int(ctx.QueryNum("page", 1)), 1)
+	size := min(max(int(ctx.QueryNum("size", 20)), 1), 100)
+	if strings.TrimSpace(ctx.Query("filter")) != "" || strings.TrimSpace(ctx.Query("expand")) != "" {
+		ctx.Error(http.StatusBadRequest, "public filter and expand are not supported")
+		return
 	}
-	q := core.ListQuery{Filter: f, Sort: sort, Expand: expand, Page: page, Size: size}
+	sort, err := parseSort(ctx.Query("sort"))
+	if err != nil {
+		ctx.Error(http.StatusBadRequest, err.Error())
+		return
+	}
+	f := `(and (= type {:typ}) (= status 1))`
+	q := core.ListQuery{Filter: f, Sort: sort, Page: page, Size: size}
 	list, total, err := s.engine.QueryPage(q, map[string]any{"typ": typ})
 	if err != nil {
 		// filter 编译错误 → 400（客户端参数）

@@ -7,7 +7,6 @@ func TestGalleryKind(t *testing.T) {
 	if err := ts.Load([]byte(`
 types:
   event:
-    title: name
     fields:
       - { name: name, kind: text }
       - { name: gallery, kind: gallery }

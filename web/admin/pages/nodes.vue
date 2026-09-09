@@ -283,7 +283,7 @@ export default {
             if (!this.query.type) return
             this.loading = true
             try {
-                const params = { type: this.query.type, page: this.query.page, size: this.query.size, sort: 'id DESC' }
+                const params = { type: this.query.type, page: this.query.page, size: this.query.size, sort: '-id' }
                 if (this.query.status !== null && this.query.status !== '') params.status = this.query.status
                 if (this.query.q) params.q = this.query.q
                 if (this.query.filter) params.filter = this.query.filter

@@ -55,22 +55,8 @@ func (s *Service) GetNodeBySlug(slug string) (*Node, error) {
 // ── 写: Create ─────────────────────────────────
 
 // CreateNode 建节点: 校验 → 事务（BeforeCreate → INSERT → ref 落边 → AfterCreate）。
-// 返回新节点 ID; 不修改调用方传入的 Node。
-// sanitizeFields 宽松清洗: 只保留类型定义声明的字段（含 ref）—
-// 剥离历史脏数据/未知字段（类型配置演进不报错）。已知字段仍走 ValidateFields。
-func sanitizeFields(td types.TypeDef, fields map[string]any) map[string]any {
-	if len(fields) == 0 {
-		return fields
-	}
-	clean := make(map[string]any, len(fields))
-	for name, v := range fields {
-		if _, ok := types.FieldByName(td, name); ok {
-			clean[name] = v
-		}
-	}
-	return clean
-}
-
+// 返回新节点 ID; 不修改调用方传入的 Node。未知字段直接报错，避免拼写错误和
+// 客户端/Schema 漂移被静默吞掉。
 func (s *Service) CreateNode(n *Node) (int64, error) {
 	if n == nil {
 		return 0, errors.New("core: create: nil node")
@@ -79,8 +65,6 @@ func (s *Service) CreateNode(n *Node) (int64, error) {
 	if !ok {
 		return 0, fmt.Errorf("core: type %q not defined", n.Type)
 	}
-	// 宽松: 先剥离未知字段（配置演进不报错）— 已知字段仍校验
-	n.Fields = sanitizeFields(td, n.Fields)
 	if err := s.types.ValidateFields(n.Type, n.Fields); err != nil {
 		return 0, err
 	}
@@ -152,15 +136,16 @@ func (s *Service) PatchNode(id int64, patch *NodePatch) error {
 	if !ok {
 		return fmt.Errorf("core: type %q not defined", existing.Type)
 	}
-	// 宽松: 未知字段剥离（不报错 — 配置演进 / 历史脏数据）
-	patch.Fields = sanitizeFields(td, patch.Fields)
-	// ref/标量分离 — 用局部变量（不触碰调用方的 patch — P2）
+	if err := s.types.ValidatePatchFields(existing.Type, patch.Fields); err != nil {
+		return err
+	}
+	// ref/标量分离 — 用局部变量（不触碰调用方的 patch）
 	scalarPatch := Fields{}
 	refPatch := map[string]any{}
 	for name, v := range patch.Fields {
 		f, ok := types.FieldByName(td, name)
 		if !ok {
-			continue // 已 sanitize — 不应到 (防御)
+			return fmt.Errorf("core: field %q not on type %q", name, existing.Type)
 		}
 		if s.types.IsRefKind(f.Kind) {
 			refPatch[name] = v

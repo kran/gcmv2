@@ -11,7 +11,6 @@ import (
 const validYAML = `
 types:
   article:
-    url: /article/{slug}
     search: true
     fields:
       - { name: body, kind: richtext, required: true }
@@ -20,7 +19,6 @@ types:
       - { name: related, kind: "ref[]", to: article, symmetric: true }
       - { name: categories, kind: "ref[]", to: category, transitive: true }
   category:
-    url: /category/{slug}
     fields:
       - { name: name, kind: text, required: true }
       - { name: parent, kind: ref, to: category, transitive: true }
@@ -88,10 +86,13 @@ func TestLoadInvalid(t *testing.T) {
 		{"algebra mutual", base + "      - { name: r, kind: \"ref[]\", to: article, symmetric: true, transitive: true }",
 			"mutually exclusive"},
 	}
-	// url 字段框架层已移除 — yaml 中出现被忽略（不报错）
+	// 未知配置必须 fail-loud，不能静默忽略拼写错误或已移除字段。
 	ts := New()
-	if err := ts.Load([]byte("types:\n  article:\n    url: /bad space/{slug}\n    fields: []")); err != nil {
-		t.Fatalf("url field must be ignored: %v", err)
+	if err := ts.Load([]byte("types:\n  article:\n    url: /bad space/{slug}\n    fields: []")); err == nil || !strings.Contains(err.Error(), "field url not found") {
+		t.Fatalf("unknown type property must fail: %v", err)
+	}
+	if err := ts.Load([]byte("types:\n  article:\n    fields:\n      - { name: body, kind: text, mystery: true }")); err == nil || !strings.Contains(err.Error(), "field mystery not found") {
+		t.Fatalf("unknown field property must fail: %v", err)
 	}
 	for _, c := range cases {
 		ts := New()
@@ -312,7 +313,6 @@ func TestCompositeFields(t *testing.T) {
 	raw := `
 types:
   page:
-    title: title
     fields:
       - { name: title, kind: text }
       - { name: tags, kind: array, item: { kind: textarea } }

@@ -25,6 +25,7 @@ import (
 	"github.com/kran/cho"
 	"github.com/kran/dba"
 	"github.com/kran/gcmv2/core"
+	"github.com/spf13/pathologize"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -41,12 +42,13 @@ const (
 
 // Admin 本站管理员账号。
 type Admin struct {
-	ID           int64     `db:"id,omitempty"`
-	Username     string    `db:"username"`
-	PasswordHash string    `db:"password_hash"`
-	SessionKey   string    `db:"session_key"`
-	CreatedAt    time.Time `db:"created_at"`
-	UpdatedAt    time.Time `db:"updated_at"`
+	ID               int64      `db:"id,omitempty"`
+	Username         string     `db:"username"`
+	PasswordHash     string     `db:"password_hash"`
+	SessionKey       string     `db:"session_key"`
+	SessionExpiresAt *time.Time `db:"session_expires_at"`
+	CreatedAt        time.Time  `db:"created_at"`
+	UpdatedAt        time.Time  `db:"updated_at"`
 }
 
 // AdminService 账号服务 — 每站点一个实例, 绑定本站 db。
@@ -107,8 +109,10 @@ func (s *AdminService) SetPassword(password string) error {
 	if err != nil {
 		return err
 	}
-	res, err := s.db.Update("accounts",
-		dba.H{"password_hash": string(hash), "updated_at": time.Now()}, "1 = 1").Exec()
+	res, err := s.db.Update("accounts", dba.H{
+		"password_hash": string(hash), "session_key": "", "session_expires_at": nil,
+		"updated_at": time.Now(),
+	}, "1 = 1").Exec()
 	if err != nil {
 		return err
 	}
@@ -134,8 +138,10 @@ func (s *AdminService) NewSession() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	res, err := s.db.Update("accounts",
-		dba.H{"session_key": key, "updated_at": time.Now()}, "1 = 1").Exec()
+	expiresAt := time.Now().Add(sessionTTL)
+	res, err := s.db.Update("accounts", dba.H{
+		"session_key": key, "session_expires_at": expiresAt, "updated_at": time.Now(),
+	}, "1 = 1").Exec()
 	if err != nil {
 		return "", err
 	}
@@ -152,7 +158,16 @@ func (s *AdminService) ValidSession(key string) bool {
 		return false
 	}
 	a, err := s.Get()
-	return err == nil && a != nil && a.SessionKey == key
+	return err == nil && a != nil && a.SessionKey == key &&
+		a.SessionExpiresAt != nil && a.SessionExpiresAt.After(time.Now())
+}
+
+// InvalidateSession 立即使当前后台会话失效。
+func (s *AdminService) InvalidateSession() error {
+	_, err := s.db.Update("accounts", dba.H{
+		"session_key": "", "session_expires_at": nil, "updated_at": time.Now(),
+	}, "1 = 1").Exec()
+	return err
 }
 
 // Get 取本站账号; 未找到返回 (nil, nil)。
@@ -175,11 +190,12 @@ func randomString(n int) (string, error) {
 
 // backend 管理 handler 组: 账号服务 + 引擎接口 + 类型系统。
 type backend struct {
-	acct      *AdminService
-	eng       core.Engine
-	db        *dba.SQL
-	uploadDir string
-	panels    []AdminPanel // 站点面板（AdminMount 收集 — 每次 /admin/panels 请求 Fire）
+	acct          *AdminService
+	eng           core.Engine
+	db            *dba.SQL
+	uploadDir     string
+	secureCookies bool
+	panels        []AdminPanel // 站点面板（AdminMount 收集 — 每次 /admin/panels 请求 Fire）
 }
 
 // internal 服务器错误统一出口: 细节进日志, 响应透传（admin 是站长工具,
@@ -214,12 +230,21 @@ func (b *backend) uiFile(ctx *CmsCtx) {
 	_, _ = ctx.W.Write(data)
 }
 
-// uploadAllowExt 上传扩展名白名单。svg/html 刻意排除（可执行内容,
+// uploadMIMEs 同时约束扩展名和文件头识别结果。svg/html 刻意排除（可执行内容,
 // 同源服务 = 存储型 XSS）。
-var uploadAllowExt = map[string]bool{
-	".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true, ".ico": true,
-	".pdf": true, ".zip": true,
-	".mp4": true, ".webm": true, ".mp3": true, ".wav": true,
+var uploadMIMEs = map[string]map[string]bool{
+	".jpg":  {"image/jpeg": true},
+	".jpeg": {"image/jpeg": true},
+	".png":  {"image/png": true},
+	".gif":  {"image/gif": true},
+	".webp": {"image/webp": true},
+	".ico":  {"image/x-icon": true, "image/vnd.microsoft.icon": true},
+	".pdf":  {"application/pdf": true},
+	".zip":  {"application/zip": true},
+	".mp4":  {"video/mp4": true},
+	".webm": {"video/webm": true, "audio/webm": true},
+	".mp3":  {"audio/mpeg": true},
+	".wav":  {"audio/wave": true, "audio/wav": true, "audio/x-wav": true},
 }
 
 // upload 处理 multipart 上传: 大小上限 → 扩展名白名单 → 随机文件名 → 落 uploads。
@@ -247,34 +272,54 @@ func saveUpload(uploadDir string, ctx *CmsCtx) {
 	}
 	defer f.Close()
 	ext := strings.ToLower(filepath.Ext(fh.Filename))
-	if !uploadAllowExt[ext] {
+	allowedMIMEs, ok := uploadMIMEs[ext]
+	if !ok {
 		ctx.Error(http.StatusBadRequest, "file type not allowed: "+ext)
 		return
 	}
+	header := make([]byte, 512)
+	n, readErr := io.ReadFull(f, header)
+	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+		ctx.Error(http.StatusBadRequest, "cannot read uploaded file")
+		return
+	}
+	contentType := http.DetectContentType(header[:n])
+	if !allowedMIMEs[contentType] {
+		ctx.Error(http.StatusBadRequest, "file content does not match extension")
+		return
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		ctx.Error(http.StatusBadRequest, "cannot read uploaded file")
+		return
+	}
 	base := strings.TrimSuffix(filepath.Base(fh.Filename), filepath.Ext(fh.Filename))
-	base = strings.ReplaceAll(base, " ", "-")
+	base = pathologize.Clean(base)
 	rand4 := make([]byte, 4)
 	if _, err := rand.Read(rand4); err != nil {
 		ctx.Error(http.StatusInternalServerError, "upload failed")
 		return
 	}
 	name := fmt.Sprintf("%d-%s-%s%s", time.Now().Unix(), hex.EncodeToString(rand4), base, ext)
-	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
 		ctx.Error(http.StatusInternalServerError, "upload failed")
 		return
 	}
-	dst, err := os.Create(filepath.Join(uploadDir, name))
+	dst, err := os.OpenFile(filepath.Join(uploadDir, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "upload failed")
 		return
 	}
 	if _, err := io.Copy(dst, f); err != nil {
-		dst.Close()
-		os.Remove(dst.Name())
+		_ = dst.Close()
+		_ = os.Remove(dst.Name())
 		ctx.Error(http.StatusInternalServerError, "upload failed")
 		return
 	}
-	dst.Close()
+	if err := dst.Close(); err != nil {
+		_ = os.Remove(dst.Name())
+		ctx.Error(http.StatusInternalServerError, "upload failed")
+		return
+	}
 	_ = ctx.Json(http.StatusOK, map[string]any{"name": name, "path": "/uploads/" + name})
 }
 
@@ -319,16 +364,19 @@ func (s *Site) setupAdmin() {
 }
 
 func (s *Site) mountAdmin() {
-	b := &backend{acct: NewService(s.DB()), eng: s.engine, db: s.DB(), uploadDir: s.uploadsDir}
+	b := &backend{
+		acct: NewService(s.DB()), eng: s.engine, db: s.DB(),
+		uploadDir: s.uploadsDir, secureCookies: s.secureCookies,
+	}
 
-	// /admin 组: 公开 login/logout/ui/upload, 其余登录保护
+	// /admin 组: 仅 login/ui 公开，其余端点要求管理员认证。
 	s.router.Group("/admin", func(g *cho.Cho[*CmsCtx]) {
 		g.Post("/login", b.login)
-		g.Post("/logout", b.logout)
 		g.Get("/ui/*", b.uiFile)
-		g.Post("/upload", b.upload)
 		g.Group("", func(authed *cho.Cho[*CmsCtx]) {
 			authed.UseCtx(b.requireAuth)
+			authed.Post("/logout", b.logout)
+			authed.Post("/upload", b.upload)
 			authed.Get("/panels", b.listPanels)
 			authed.Get("/me", b.me)
 			authed.Get("/types", b.types)
@@ -376,15 +424,20 @@ func (b *backend) login(ctx *CmsCtx) {
 	}
 	http.SetCookie(ctx.W, &http.Cookie{
 		Name: cookieName, Value: key,
-		Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		Path: "/", HttpOnly: true, Secure: b.secureCookies, SameSite: http.SameSiteLaxMode,
 		Expires: time.Now().Add(sessionTTL),
 	})
 	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
 }
 
 func (b *backend) logout(ctx *CmsCtx) {
+	if err := b.acct.InvalidateSession(); err != nil {
+		b.internal(ctx, err)
+		return
+	}
 	http.SetCookie(ctx.W, &http.Cookie{
-		Name: cookieName, Value: "", Path: "/", MaxAge: -1,
+		Name: cookieName, Value: "", Path: "/", HttpOnly: true,
+		Secure: b.secureCookies, SameSite: http.SameSiteLaxMode, MaxAge: -1,
 	})
 	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
 }
@@ -465,12 +518,16 @@ func (b *backend) listNodes(ctx *CmsCtx) {
 	if filter != "" {
 		f = `(and (= type {:typ}) ` + filter + `)`
 	}
-	// 默认 id 降序（新节点在前）; sort 参数可选覆盖
-	sortQ := strings.TrimSpace(ctx.Query("sort"))
-	if sortQ == "" {
-		sortQ = "id DESC"
+	// 默认 id 降序（新节点在前）; sort 参数可选覆盖。
+	sortFields, sortErr := parseSort(ctx.Query("sort"))
+	if sortErr != nil {
+		b.bad(ctx, sortErr)
+		return
 	}
-	list, total, err = b.eng.QueryPage(core.ListQuery{Filter: f, Sort: sortQ, Page: page, Size: size}, params)
+	if len(sortFields) == 0 {
+		sortFields = []core.SortField{{Field: "id", Desc: true}}
+	}
+	list, total, err = b.eng.QueryPage(core.ListQuery{Filter: f, Sort: sortFields, Page: page, Size: size}, params)
 	if err != nil {
 		// filter 编译错误（filter-lisp: 前缀）= 客户端参数 → 400; 其余 → 500
 		if strings.Contains(err.Error(), "filter-lisp:") {

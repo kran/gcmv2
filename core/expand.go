@@ -18,7 +18,17 @@ func (s *Service) nodesByIDs(ids []int64) ([]Node, error) {
 	if err != nil {
 		return nil, fmt.Errorf("core: nodesByIDs: %w", err)
 	}
-	return rows, nil
+	byID := make(map[int64]Node, len(rows))
+	for _, node := range rows {
+		byID[node.ID] = node
+	}
+	ordered := make([]Node, 0, len(rows))
+	for _, id := range ids {
+		if node, ok := byID[id]; ok {
+			ordered = append(ordered, node)
+		}
+	}
+	return ordered, nil
 }
 
 // ── ExpandPath: 表达式驱动的路径展开 ───────────────
@@ -49,10 +59,18 @@ func (s *Service) ExpandPath(id int64, expr string) (*Node, error) {
 	return nodes[0], nil
 }
 
+const (
+	maxExpandBytes = 1024
+	maxExpandPaths = 32
+)
+
 // parseExpandExpr 解析表达式: "a, b.c, <-d" → 路径段序列。
 // 外层逗号并行 + 统一路径语言（types.ParsePath）; 段语义 = 引用字段名,
 // JSON 段（$.x）在展开语境无意义 → 拒绝（fail-loud）。
 func parseExpandExpr(expr string) ([][]types.Seg, error) {
+	if len(expr) > maxExpandBytes {
+		return nil, fmt.Errorf("core: expand expression exceeds %d bytes", maxExpandBytes)
+	}
 	var out [][]types.Seg
 	for _, raw := range strings.Split(expr, ",") {
 		raw = strings.TrimSpace(raw)
@@ -70,6 +88,9 @@ func parseExpandExpr(expr string) ([][]types.Seg, error) {
 			if seg.JSON {
 				return nil, fmt.Errorf("core: expand: $. not allowed in %q (expand walks ref fields, not JSON)", raw)
 			}
+		}
+		if len(out) >= maxExpandPaths {
+			return nil, fmt.Errorf("core: expand expression exceeds %d paths", maxExpandPaths)
 		}
 		out = append(out, path)
 	}

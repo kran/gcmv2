@@ -12,19 +12,16 @@ import (
 const testTypesYAML = `
 types:
   category:
-    title: name
     search: true
     fields:
       - { name: name, kind: text }
       - { name: parent, kind: ref, to: category }
       - { name: children, kind: "ref[]", to: category }
   person:
-    title: name
     search: true
     fields:
       - { name: name, kind: text }
   article:
-    title: title
     search: true
     fields:
       - { name: title, kind: text }
@@ -232,6 +229,50 @@ func TestPatchMissingNode(t *testing.T) {
 	}
 }
 
+func TestCreateRejectsUnknownField(t *testing.T) {
+	s := newTestService(t)
+	_, err := s.CreateNode(&Node{
+		Type: "article", Display: "t",
+		Fields: Fields{"title": "t", "typo": "must fail"},
+	})
+	if err == nil {
+		t.Fatal("unknown create field must fail")
+	}
+}
+
+func TestPatchValidatesFields(t *testing.T) {
+	ts := newTypes(t, `
+types:
+  item:
+    fields:
+      - { name: name, kind: text, required: true }
+      - { name: state, kind: select, options: [open, closed] }
+      - { name: happened_at, kind: timestamp }
+`)
+	s := New(testDB(t), ts)
+	id, err := s.CreateNode(&Node{
+		Type: "item", Display: "item",
+		Fields: Fields{"name": "item", "state": "open", "happened_at": 100},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fields := range []Fields{
+		{"unknown": "x"},
+		{"state": "invalid"},
+		{"happened_at": "not-a-number"},
+		{"name": nil},
+		{"name": ""},
+	} {
+		if err := s.PatchNode(id, &NodePatch{Fields: fields}); err == nil {
+			t.Fatalf("invalid patch must fail: %#v", fields)
+		}
+	}
+	if err := s.PatchNode(id, &NodePatch{Fields: Fields{"state": nil}}); err != nil {
+		t.Fatalf("optional field delete: %v", err)
+	}
+}
+
 // ── Delete ─────────────────────────────────────
 
 func TestDelete(t *testing.T) {
@@ -260,7 +301,7 @@ func TestQueryPage(t *testing.T) {
 	s := newTestService(t)
 	for i := 0; i < 5; i++ {
 		s.CreateNode(&Node{Type: "article", Display: "t", Sort: i,
-			Fields: map[string]any{"title": "t" + string(rune('a'+i))}})
+			Fields: map[string]any{"title": "t" + string(rune('a'+i)), "views": i}})
 	}
 	list, total, err := s.QueryPage(ListQuery{Page: 1, Size: 2})
 	if err != nil {
@@ -268,6 +309,21 @@ func TestQueryPage(t *testing.T) {
 	}
 	if total != 5 || len(list) != 2 {
 		t.Fatalf("total=%d list=%d", total, len(list))
+	}
+	list, _, err = s.QueryPage(ListQuery{
+		Sort: []SortField{{Field: "$views", Desc: true}}, Page: 1, Size: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list[0].Fields.Int("views") != 4 || list[4].Fields.Int("views") != 0 {
+		t.Fatalf("dynamic field sort order = %#v", list)
+	}
+	for _, field := range []string{"id DESC", "id; DELETE FROM nodes", "$missing"} {
+		_, _, err := s.QueryPage(ListQuery{Sort: []SortField{{Field: field}}, Page: 1, Size: 5})
+		if err == nil {
+			t.Fatalf("unsafe sort field %q must fail", field)
+		}
 	}
 }
 

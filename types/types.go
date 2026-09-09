@@ -9,6 +9,7 @@
 package types
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"regexp"
@@ -117,7 +118,9 @@ func (t *Types) Load(raw []byte) error {
 	var cfg struct {
 		Types map[string]TypeDef `yaml:"types"`
 	}
-	if err := yaml.Unmarshal(raw, &cfg); err != nil {
+	decoder := yaml.NewDecoder(bytes.NewReader(raw))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&cfg); err != nil {
 		return fmt.Errorf("types: parse: %w", err)
 	}
 	if len(cfg.Types) == 0 {
@@ -380,6 +383,34 @@ func (t *Types) ValidateFields(typeName string, fields map[string]any) error {
 		v, ok := fields[f.Name]
 		if !ok || t.isEmpty(f.Kind, v) {
 			return fmt.Errorf("types: %q: required field %q missing", typeName, f.Name)
+		}
+	}
+	return nil
+}
+
+// ValidatePatchFields 校验差量字段。nil 表示删除/清空：可选字段允许，
+// required 字段拒绝；非 nil 值与 Create 使用同一个 Kind 校验。
+func (t *Types) ValidatePatchFields(typeName string, fields map[string]any) error {
+	td, ok := t.defs[typeName]
+	if !ok {
+		return fmt.Errorf("types: type %q not defined", typeName)
+	}
+	for name, value := range fields {
+		field, ok := FieldByName(td, name)
+		if !ok {
+			return fmt.Errorf("types: %q: unknown field %q", typeName, name)
+		}
+		if value == nil {
+			if field.Required {
+				return fmt.Errorf("types: %q: required field %q cannot be deleted", typeName, name)
+			}
+			continue
+		}
+		if err := t.ValidateValue(typeName, field, value); err != nil {
+			return err
+		}
+		if field.Required && t.isEmpty(field.Kind, value) {
+			return fmt.Errorf("types: %q: required field %q cannot be empty", typeName, name)
 		}
 	}
 	return nil

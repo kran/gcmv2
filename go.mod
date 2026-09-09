@@ -9,6 +9,7 @@ require (
 	github.com/kran/dba v0.15.0
 	github.com/pressly/goose/v3 v3.27.3
 	github.com/spf13/cast v1.7.0
+	github.com/spf13/pathologize v1.1.0
 	golang.org/x/crypto v0.55.0
 	gopkg.in/yaml.v3 v3.0.1
 	jaytaylor.com/html2text v0.0.0-20260303211410-1a4bdc82ecec
@@ -45,7 +46,7 @@ require (
 	github.com/shopspring/decimal v1.4.0 // indirect
 	github.com/ssor/bom v0.0.0-20170718123548-6386211fdfcf // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/image v0.0.0-20191009234506-e7c1f5e7dbb8 // indirect
+	golang.org/x/image v0.43.0 // indirect
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect

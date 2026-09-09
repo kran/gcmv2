@@ -17,22 +17,23 @@ import (
 // testSite 临时站点（真实 DB + 最小类型）。
 func testSite(t *testing.T) *Site {
 	t.Helper()
+	return testSiteConfigured(t, nil)
+}
+
+func testSiteConfigured(t *testing.T, configure func(*Site)) *Site {
+	t.Helper()
 	dir := t.TempDir()
 	typesYAML := `
 types:
   user:
-    title: name
     auth: true
     fields:
       - { name: name, kind: text }
       - { name: role, kind: select, options: [member, editor] }
   guestbook:
-    title: title
-    create: 'auth != nil'
     fields:
       - { name: title, kind: text }
   article:
-    create: 'false'
     fields:
       - { name: body, kind: richtext }
 `
@@ -42,6 +43,9 @@ types:
 	}
 	os.MkdirAll(filepath.Join(dir, "templates"), 0o755)
 	site := New(dir)
+	if configure != nil {
+		configure(site)
+	}
 	site.Start()
 	return site
 }
@@ -96,6 +100,26 @@ func TestAuthCreateRule(t *testing.T) {
 	}
 }
 
+func TestAuthSessionSecureCookie(t *testing.T) {
+	s := testSiteConfigured(t, func(site *Site) { site.SecureCookies(true) })
+	id, err := s.Engine().CreateNode(&core.Node{
+		Type: "user", Display: "secure", Fields: core.Fields{"name": "secure"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/login", nil)
+	ctx := s.CmsCtxMaker(response, request)
+	if _, err := AuthSession(ctx, s.Engine(), id); err != nil {
+		t.Fatal(err)
+	}
+	cookies := response.Result().Cookies()
+	if len(cookies) == 0 || !cookies[0].Secure || !cookies[0].HttpOnly {
+		t.Fatalf("auth cookie flags = %#v", cookies)
+	}
+}
+
 func TestAuthLogout(t *testing.T) {
 	s := testSite(t)
 	ck := newSession(t, s)
@@ -108,6 +132,25 @@ func TestAuthLogout(t *testing.T) {
 	w = do(s, "GET", "/api/auth/me", nil, ck)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("me after logout = %d", w.Code)
+	}
+}
+
+func TestAuthBindUsesSessionNodeType(t *testing.T) {
+	s := testSite(t)
+	ck := newSession(t, s)
+	w := do(s, "POST", "/api/auth/bind", map[string]any{
+		"type": "article", "method": "wechat", "identifier": "openid-bind",
+	}, ck)
+	if w.Code != http.StatusOK {
+		t.Fatalf("bind = %d: %s", w.Code, w.Body.String())
+	}
+	method, err := s.Engine().FindAuth("user", "wechat", "openid-bind")
+	if err != nil || method == nil {
+		t.Fatalf("auth method bound to wrong type: method=%#v err=%v", method, err)
+	}
+	wrong, err := s.Engine().FindAuth("article", "wechat", "openid-bind")
+	if err != nil || wrong != nil {
+		t.Fatalf("client type should be ignored: method=%#v err=%v", wrong, err)
 	}
 }
 

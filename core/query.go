@@ -1,14 +1,25 @@
 package core
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/kran/dba"
+	"github.com/kran/gcmv2/types"
 )
+
+// SortField 是经过 Schema 校验的排序项。Field 使用节点列名（如 id、created_at）
+// 或动态字段名（如 $published_at）；不接受 SQL 表达式。
+type SortField struct {
+	Field string `json:"field"`
+	Desc  bool   `json:"desc"`
+}
 
 // ListQuery 结构化查询: 过滤（Lisp 表达式）、排序、展开、分页。
 type ListQuery struct {
-	Filter string // Lisp filter（空 = 不过滤）
-	Sort   string // 排序（空 = 默认 ORDER BY sort, id DESC）
-	Expand string // 展开表达式（"authors, categories" — 批量路径展开）
+	Filter string      // Lisp filter（空 = 不过滤）
+	Sort   []SortField // 空 = 默认 sort ASC, id DESC
+	Expand string      // 展开表达式（"authors, categories" — 批量路径展开）
 	Page   int
 	Size   int
 }
@@ -32,8 +43,14 @@ func (s *Service) QueryPage(q ListQuery, params ...map[string]any) ([]Node, int6
 		if err != nil {
 			return nil, 0, err
 		}
+		byID := make(map[int64]*Node, len(expanded))
+		for _, node := range expanded {
+			byID[node.ID] = node
+		}
 		for i := range nodes {
-			nodes[i].Expand = expanded[i].Expand
+			if node := byID[nodes[i].ID]; node != nil {
+				nodes[i].Expand = node.Expand
+			}
 		}
 	}
 	return nodes, total, nil
@@ -55,13 +72,12 @@ func (s *Service) Query(q ListQuery, params ...map[string]any) ([]Node, error) {
 	return db.FetchList[Node]()
 }
 
-// buildQuery 构建查询（Lisp 编译暂缺 — filter 非空报错, 后续补）。
 func (s *Service) buildQuery(q ListQuery, params []map[string]any) (*dba.SQL, error) {
 	var p map[string]any
 	if len(params) > 0 {
 		p = params[0]
 	}
-	db := s.db.Add(`SELECT ${F:*} FROM nodes WHERE ${where} ${order:ORDER BY sort, id DESC}`)
+	db := s.db.Add(`SELECT ${F:*} FROM nodes WHERE ${where} ${order:ORDER BY sort ASC, id DESC}`)
 	var err error
 	if q.Filter != "" {
 		db, err = s.CompileLispInto(db, q.Filter, p)
@@ -71,8 +87,50 @@ func (s *Service) buildQuery(q ListQuery, params []map[string]any) (*dba.SQL, er
 	} else {
 		db = db.Var("where", "1 = 1")
 	}
-	if q.Sort != "" {
-		db = db.Var("order", "ORDER BY "+q.Sort)
+	if len(q.Sort) > 0 {
+		order, err := s.compileSort(q.Sort)
+		if err != nil {
+			return nil, err
+		}
+		db = db.Var("order", "ORDER BY "+order)
 	}
 	return db, nil
+}
+
+func (s *Service) compileSort(fields []SortField) (string, error) {
+	parts := make([]string, 0, len(fields))
+	for _, sortField := range fields {
+		field := strings.TrimSpace(sortField.Field)
+		if field == "" {
+			return "", fmt.Errorf("core: sort field required")
+		}
+		var expression string
+		if strings.HasPrefix(field, "$") {
+			name := strings.TrimPrefix(field, "$")
+			if !s.hasField(name) {
+				return "", fmt.Errorf("core: sort field %q not defined", field)
+			}
+			expression = `json_extract(nodes.fields, '$.` + name + `')`
+		} else {
+			if !types.IsNodeColumn(field) || field == "fields" {
+				return "", fmt.Errorf("core: sort column %q not allowed", field)
+			}
+			expression = `nodes."` + field + `"`
+		}
+		direction := "ASC"
+		if sortField.Desc {
+			direction = "DESC"
+		}
+		parts = append(parts, expression+" "+direction)
+	}
+	return strings.Join(parts, ", "), nil
+}
+
+func (s *Service) hasField(name string) bool {
+	for _, typeName := range s.types.Names() {
+		if _, ok := s.types.Field(typeName, name); ok {
+			return true
+		}
+	}
+	return false
 }

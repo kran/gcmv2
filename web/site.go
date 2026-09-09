@@ -9,6 +9,7 @@
 package web
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -26,15 +27,16 @@ import (
 // 一个 Site = 一个引擎 + 一个路由器 + 模板函数表。
 // 多站 = 多个 Site + HostMux 分发。
 type Site struct {
-	basedir    string
-	engine     core.Engine
-	db         *dba.SQL
-	render     *Render
-	router     *cho.Cho[*CmsCtx]
-	uploadsDir string
-	debug      bool      // 开发模式: 渲染错误显示详情页
-	once       sync.Once // Setup 幂等 — 带锁不重复 mount 路由
-	started    bool      // Setup 已执行（Handler() 检查 — 防未 Setup）
+	basedir       string
+	engine        core.Engine
+	db            *dba.SQL
+	render        *Render
+	router        *cho.Cho[*CmsCtx]
+	uploadsDir    string
+	debug         bool      // 开发模式: 渲染错误显示详情页
+	secureCookies bool      // 前台/后台认证 Cookie 是否仅通过 HTTPS 发送
+	once          sync.Once // Setup 幂等 — 带锁不重复 mount 路由
+	started       bool      // Setup 已执行（Handler() 检查 — 防未 Setup）
 }
 
 // New 站点初始化（两阶段第 ① 步）。basedir 下固定路径:
@@ -132,6 +134,10 @@ func (s *Site) Router() *cho.Cho[*CmsCtx] { return s.router }
 // Debug 开发模式（配置期调 — 渲染错误显示详情页）。
 func (s *Site) Debug(on bool) { s.debug = on }
 
+// SecureCookies 设置前台和后台认证 Cookie 的 Secure 属性。
+// 生产 HTTPS 环境应在 Start 前启用。
+func (s *Site) SecureCookies(on bool) { s.secureCookies = on }
+
 // Handler 路由器（Start 后有效; HostMux 用）。
 func (s *Site) Handler() http.Handler {
 	if !s.started {
@@ -202,6 +208,14 @@ func (s *Site) serveFiles(pattern, baseDir, prefix string) {
 		if err := s.engine.Hooks().Fire(HookServeFile, ctx, &filePath); err != nil {
 			ctx.String(http.StatusInternalServerError, "serve file: "+err.Error())
 			return
+		}
+		// 禁止浏览器 MIME 猜测；PDF/ZIP 等主动或归档内容只允许下载。
+		ctx.SetHeader("X-Content-Type-Options", "nosniff")
+		if prefix == "/uploads/" {
+			ext := strings.ToLower(filepath.Ext(filePath))
+			if ext == ".pdf" || ext == ".zip" {
+				ctx.SetHeader("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filepath.Base(filePath)))
+			}
 		}
 		// 兜底 — 用（可能被插件改的）filePath 服务
 		http.ServeFile(ctx.W, ctx.R, filePath)

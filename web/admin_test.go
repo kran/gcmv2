@@ -3,7 +3,9 @@ package web
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/kran/gcmv2/core"
 )
@@ -27,6 +29,12 @@ func TestAdminRequireAuth(t *testing.T) {
 			t.Fatalf("%s = %d, want 401", path, w.Code)
 		}
 	}
+	for _, path := range []string{"/admin/upload", "/admin/logout"} {
+		w := do(s, "POST", path, nil)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("POST %s = %d, want 401", path, w.Code)
+		}
+	}
 }
 
 // TestAdminLoginBad 错误密码 → 401。
@@ -47,6 +55,21 @@ func TestAdminUI(t *testing.T) {
 	}
 	if w.Body.String() == "" {
 		t.Fatal("ui empty")
+	}
+}
+
+func TestAdminTreeRouteUsesParamKey(t *testing.T) {
+	s := testSite(t)
+	w := do(s, "GET", "/admin/ui/pages/App.vue", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("app component = %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `<router-view :key="routeViewKey"`) {
+		t.Fatal("router-view is not keyed by route params")
+	}
+	if !strings.Contains(body, `JSON.stringify(route.params || {})`) {
+		t.Fatal("route view key does not include route params")
 	}
 }
 
@@ -141,6 +164,51 @@ func TestAdminPasswordFlow(t *testing.T) {
 	w = do(s, "GET", "/admin/nodes/"+itoa(created.ID), nil, ck)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("deleted get = %d", w.Code)
+	}
+	// logout 必须同时使服务端 session_key 失效，旧 Cookie 不可复用。
+	w = do(s, "POST", "/admin/logout", nil, ck)
+	if w.Code != http.StatusOK {
+		t.Fatalf("logout = %d", w.Code)
+	}
+	w = do(s, "GET", "/admin/me", nil, ck)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("old cookie after logout = %d, want 401", w.Code)
+	}
+}
+
+func TestAdminSecureCookie(t *testing.T) {
+	s := testSiteConfigured(t, func(site *Site) { site.SecureCookies(true) })
+	if err := NewService(s.DB()).SetPassword("cmx12345"); err != nil {
+		t.Fatal(err)
+	}
+	w := do(s, "POST", "/admin/login", map[string]any{"username": "admin", "password": "cmx12345"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("login = %d: %s", w.Code, w.Body.String())
+	}
+	cookies := w.Result().Cookies()
+	if len(cookies) == 0 || !cookies[0].Secure || !cookies[0].HttpOnly {
+		t.Fatalf("admin cookie flags = %#v", cookies)
+	}
+}
+
+func TestAdminSessionExpiresServerSide(t *testing.T) {
+	s := testSite(t)
+	service := NewService(s.DB())
+	key, err := service.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !service.ValidSession(key) {
+		t.Fatal("new admin session should be valid")
+	}
+	_, err = s.DB().Update("accounts", map[string]any{
+		"session_expires_at": time.Now().Add(-time.Minute),
+	}, "1 = 1").Exec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if service.ValidSession(key) {
+		t.Fatal("expired admin session should be rejected")
 	}
 }
 

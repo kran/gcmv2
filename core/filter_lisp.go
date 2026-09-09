@@ -29,16 +29,27 @@ type lispExpr struct {
 
 // ── Parser（括号递归, ~60 行）────────────────────
 
+const (
+	maxFilterBytes = 4096
+	maxFilterDepth = 12
+	maxFilterNodes = 256
+	maxArrayItems  = 100
+)
+
 type lispParser struct {
-	src string
-	pos int
+	src   string
+	pos   int
+	nodes int
 }
 
-// parseLisp 解析 S-expression → 表达式树。
+// parseLisp 解析 S-expression → 表达式树，并限制输入和 AST 复杂度。
 func parseLisp(src string) (lispExpr, error) {
+	if len(src) > maxFilterBytes {
+		return lispExpr{}, fmt.Errorf("filter-lisp: expression exceeds %d bytes", maxFilterBytes)
+	}
 	p := &lispParser{src: src}
 	p.skipWS()
-	e, err := p.parseExpr()
+	e, err := p.parseExpr(0)
 	if err != nil {
 		return lispExpr{}, err
 	}
@@ -49,7 +60,14 @@ func parseLisp(src string) (lispExpr, error) {
 	return e, nil
 }
 
-func (p *lispParser) parseExpr() (lispExpr, error) {
+func (p *lispParser) parseExpr(depth int) (lispExpr, error) {
+	if depth > maxFilterDepth {
+		return lispExpr{}, fmt.Errorf("filter-lisp: nesting exceeds %d", maxFilterDepth)
+	}
+	p.nodes++
+	if p.nodes > maxFilterNodes {
+		return lispExpr{}, fmt.Errorf("filter-lisp: expression exceeds %d nodes", maxFilterNodes)
+	}
 	p.skipWS()
 	if p.pos >= len(p.src) {
 		return lispExpr{}, fmt.Errorf("filter-lisp: unexpected end")
@@ -73,7 +91,7 @@ func (p *lispParser) parseExpr() (lispExpr, error) {
 				p.pos++
 				break
 			}
-			arg, err := p.parseExpr()
+			arg, err := p.parseExpr(depth + 1)
 			if err != nil {
 				return lispExpr{}, err
 			}
@@ -95,7 +113,10 @@ func (p *lispParser) parseExpr() (lispExpr, error) {
 				p.pos++
 				break
 			}
-			item, err := p.parseExpr()
+			if len(items) >= maxArrayItems {
+				return lispExpr{}, fmt.Errorf("filter-lisp: array exceeds %d items", maxArrayItems)
+			}
+			item, err := p.parseExpr(depth + 1)
 			if err != nil {
 				return lispExpr{}, err
 			}

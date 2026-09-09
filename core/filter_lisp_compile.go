@@ -245,6 +245,9 @@ func (c *lispCompiler) logical(sep string, args []lispExpr) (string, error) {
 		}
 		return c.varRef("NOT (" + frag + ")"), nil
 	}
+	if len(args) == 0 {
+		return "", fmt.Errorf("filter-lisp: logical expression requires at least one argument")
+	}
 	for _, a := range args {
 		frag, _, err := c.call(a)
 		if err != nil {
@@ -361,7 +364,11 @@ func (c *lispCompiler) inFn(args []lispExpr) (string, error) {
 	}
 
 	// 集合形态一: 数组字面量 [1 2 3] 或占位符绑定数组（元素解析占位符）
-	if arr, ok := c.arrayValue(args[1]); ok {
+	arr, isArray, err := c.arrayValue(args[1])
+	if err != nil {
+		return "", err
+	}
+	if isArray {
 		return c.varRef(c.inSQL(kind, refType, field, arr), c.inArgs(kind, refType, field, arr)...), nil
 	}
 	// 集合形态二: 集合函数 (subtree "root") / 自定义 — 返回 id 切片参数
@@ -386,41 +393,59 @@ func (c *lispCompiler) inFn(args []lispExpr) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	arr := []any{val}
-	return c.varRef(c.inSQL(kind, refType, field, arr), c.inArgs(kind, refType, field, arr)...), nil
+	single := []any{val}
+	return c.varRef(c.inSQL(kind, refType, field, single), c.inArgs(kind, refType, field, single)...), nil
 }
 
-// arrayValue 数组字面量 [..] / 占位符绑定数组 → ([]any, true); 否则 (nil, false)。
-func (c *lispCompiler) arrayValue(e lispExpr) ([]any, bool) {
+// arrayValue 数组字面量 / 占位符绑定数组 → (items, true, nil)；
+// 普通单值返回 (_, false, nil)。所有集合统一限制大小。
+func (c *lispCompiler) arrayValue(e lispExpr) ([]any, bool, error) {
 	if e.head != "" {
-		return nil, false
+		return nil, false, nil
 	}
-	switch v := e.atom.(type) {
+	var out []any
+	switch value := e.atom.(type) {
 	case []any:
-		out := make([]any, len(v))
-		for i, item := range v {
+		out = make([]any, len(value))
+		for i, item := range value {
 			if p, ok := item.(placeholder); ok {
-				val, err := valueParam(p, c.params)
+				resolved, err := valueParam(p, c.params)
 				if err != nil {
-					return nil, false
+					return nil, false, err
 				}
-				out[i] = val
+				out[i] = resolved
 			} else {
 				out[i] = item
 			}
 		}
-		return out, true
 	case placeholder:
-		val, err := valueParam(v, c.params)
+		resolved, err := valueParam(value, c.params)
 		if err != nil {
-			return nil, false
+			return nil, false, err
 		}
-		if arr, ok := val.([]any); ok {
-			return arr, true
+		switch values := resolved.(type) {
+		case []any:
+			out = values
+		case []int64:
+			out = make([]any, len(values))
+			for i, item := range values {
+				out[i] = item
+			}
+		case []int:
+			out = make([]any, len(values))
+			for i, item := range values {
+				out[i] = item
+			}
+		default:
+			return nil, false, nil
 		}
-		return nil, false
+	default:
+		return nil, false, nil
 	}
-	return nil, false
+	if len(out) > maxArrayItems {
+		return nil, false, fmt.Errorf("filter-lisp: collection exceeds %d items", maxArrayItems)
+	}
+	return out, true, nil
 }
 
 // inFieldArg 集合片段 #{1} 的参数（字段名 / JSON 路径）。
@@ -487,6 +512,9 @@ func (c *lispCompiler) subtreeFn(args []lispExpr) (string, error) {
 		return "", err
 	}
 	ids = append([]int64{cat.ID}, ids...)
+	if len(ids) > maxArrayItems {
+		return "", fmt.Errorf("filter-lisp: subtree exceeds %d nodes", maxArrayItems)
+	}
 	anyIDs := make([]any, len(ids))
 	for i, id := range ids {
 		anyIDs[i] = id
