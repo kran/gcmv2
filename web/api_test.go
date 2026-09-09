@@ -142,7 +142,7 @@ func TestAPIUploadRequiresLoginAndValidContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := s.Engine().CreateSession(userID)
+	token, err := s.Engine().CreateSession("members", userID)
 	if err != nil {
 		t.Fatal(err)
 	}

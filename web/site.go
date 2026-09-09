@@ -32,6 +32,7 @@ type Site struct {
 	db            *dba.SQL
 	render        *Render
 	router        *cho.Cho[*CmsCtx]
+	auth          *AuthRegistry
 	uploadsDir    string
 	debug         bool      // 开发模式: 渲染错误显示详情页
 	secureCookies bool      // 前台/后台认证 Cookie 是否仅通过 HTTPS 发送
@@ -66,7 +67,8 @@ func New(basedir string) *Site {
 		render:     render,
 		uploadsDir: filepath.Join(basedir, "uploads"),
 	}
-	// ⑥ 定义全部内置 hook（事件先声明 — 配置期 AddHook 无时序问题）
+	// ⑥ 认证 Realm 注册表与内置 hook（配置期注册，Start 后不可变）
+	site.auth = newAuthRegistry(site)
 	defineWebHooks(engine)
 	defineNodeHooks(engine)
 	defineAuthHooks(engine)
@@ -116,6 +118,9 @@ func (s *Site) CmsCtxMaker(w http.ResponseWriter, r *http.Request) *CmsCtx {
 
 // Engine 引擎（AddHook/Query/...）。
 func (s *Site) Engine() core.Engine { return s.engine }
+
+// Auth returns the Site's server-controlled authentication Realm registry.
+func (s *Site) Auth() *AuthRegistry { return s.auth }
 
 // DB 底层数据库句柄（逃生舱 — admin 账号表等）。
 func (s *Site) DB() *dba.SQL { return s.db }

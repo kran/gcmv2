@@ -43,15 +43,15 @@ type Engine interface {
 	ExpandMany(ctx context.Context, ids []int64, paths ...query.ExpandPath) ([]*Node, error)
 	AutoExpand(typeName string) []query.ExpandPath
 
-	// ── 认证（前台用户 — 多登录方式 + 会话） ──
-	RegisterAuth(typeName, method, identifier string, data Fields, n *Node) (int64, error)
-	FindAuth(typeName, method, identifier string) (*AuthMethod, error)
-	VerifyPassword(am *AuthMethod, secret string) bool
-	AddAuthMethod(typeName string, nodeID int64, method, identifier string, data Fields) error
-	RemoveAuthMethod(typeName, method, identifier string) error
-	CreateSession(nodeID int64) (string, error)
-	ValidSession(token string) (int64, error)
+	// ── 认证（opaque credentials + Realm-bound sessions） ──
+	RegisterAuth(nodeType, method, identifier string, data Fields, n *Node) (int64, error)
+	FindAuth(nodeType, method, identifier string) (*AuthMethod, error)
+	AddAuthMethod(nodeType string, nodeID int64, method, identifier string, data Fields) error
+	RemoveAuthMethod(nodeType, method, identifier string) error
+	CreateSession(realm string, nodeID int64) (string, error)
+	ValidSession(token string) (*Session, error)
 	DeleteSession(token string) error
+	DeleteNodeSessions(nodeID int64) error
 
 	// ── 容器 ──
 	Types() *types.Types

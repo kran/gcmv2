@@ -18,6 +18,11 @@
 - `ListQuery.Expand string` is replaced by typed `[]query.ExpandPath`.
 - `ExpandPath/ExpandPathMany` are replaced by context-aware `Expand/ExpandMany`; incoming paths require an explicit source Type.
 - Raw-SQL Lisp extension registration is removed.
+- Authentication request DTOs no longer accept `type`; credential routes are now `/api/auth/{realm}/...`.
+- `password.Mount` now requires `password.Options{Realm: ...}`.
+- `CmsCtx.User` and `RequireRole` are removed; use `Actor` and `Principal`.
+- Session APIs now require a Realm and resolve a `core.Session` instead of a bare Node ID.
+- `core.VerifyPassword` is removed; credential verification belongs to the password plugin.
 
 ### Added
 
@@ -34,6 +39,10 @@
 - Schema-aware validation for fields, Kind-declared query operations, values, relations, sorts, complexity, and relation depth.
 - Stable ID tie-breaking for every explicit sort.
 - Per-hop Schema validation for Expand, including mixed root Types, relation cardinality, and target Type integrity.
+- Server-registered Auth Realms mapping stable public names to authentication-enabled Node types.
+- Unified Anonymous, Node, Admin, and API Key Actor model with lazy Node Principal loading.
+- Realm-isolated password register/login/bind endpoints and cross-Realm bind rejection.
+- SHA-256 Session token storage and bulk Node session revocation.
 
 ### Migration
 
@@ -41,6 +50,8 @@
 - Update callers to send `revision` with effective patches.
 - Remove `legacy_node_columns` after the site migration has verified its data.
 - No runtime fallback reads old columns and no source compatibility layer is provided.
+- Register Auth Realms before mounting credential plugins and update clients to `/api/auth/{realm}/...`.
+- Core migration `00010_auth_realms.sql` replaces plaintext Session tokens with hashes and invalidates existing frontend Sessions.
 
 ## v0.8.4
 

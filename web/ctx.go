@@ -8,12 +8,14 @@ import (
 	"github.com/kran/gcmv2/core"
 )
 
-// CmsCtx 请求上下文（渲染 + 响应方法 + 引擎访问 + 当前用户）。
+// CmsCtx 请求上下文（渲染 + 响应方法 + 引擎访问 + 当前 Actor）。
 type CmsCtx struct {
 	*cho.BaseContext
-	site       *Site
-	user       *core.Node // 当前登录用户（惰性解析 — 每请求缓存）
-	userLoaded bool
+	site            *Site
+	actor           Actor
+	actorLoaded     bool
+	principal       *core.Node
+	principalLoaded bool
 }
 
 // Engine 引擎访问（handler 里查数据）。

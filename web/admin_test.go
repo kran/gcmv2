@@ -120,10 +120,19 @@ func TestAdminPasswordFlow(t *testing.T) {
 	if ck == nil {
 		t.Fatal("no cookie")
 	}
-	// 登录后 me
+	// 登录后 me，并统一暴露 Admin Actor。
 	w = do(s, "GET", "/admin/me", nil, ck)
 	if w.Code != http.StatusOK {
 		t.Fatalf("me = %d", w.Code)
+	}
+	var me struct {
+		Actor Actor `json:"actor"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &me); err != nil {
+		t.Fatal(err)
+	}
+	if me.Actor.Kind != ActorAdmin {
+		t.Fatalf("admin actor = %#v", me.Actor)
 	}
 	// 建节点（article）
 	w = do(s, "POST", "/admin/nodes?type=article", map[string]any{

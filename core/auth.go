@@ -2,89 +2,79 @@ package core
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/kran/dba"
-	"golang.org/x/crypto/bcrypt"
 )
 
-// ── 前台用户认证: 多登录方式（auth_methods）+ 会话（sessions） ──
-//
-// 结构（PB 参考）:
-//   - 可认证类型声明 capabilities.authentication — 节点资料存 fields
-//   - 认证信息（email/密码 hash）存 auth_methods — 一个节点多行 = 多登录方式
-//   - 会话 node 级（sessions）— 任何方式登录进同一会话; token 双轨
-//     （cookie 与 Bearer 是同一个字符串 — 两种携带方式）
-//   - bcrypt 只在 auth_methods.secret — fields 永不出现密码
-
-// AuthMethod 一种登录方式（一个节点可多行）。
+// AuthMethod binds one credential, owned by a credential plugin, to an
+// authentication-enabled Node. Core stores credential data opaquely.
 type AuthMethod struct {
 	ID         int64     `db:"id,omitempty" json:"id"`
-	Type       string    `db:"type" json:"type"`
+	NodeType   string    `db:"type" json:"node_type"`
 	NodeID     int64     `db:"node_id" json:"node_id"`
 	Method     string    `db:"method" json:"method"`
 	Identifier string    `db:"identifier" json:"identifier"`
-	Data       Fields    `db:"data" json:"-"` // 凭证 JSON（各方式自定义 — password hash/oauth token...; 永不输出）
+	Data       Fields    `db:"data" json:"-"`
 	CreatedAt  time.Time `db:"created_at" json:"created_at"`
 	UpdatedAt  time.Time `db:"updated_at" json:"updated_at"`
 }
 
-// Session 会话（node 级 — 与登录方式无关）。
+// Session is a Realm-bound Node session. TokenHash is never sent to clients.
 type Session struct {
-	Token     string    `db:"token" json:"-"`
+	TokenHash string    `db:"token_hash" json:"-"`
+	Realm     string    `db:"realm" json:"realm"`
 	NodeID    int64     `db:"node_id" json:"node_id"`
 	ExpiresAt time.Time `db:"expires_at" json:"expires_at"`
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
-// SessionTTL 会话有效期（滑动 — 活跃续期, 过期重新登录）。
+// SessionTTL is the sliding frontend session lifetime.
 const SessionTTL = 7 * 24 * time.Hour
 
-// ── 认证方式 ──────────────────────────────────
-
-// RegisterAuth 注册: 事务内建 auth 类型节点 + 认证方式（原子）。
-// 返回节点 id。identifier 冲突 → 报错（UNIQUE 兜底 + 提前查重给友好错误）。
-func (s *Service) RegisterAuth(typeName, method, identifier string, data Fields, n *Node) (int64, error) {
-	td, ok := s.types.Type(typeName)
+// RegisterAuth atomically creates an authentication-enabled Node and binds an
+// opaque credential to it.
+func (s *Service) RegisterAuth(nodeType, method, identifier string, data Fields, n *Node) (int64, error) {
+	td, ok := s.types.Type(nodeType)
 	if !ok {
-		return 0, fmt.Errorf("core: auth: type %q not defined", typeName)
+		return 0, fmt.Errorf("core: auth: type %q not defined", nodeType)
 	}
 	if !td.Capabilities.Authentication {
-		return 0, fmt.Errorf("core: auth: type %q is not auth-enabled", typeName)
+		return 0, fmt.Errorf("core: auth: type %q is not auth-enabled", nodeType)
 	}
 	if method == "" || identifier == "" {
 		return 0, errors.New("core: auth: method and identifier required")
 	}
-	// 查重（提前 — 友好错误; UNIQUE 兜底并发）
-	ex, err := s.FindAuth(typeName, method, identifier)
+	existing, err := s.FindAuth(nodeType, method, identifier)
 	if err != nil {
 		return 0, err
 	}
-	if ex != nil {
+	if existing != nil {
 		return 0, fmt.Errorf("core: auth: %s %q already registered", method, identifier)
 	}
-	// 类型补全（n.Type 可能为空 — 以 typeName 为准）
 	if n == nil {
 		n = &Node{}
 	}
-	n.Type = typeName
+	n.Type = nodeType
 
 	var nodeID int64
 	err = s.db.Transaction(func(tx *dba.SQL) error {
-		// CreateNode 内部事务 — 嵌套检测（pool == nil）直接并入当前事务
 		id, err := s.CreateNode(n)
 		if err != nil {
 			return err
 		}
 		nodeID = id
 		now := time.Now()
-		if _, err := tx.Insert("auth_methods", &AuthMethod{
-			Type: typeName, NodeID: id, Method: method, Identifier: identifier,
+		authMethod := &AuthMethod{
+			NodeType: nodeType, NodeID: id, Method: method, Identifier: identifier,
 			Data: data, CreatedAt: now, UpdatedAt: now,
-		}).Exec(); err != nil {
+		}
+		_, err = tx.Insert("auth_methods", authMethod).Exec()
+		if err != nil {
 			return fmt.Errorf("core: auth: insert method: %w", err)
 		}
 		return nil
@@ -95,33 +85,21 @@ func (s *Service) RegisterAuth(typeName, method, identifier string, data Fields,
 	return nodeID, nil
 }
 
-// FindAuth 按 (type, method, identifier) 找认证方式; 未找到返回 (nil, nil)。
-func (s *Service) FindAuth(typeName, method, identifier string) (*AuthMethod, error) {
+// FindAuth finds a credential by Node type, method, and identifier.
+func (s *Service) FindAuth(nodeType, method, identifier string) (*AuthMethod, error) {
 	return s.db.Add(
 		`SELECT * FROM auth_methods WHERE type = #{1} AND method = #{2} AND identifier = #{3}`,
-		typeName, method, identifier).FetchOne[AuthMethod]()
+		nodeType, method, identifier).FetchOne[AuthMethod]()
 }
 
-// VerifyPassword 验密（password 方式 — 比较 Data["password"] 与输入; bcrypt）。
-func (s *Service) VerifyPassword(am *AuthMethod, secret string) bool {
-	if am == nil {
-		return false
-	}
-	hash := am.Data.Str("password")
-	if hash == "" {
-		return false
-	}
-	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(secret)) == nil
-}
-
-// AddAuthMethod 给已有节点加登录方式（bind — 登录后绑定新方式）。
-func (s *Service) AddAuthMethod(typeName string, nodeID int64, method, identifier string, data Fields) error {
+// AddAuthMethod binds an opaque credential to an existing Node.
+func (s *Service) AddAuthMethod(nodeType string, nodeID int64, method, identifier string, data Fields) error {
 	if method == "" || identifier == "" {
 		return errors.New("core: auth: method and identifier required")
 	}
-	td, ok := s.types.Type(typeName)
+	td, ok := s.types.Type(nodeType)
 	if !ok || !td.Capabilities.Authentication {
-		return fmt.Errorf("core: auth: type %q is not auth-enabled", typeName)
+		return fmt.Errorf("core: auth: type %q is not auth-enabled", nodeType)
 	}
 	node, err := s.GetNodeById(nodeID)
 	if err != nil {
@@ -130,97 +108,123 @@ func (s *Service) AddAuthMethod(typeName string, nodeID int64, method, identifie
 	if node == nil {
 		return ErrNotFound
 	}
-	if node.Type != typeName {
-		return fmt.Errorf("core: auth: node %d is type %q, not %q", nodeID, node.Type, typeName)
+	if node.Type != nodeType {
+		return fmt.Errorf("core: auth: node %d is type %q, not %q", nodeID, node.Type, nodeType)
 	}
-	ex, err := s.FindAuth(typeName, method, identifier)
+	existing, err := s.FindAuth(nodeType, method, identifier)
 	if err != nil {
 		return err
 	}
-	if ex != nil {
+	if existing != nil {
 		return fmt.Errorf("core: auth: %s %q already registered", method, identifier)
 	}
 	now := time.Now()
-	if _, err := s.db.Insert("auth_methods", &AuthMethod{
-		Type: typeName, NodeID: nodeID, Method: method, Identifier: identifier,
+	authMethod := &AuthMethod{
+		NodeType: nodeType, NodeID: nodeID, Method: method, Identifier: identifier,
 		Data: data, CreatedAt: now, UpdatedAt: now,
-	}).Exec(); err != nil {
-		return err
 	}
-	return nil
+	_, err = s.db.Insert("auth_methods", authMethod).Exec()
+	return err
 }
 
-// RemoveAuthMethod 解绑登录方式（至少保留一种 — 防锁死）。
-func (s *Service) RemoveAuthMethod(typeName, method, identifier string) error {
-	n, err := s.db.Add(
+// RemoveAuthMethod unbinds a credential while retaining at least one method.
+func (s *Service) RemoveAuthMethod(nodeType, method, identifier string) error {
+	count, err := s.db.Add(
 		`SELECT COUNT(1) FROM auth_methods WHERE type = #{1} AND node_id =
 		 (SELECT node_id FROM auth_methods WHERE type = #{1} AND method = #{2} AND identifier = #{3})`,
-		typeName, method, identifier).FetchOne[int64]()
+		nodeType, method, identifier).FetchOne[int64]()
 	if err != nil {
 		return err
 	}
-	if n != nil && *n <= 1 {
+	if count != nil && *count <= 1 {
 		return errors.New("core: auth: cannot remove last auth method")
 	}
-	if _, err := s.db.Delete("auth_methods", `type = #{1} AND method = #{2} AND identifier = #{3}`,
-		typeName, method, identifier).Exec(); err != nil {
-		return err
-	}
-	return nil
+	_, err = s.db.Delete("auth_methods", `type = #{1} AND method = #{2} AND identifier = #{3}`,
+		nodeType, method, identifier).Exec()
+	return err
 }
 
-// ── 会话 ──────────────────────────────────────
-
-// CreateSession 建会话（登录成功）; 返回 token（cookie 与 Bearer 同值）。
-func (s *Service) CreateSession(nodeID int64) (string, error) {
+// CreateSession creates a Realm-bound session and returns the raw bearer token.
+// Only its SHA-256 hash is stored.
+func (s *Service) CreateSession(realm string, nodeID int64) (string, error) {
+	if realm == "" {
+		return "", errors.New("core: auth: session realm required")
+	}
+	node, err := s.GetNodeById(nodeID)
+	if err != nil {
+		return "", err
+	}
+	if node == nil {
+		return "", ErrNotFound
+	}
+	td, ok := s.types.Type(node.Type)
+	if !ok || !td.Capabilities.Authentication {
+		return "", fmt.Errorf("core: auth: node type %q is not auth-enabled", node.Type)
+	}
 	token, err := randomToken()
 	if err != nil {
 		return "", err
 	}
 	now := time.Now()
-	if _, err := s.db.Insert("sessions", &Session{
-		Token: token, NodeID: nodeID,
+	session := &Session{
+		TokenHash: sessionTokenHash(token), Realm: realm, NodeID: nodeID,
 		ExpiresAt: now.Add(SessionTTL), CreatedAt: now,
-	}).Exec(); err != nil {
+	}
+	_, err = s.db.Insert("sessions", session).Exec()
+	if err != nil {
 		return "", err
 	}
 	return token, nil
 }
 
-// ValidSession 校验 token → 节点 id; 无效返回 0。
-// 滑动过期: 剩余不足一半才更新 expires_at（活跃用户写库频率极低）。
-func (s *Service) ValidSession(token string) (int64, error) {
+// ValidSession resolves a raw token. Invalid or expired tokens return nil.
+func (s *Service) ValidSession(token string) (*Session, error) {
 	if token == "" {
-		return 0, nil
+		return nil, nil
 	}
-	rec, err := s.db.Add(`SELECT * FROM sessions WHERE token = #{1}`, token).FetchOne[Session]()
+	hash := sessionTokenHash(token)
+	record, err := s.db.Add(`SELECT * FROM sessions WHERE token_hash = #{1}`, hash).FetchOne[Session]()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	if rec == nil {
-		return 0, nil
+	if record == nil {
+		return nil, nil
 	}
-	if rec.ExpiresAt.Before(time.Now()) {
-		// 过期 — 清理
-		_, _ = s.db.Delete("sessions", `token = #{1}`, token).Exec()
-		return 0, nil
+	if record.ExpiresAt.Before(time.Now()) {
+		_, _ = s.db.Delete("sessions", `token_hash = #{1}`, hash).Exec()
+		return nil, nil
 	}
-	if time.Until(rec.ExpiresAt) < SessionTTL/2 {
-		_, _ = s.db.Update("sessions", dba.H{"expires_at": time.Now().Add(SessionTTL)}, `token = #{1}`, token).Exec()
+	if time.Until(record.ExpiresAt) < SessionTTL/2 {
+		record.ExpiresAt = time.Now().Add(SessionTTL)
+		_, _ = s.db.Update("sessions", dba.H{"expires_at": record.ExpiresAt}, `token_hash = #{1}`, hash).Exec()
 	}
-	return rec.NodeID, nil
+	return record, nil
 }
 
-// DeleteSession 登出（删 token — cookie/Bearer 同时失效）。
+// DeleteSession invalidates one raw session token.
 func (s *Service) DeleteSession(token string) error {
-	_, err := s.db.Delete("sessions", `token = #{1}`, token).Exec()
+	if token == "" {
+		return nil
+	}
+	_, err := s.db.Delete("sessions", `token_hash = #{1}`, sessionTokenHash(token)).Exec()
 	return err
 }
 
-// randomToken 32 字节随机 hex（会话 token）。
+// DeleteNodeSessions invalidates every frontend session for a Node.
+func (s *Service) DeleteNodeSessions(nodeID int64) error {
+	_, err := s.db.Delete("sessions", `node_id = #{1}`, nodeID).Exec()
+	return err
+}
+
+func sessionTokenHash(token string) string {
+	hash := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(hash[:])
+}
+
 func randomToken() (string, error) {
 	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
+	_, err := rand.Read(b)
+	if err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil

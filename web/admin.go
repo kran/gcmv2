@@ -457,16 +457,17 @@ func (b *backend) listPanels(ctx *CmsCtx) {
 
 // requireAuth 会话校验中间件（cho 类型化中间件: 校验失败短路）。
 func (b *backend) requireAuth(ctx *CmsCtx, next func()) {
-	c, err := ctx.R.Cookie(cookieName)
-	if err != nil || !b.acct.ValidSession(c.Value) {
+	cookie, err := ctx.R.Cookie(cookieName)
+	if err != nil || !b.acct.ValidSession(cookie.Value) {
 		ctx.Error(http.StatusUnauthorized, "unauthorized")
 		return
 	}
+	ctx.SetActor(Actor{Kind: ActorAdmin, Scopes: []string{"admin"}})
 	next()
 }
 
 func (b *backend) me(ctx *CmsCtx) {
-	_ = ctx.Json(http.StatusOK, map[string]any{"username": "admin"})
+	_ = ctx.Json(http.StatusOK, map[string]any{"username": "admin", "actor": ctx.Actor()})
 }
 
 // ── 类型定义 ─────────────────────────────────────

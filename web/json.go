@@ -7,6 +7,11 @@ import (
 	"io"
 )
 
+// BindStrictJSON decodes exactly one JSON value and rejects unknown fields.
+func (c *CmsCtx) BindStrictJSON(dst any) error {
+	return decodeStrictJSON(c.R.Body, dst)
+}
+
 func decodeStrictJSON(r io.Reader, dst any) error {
 	decoder := json.NewDecoder(r)
 	decoder.DisallowUnknownFields()

@@ -70,7 +70,7 @@ addressable 仍要求 `slug` Kind，这是刻意的安全约束：公开路径�
 
 目标：ADR-004。
 
-### P1：认证核心仍包含 password/user 假设
+### 已解决：认证核心中的 password/user 假设
 
 位置：
 
@@ -78,16 +78,16 @@ addressable 仍要求 `slug` Kind，这是刻意的安全约束：公开路径�
 - `core/auth.go`
 - `web/auth.go`
 
-当前泄漏：
+ADR-003 已完成：
 
-- password 插件默认 `Type = "user"`。
-- Register/Login DTO 允许客户端提交 Type。
-- `core.VerifyPassword` 知道 bcrypt 和 `data["password"]`。
-- `CmsCtx.RequireRole` 写死 `Fields["role"]`。
+- password 插件必须绑定服务端注册的 Realm，不存在 `"user"` fallback。
+- Register/Login DTO 已删除 Type，并使用严格 JSON 解码拒绝客户端传入 NodeType。
+- bcrypt 和 `data["password"]` 仅存在于 password credential 插件；core 只存不透明 Data。
+- `CmsCtx.User` 和 `RequireRole` 已删除，改为 `Actor` 与 `Principal`。
+- 前台 Session、Admin 和 API Key 适配入口统一为 Actor。
+- Session 绑定 Realm，数据库只保存 Token hash。
 
-这使 core 认证层同时知道 Realm、业务角色和具体凭据算法。
-
-目标：ADR-003。password 校验应完全留在插件；core 只保存不透明 credential data 和 Session 绑定。
+后续 Policy 只依赖 Actor，不再读取固定业务角色字段。
 
 ### P1：Searchable 与 Publication 仍在索引层耦合
 
@@ -175,9 +175,9 @@ array/object 是否注册成正式 Kind 需要单独决定。它们需要递归�
 ## 建议顺序
 
 ```text
-1. 实现 ADR-003 Auth Realm / Actor，删除 user/password/role 假设
-2. 实现 Policy，并解除 Searchable/Publication 索引耦合
-3. 实现 ADR-004 的基数、删除策略、关系代数和 Merge
-4. 清理 mine endpoint、TemplateCandidates、select 特判等边界问题
-5. 继续 Context 贯穿
+1. [x] 实现 ADR-003 Auth Realm / Actor，删除 user/password/role 假设
+2. [ ] 实现 Policy，并解除 Searchable/Publication 索引耦合
+3. [ ] 实现 ADR-004 的基数、删除策略、关系代数和 Merge
+4. [ ] 清理 mine endpoint、TemplateCandidates、select 特判等边界问题
+5. [ ] 继续 Context 贯穿
 ```

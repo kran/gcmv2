@@ -31,6 +31,11 @@ types:
     fields:
       - { name: name, kind: text }
       - { name: role, kind: select, options: [member, editor] }
+  staff:
+    capabilities:
+      authentication: true
+    fields:
+      - { name: name, kind: text }
   guestbook:
     fields:
       - { name: title, kind: text }
@@ -47,6 +52,9 @@ types:
 	}
 	os.MkdirAll(filepath.Join(dir, "templates"), 0o755)
 	site := New(dir)
+	site.Auth().Register(AuthRealm{
+		Name: "members", NodeType: "user", AllowRegister: true, Default: true,
+	})
 	if configure != nil {
 		configure(site)
 	}
@@ -115,7 +123,8 @@ func TestAuthSessionSecureCookie(t *testing.T) {
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/login", nil)
 	ctx := s.CmsCtxMaker(response, request)
-	if _, err := AuthSession(ctx, s.Engine(), id); err != nil {
+	realm := s.Auth().MustRealm("members")
+	if _, err := AuthSession(ctx, realm, id); err != nil {
 		t.Fatal(err)
 	}
 	cookies := response.Result().Cookies()
@@ -139,23 +148,108 @@ func TestAuthLogout(t *testing.T) {
 	}
 }
 
-func TestAuthBindUsesSessionNodeType(t *testing.T) {
+func TestAuthActorAndPrincipal(t *testing.T) {
 	s := testSite(t)
-	ck := newSession(t, s)
-	w := do(s, "POST", "/api/auth/bind", map[string]any{
-		"type": "article", "method": "wechat", "identifier": "openid-bind",
-	}, ck)
-	if w.Code != http.StatusOK {
-		t.Fatalf("bind = %d: %s", w.Code, w.Body.String())
+	cookie := newSession(t, s)
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.AddCookie(cookie)
+	ctx := s.CmsCtxMaker(httptest.NewRecorder(), request)
+	actor := ctx.Actor()
+	if actor.Kind != ActorNode || actor.Realm != "members" || actor.NodeType != "user" {
+		t.Fatalf("actor = %#v", actor)
 	}
-	method, err := s.Engine().FindAuth("user", "wechat", "openid-bind")
-	if err != nil || method == nil {
-		t.Fatalf("auth method bound to wrong type: method=%#v err=%v", method, err)
+	principal, err := ctx.Principal()
+	if err != nil || principal == nil || principal.ID != actor.NodeID {
+		t.Fatalf("principal = %#v, %v", principal, err)
 	}
-	wrong, err := s.Engine().FindAuth("article", "wechat", "openid-bind")
-	if err != nil || wrong != nil {
-		t.Fatalf("client type should be ignored: method=%#v err=%v", wrong, err)
+}
+
+func TestAuthAnonymousActor(t *testing.T) {
+	s := testSite(t)
+	ctx := s.CmsCtxMaker(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	if actor := ctx.Actor(); actor.Kind != ActorAnonymous || actor.Authenticated() {
+		t.Fatalf("actor = %#v", actor)
 	}
+	if _, err := ctx.Principal(); !errors.Is(err, ErrNoPrincipal) {
+		t.Fatalf("Principal error = %v", err)
+	}
+}
+
+func TestAPIKeyActorAdapter(t *testing.T) {
+	s := testSite(t)
+	ctx := s.CmsCtxMaker(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	ctx.SetActor(Actor{Kind: ActorAPIKey, Scopes: []string{"content:read"}})
+	actor := ctx.Actor()
+	if actor.Kind != ActorAPIKey || !actor.Authenticated() || len(actor.Scopes) != 1 {
+		t.Fatalf("api key actor = %#v", actor)
+	}
+	if _, err := ctx.Principal(); !errors.Is(err, ErrNoPrincipal) {
+		t.Fatalf("API key Principal error = %v", err)
+	}
+}
+
+func TestAuthRealmRejectsMismatchedSession(t *testing.T) {
+	s := testSite(t)
+	id, err := s.Engine().CreateNode(&core.Node{
+		Type: "staff", Display: "staff", Fields: core.Fields{"name": "staff"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Core stores Realm opaquely; Web rejects a Session whose Node does not
+	// match the server-side Realm mapping.
+	token, err := s.Engine().CreateSession("members", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	ctx := s.CmsCtxMaker(httptest.NewRecorder(), request)
+	if actor := ctx.Actor(); actor.Kind != ActorAnonymous {
+		t.Fatalf("mismatched actor = %#v", actor)
+	}
+}
+
+func TestAuthRealmConfiguration(t *testing.T) {
+	site := testSiteConfigured(t, func(site *Site) {
+		site.Auth().Register(AuthRealm{Name: "staff", NodeType: "staff"})
+	})
+	defaultRealm, ok := site.Auth().DefaultRealm()
+	if !ok || defaultRealm.Name != "members" || defaultRealm.NodeType != "user" {
+		t.Fatalf("default realm = %#v, %v", defaultRealm, ok)
+	}
+	staff, ok := site.Auth().Realm("staff")
+	if !ok || staff.NodeType != "staff" {
+		t.Fatalf("staff realm = %#v, %v", staff, ok)
+	}
+}
+
+func TestAuthRealmConfigurationFailsLoudly(t *testing.T) {
+	assertPanics(t, func() {
+		testSiteConfigured(t, func(site *Site) {
+			site.Auth().Register(AuthRealm{Name: "plain", NodeType: "guestbook"})
+		})
+	})
+	assertPanics(t, func() {
+		testSiteConfigured(t, func(site *Site) {
+			site.Auth().Register(AuthRealm{Name: "members", NodeType: "staff"})
+		})
+	})
+	assertPanics(t, func() {
+		testSiteConfigured(t, func(site *Site) {
+			site.Auth().Register(AuthRealm{Name: "staff", NodeType: "staff", Default: true})
+		})
+	})
+}
+
+func assertPanics(t *testing.T, fn func()) {
+	t.Helper()
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic")
+		}
+	}()
+	fn()
 }
 
 func TestAuthMe(t *testing.T) {
@@ -182,7 +276,8 @@ func newSession(t *testing.T, s *Site) *http.Cookie {
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
 	ctx := &CmsCtx{BaseContext: cho.MakeBaseContext(w, req), site: s}
-	token, err := AuthSession(ctx, s.Engine(), id)
+	realm := s.Auth().MustRealm("members")
+	token, err := AuthSession(ctx, realm, id)
 	if err != nil {
 		t.Fatal(err)
 	}

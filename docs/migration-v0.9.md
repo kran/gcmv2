@@ -65,3 +65,34 @@ Rollback order is the reverse:
 3. Restore the pre-upgrade backup if either step fails.
 
 Do not deploy the v0.9 runtime with a v0.8 `types.yaml`.
+
+## Authentication migration
+
+Register every authentication Realm before mounting credential plugins:
+
+```go
+site.Auth().Register(web.AuthRealm{
+    Name:          "member",
+    NodeType:      "member",
+    AllowRegister: true,
+    Default:       true,
+})
+password.Mount(site, password.Options{Realm: "member"})
+```
+
+Update source and clients as follows:
+
+```text
+RegisterInput.Type / LoginInput.Type     -> removed
+password.Mount(site)                     -> password.Mount(site, Options{Realm: ...})
+/api/auth/register                       -> /api/auth/{realm}/register
+/api/auth/login                          -> /api/auth/{realm}/login
+/api/auth/bind                           -> /api/auth/{realm}/bind
+CmsCtx.User()                            -> CmsCtx.Actor() / CmsCtx.Principal()
+AuthSession(ctx, engine, nodeID)         -> AuthSession(ctx, realm, nodeID)
+CreateSession(nodeID)                    -> CreateSession(realm, nodeID)
+ValidSession(token) node ID result       -> ValidSession(token) *Session result
+core.VerifyPassword                     -> credential plugin verification
+```
+
+Core migration `00010_auth_realms.sql` replaces plaintext Session tokens with SHA-256 hashes and adds the Realm column. Existing frontend Sessions are intentionally invalidated, so users must sign in again after upgrading. `auth_methods.type` remains the authenticated NodeType; Realm-to-NodeType mapping is server configuration and is not duplicated there.

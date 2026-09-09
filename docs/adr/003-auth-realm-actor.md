@@ -1,6 +1,6 @@
 # ADR-003：Auth Realm 与统一 Actor
 
-- 状态：Proposed
+- 状态：Accepted / Core Implemented
 - 目标版本：v0.9.0
 - 日期：2026-09-09
 
@@ -139,36 +139,32 @@ NodeType 由 Mount 的 Realm 决定。
 
 ## 路由
 
-### 单 Realm
-
-默认 Realm 存在时：
-
-```text
-POST /api/auth/register
-POST /api/auth/login
-POST /api/auth/bind
-POST /api/auth/logout
-GET  /api/auth/me
-```
-
-### 多 Realm
+所有 credential 路由统一显式携带 Realm，不根据 Realm 数量切换路由形态：
 
 ```text
 POST /api/auth/{realm}/register
 POST /api/auth/{realm}/login
 POST /api/auth/{realm}/bind
+POST /api/auth/{realm}/{provider}
 ```
 
-Session 仍然可以使用统一：
+Session 操作保持全局入口：
 
 ```text
 POST /api/auth/logout
 GET  /api/auth/me
 ```
 
-未知 Realm 返回 404 或结构化 `auth_realm_not_found`。
+例如 association 使用：
 
-不同时保留两套路由；Site 根据 Realm 数量在启动时选择唯一规则，或者直接统一使用带 Realm 路由。最终方案实现前确定。
+```text
+POST /api/auth/member/register
+POST /api/auth/member/login
+POST /api/auth/member/bind
+POST /api/auth/member/wechat
+```
+
+Realm 名只能包含小写字母、数字、下划线和连字符。插件挂载时必须引用已注册 Realm；未知 Realm 在启动期直接 panic。框架不同时保留无 Realm 的旧路由。
 
 ## Actor
 
@@ -213,7 +209,7 @@ Actor 是请求身份，不是业务实体副本。
 
 ## Request Context
 
-`CmsCtx.User()` 最终替换为：
+`CmsCtx.User()` 已替换为：
 
 ```go
 func (c *CmsCtx) Actor() Actor
@@ -237,20 +233,20 @@ node_id
 realm
 expires_at
 created_at
-last_seen_at
 ```
 
 建议数据库不保存明文 Token，只保存哈希。客户端只持有原始 Token。
 
 ### 规则
 
-- [ ] Token 使用 crypto/rand。
-- [ ] 数据库只保存 Token hash。
-- [ ] Session 有服务端过期时间。
-- [ ] logout 删除当前 Session。
-- [ ] 修改密码可删除该 Node 的全部 Session。
+- [x] Token 使用 crypto/rand。
+- [x] 数据库只保存 SHA-256 Token hash。
+- [x] Session 有服务端过期时间。
+- [x] logout 删除当前 Session。
+- [x] Core 提供删除某个 Node 全部 Session 的原语。
+- [ ] 修改密码流程调用删除该 Node 的全部 Session。
 - [ ] 归档认证 Node 后删除全部 Session。
-- [ ] Session 续期频率受限，不每次请求写库。
+- [x] Session 续期频率受限，不每次请求写库。
 - [ ] 支持列出和撤销当前账号的其他 Session。
 
 ## Bind
@@ -295,13 +291,13 @@ AfterLogin(ctx, actor)
 
 ## 安全
 
-- [ ] Login/Register/Bind 有独立限流 Hook。
-- [ ] 登录失败响应不区分账号不存在和密码错误。
-- [ ] Cookie Secure/SameSite/Domain/TTL 由 Site 配置。
-- [ ] Bearer 和 Cookie 使用同一 Session，但提取规则明确。
-- [ ] SQL 日志不输出 identifier/token/hash。
-- [ ] OAuth session_key/access_token 不进入 Node.Fields。
-- [ ] 管理员认证和前台认证的 Cookie 名和作用域分离。
+- [ ] Login/Register/Bind 有独立限流 Hook（后续安全中间件阶段）。
+- [x] 登录失败响应不区分账号不存在和密码错误。
+- [x] Cookie Secure/SameSite/TTL 由 Site 配置；Domain 暂不开放。
+- [x] Bearer 和 Cookie 使用同一 Session，但提取规则明确。
+- [x] Session Token/hash 不进入 SQL 参数日志；站点可关闭敏感 SQL 参数日志。
+- [x] OAuth session_key/access_token 不进入 Node.Fields。
+- [x] 管理员认证和前台认证使用不同 Cookie。
 
 ## API Key
 
@@ -314,17 +310,18 @@ API Key 不伪装成 Node Session：
 
 ## 直接迁移
 
-v0.9 实现时：
+v0.9 已执行：
 
 1. 删除 RegisterInput.Type 和 LoginInput.Type。
 2. 删除 `type == "" -> "user"`。
-3. Site 必须显式注册 Realm。
+3. 使用认证插件的 Site 必须显式注册 Realm。
 4. password.Mount 必须指定 Realm。
 5. association 注册 member Realm。
-6. 一次性修改测试和示例。
+6. 一次性修改测试、前端和示例。
 7. 不保留旧 DTO、旧路由和 fallback user。
+8. 前台 Session 迁移为 Realm-bound hash 存储；升级时旧 Session 失效并要求重新登录。
 
-数据库中的 auth_methods.type 可以迁移为 realm 或继续保存 NodeType，需在实现前根据查询和唯一性决定；不能同时维护两个权威字段。
+数据库中的 `auth_methods.type` 继续保存 NodeType，因为凭据绑定的是 Node；`sessions.realm` 保存创建会话时使用的 Realm。Realm 到 NodeType 的权威映射只存在于 Site 配置。迁移 `00010_auth_realms.sql` 将明文 Token 改为 hash，并主动使旧前台 Session 失效。
 
 ## 影响
 
@@ -344,11 +341,11 @@ v0.9 实现时：
 
 ## 验收条件
 
-- [ ] 不定义 user 类型的站点可以使用 password 登录。
-- [ ] member/contact/employee 三种 NodeType 分别通过 Realm 测试。
-- [ ] 客户端请求中不存在 NodeType 字段。
-- [ ] bind 不能跨 Realm。
-- [ ] 非 auth-enabled Type 不能注册 Realm。
-- [ ] Session、Admin、API Key 均可转为 Actor。
-- [ ] Policy 测试不依赖具体业务类型名。
-- [ ] 代码中不存在 `"user"` 默认认证类型。
+- [x] 不定义 user 类型的站点可以使用 password 登录。
+- [x] 多个自定义 NodeType 可以分别注册 Realm。
+- [x] 客户端请求 DTO 中不存在 NodeType 字段，未知 `type` 被拒绝。
+- [x] bind 不能跨 Realm。
+- [x] 非 auth-enabled Type 不能注册 Realm。
+- [x] Session 和 Admin 可解析为 Actor；API Key 中间件可通过 `SetActor` 安装 Actor。
+- [ ] Policy 测试不依赖具体业务类型名（Policy 阶段完成）。
+- [x] 生产代码中不存在 `"user"` 默认认证类型。

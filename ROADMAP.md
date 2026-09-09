@@ -35,7 +35,7 @@ ADR 状态与实现进度：
 
 - [x] [ADR-001：Node、Schema 与 Capability 的边界](docs/adr/001-node-schema-capabilities.md) — Accepted / Implemented
 - [x] [ADR-002：统一 Query AST，Lisp 作为文本前端](docs/adr/002-query-ast.md) — Accepted / Core Implemented
-- [x] [ADR-003：Auth Realm 与统一 Actor](docs/adr/003-auth-realm-actor.md)
+- [x] [ADR-003：Auth Realm 与统一 Actor](docs/adr/003-auth-realm-actor.md) — Accepted / Core Implemented
 - [x] [ADR-004：Edge、关系 Node 与引用完整性](docs/adr/004-relations.md)
 - [x] [v0.9 Core 边界复审](docs/core-review-v0.9.md)
 
@@ -156,11 +156,11 @@ employment(contact, account, role, start_at, end_at)  关系 Node
 
 ## 2.5 Actor 不变量
 
-- [ ] Core 不假定存在名为 user 的类型。
-- [ ] Session 指向一个 auth-enabled Node。
-- [ ] Web 层把 Session、Admin、API Key 统一解析成 Actor。
+- [x] Core 不假定存在名为 user 的类型。
+- [x] Session 指向一个 auth-enabled Node，并绑定服务端 Realm。
+- [x] Web 层将 Session、Admin 解析成 Actor，并提供 API Key Actor 适配入口。
 - [ ] Policy 只依赖 Actor 能力，不依赖固定业务类型名。
-- [ ] 客户端永远不能直接决定内部认证 NodeType。
+- [x] 客户端永远不能直接决定内部认证 NodeType。
 
 ## 2.6 Query 不变量
 
@@ -548,7 +548,7 @@ CRM 的金额不能默认使用 float64。
 
 ### Auth Realm 与 Actor
 
-当前 password/web auth 使用 `type == "" -> "user"`，不符合通用框架定位。
+password/web auth 已改为服务端 Realm 映射，不再存在 `type == "" -> "user"`。
 
 建议：
 
@@ -561,16 +561,16 @@ site.Auth().Register(web.AuthRealm{
 password.Mount(site, password.Options{Realm: "member"})
 ```
 
-- [ ] 删除框架对 `user` 类型的假设。
-- [ ] Realm 只在服务端注册，启动后只读。
-- [ ] Realm 注册时验证 NodeType 存在且 `auth: true`。
-- [ ] register/login 不接受任意 NodeType。
-- [ ] bind 从 Session Node 推导真实类型。
-- [ ] 单 Realm 保持简洁路由。
-- [ ] 多 Realm 使用 `/api/auth/{realm}/...`。
-- [ ] password/OAuth/微信插件只负责 credential method。
-- [ ] Session、Admin、API Key 统一解析为 Actor。
-- [ ] Realm 上线时直接从请求 DTO 删除 Type，并同步修改所有站点；不保留弃用字段和兼容分支。
+- [x] 删除框架对 `user` 类型的假设。
+- [x] Realm 只在服务端注册，启动后只读。
+- [x] Realm 注册时验证 NodeType 存在且启用 authentication capability。
+- [x] register/login 不接受任意 NodeType，未知 JSON 字段直接拒绝。
+- [x] bind 校验 Session Actor 的 Realm 与真实 NodeType。
+- [x] 所有 credential 路由统一使用 `/api/auth/{realm}/...`。
+- [x] password/微信只负责各自 credential method。
+- [x] Session、Admin 和 API Key 适配入口统一为 Actor。
+- [x] Session 仅保存 Token hash，并记录 Realm。
+- [x] Realm 上线时直接从请求 DTO 删除 Type，并同步修改所有站点；未保留旧字段、旧路由和 fallback。
 
 ### Error Contract
 

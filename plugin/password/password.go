@@ -1,10 +1,8 @@
-// Package password 用户名密码登录插件（email/phone + 密码）。
-//
-// 复用 web 的认证基础（AuthSession / RegisterInput / hook）— 方式无关部分
-// 在 web（auth.go）; 本插件只做 password 方式的注册/登录（bcrypt data["password"]）。
+// Package password provides bcrypt-backed credentials for a configured Auth Realm.
 package password
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/kran/gcmv2/core"
@@ -12,75 +10,188 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// Mount 挂载 password 登录路由（/api/auth/register|login — HookBeforeMount 统一挂载）。
-func Mount(s *web.Site) {
-	b := &backend{eng: s.Engine()}
+// Options configures one password credential endpoint set.
+type Options struct {
+	Realm           string
+	Methods         []string
+	MinSecretLength int
+}
+
+// Mount adds /api/auth/{realm}/register|login|bind routes.
+func Mount(s *web.Site, options Options) {
+	realm := s.Auth().MustRealm(options.Realm)
+	if options.MinSecretLength == 0 {
+		options.MinSecretLength = 8
+	}
+	if options.MinSecretLength < 1 {
+		panic("password: MinSecretLength must be positive")
+	}
+	if len(options.Methods) == 0 {
+		options.Methods = []string{"email", "phone"}
+	}
+	methods := make(map[string]bool, len(options.Methods))
+	for _, method := range options.Methods {
+		if method == "" || methods[method] {
+			panic("password: Methods must be non-empty and unique")
+		}
+		methods[method] = true
+	}
+	b := &backend{
+		eng: s.Engine(), realm: realm, methods: methods,
+		minSecretLength: options.MinSecretLength,
+	}
 	s.Hook(web.HookBeforeMount, func(site *web.Site) error {
-		site.Router().Post("/api/auth/register", b.register)
-		site.Router().Post("/api/auth/login", b.login)
+		base := "/api/auth/" + realm.Name
+		site.Router().Post(base+"/register", b.register)
+		site.Router().Post(base+"/login", b.login)
+		site.Router().Post(base+"/bind", b.bind)
 		return nil
 	})
 }
 
 type backend struct {
-	eng core.Engine
+	eng             core.Engine
+	realm           web.AuthRealm
+	methods         map[string]bool
+	minSecretLength int
 }
 
-// register 注册（email/phone + 密码): 建用户节点 + auth_method(data["password"]=bcrypt) + 会话。
 func (b *backend) register(ctx *web.CmsCtx) {
-	var in web.RegisterInput
-	if err := ctx.BindJson(&in); err != nil {
-		ctx.Error(http.StatusBadRequest, err.Error())
+	if !b.realm.AllowRegister {
+		ctx.Error(http.StatusForbidden, "registration is disabled")
 		return
 	}
-	if in.Type == "" {
-		in.Type = "user"
-	}
-	if in.Method == "" || in.Identifier == "" || in.Secret == "" {
-		ctx.Error(http.StatusBadRequest, "method, identifier, secret required")
-		return
-	}
-	n := &core.Node{Display: in.Display, Fields: in.Fields}
-	// 站点敏感字段兜底（hook 可改 fields/拒绝）
-	if err := ctx.Engine().Hooks().Fire(web.HookAuthRegister, ctx, &in, n); err != nil {
-		ctx.Error(http.StatusBadRequest, err.Error())
-		return
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(in.Secret), bcrypt.DefaultCost)
+	var input web.RegisterInput
+	err := ctx.BindStrictJSON(&input)
 	if err != nil {
 		ctx.Error(http.StatusBadRequest, err.Error())
 		return
 	}
-	id, err := b.eng.RegisterAuth(in.Type, in.Method, in.Identifier, core.Fields{"password": string(hash)}, n)
+	err = b.validateCredential(input.Method, input.Identifier, input.Secret)
 	if err != nil {
 		ctx.Error(http.StatusBadRequest, err.Error())
 		return
 	}
-	_, _ = web.AuthSession(ctx, b.eng, id) // 注册即登录
-}
-
-// login 登录（FindAuth + VerifyPassword → 会话）。
-func (b *backend) login(ctx *web.CmsCtx) {
-	var in web.LoginInput
-	if err := ctx.BindJson(&in); err != nil {
+	node := &core.Node{Type: b.realm.NodeType, Display: input.Display, Fields: input.Fields}
+	err = ctx.Engine().Hooks().Fire(web.HookAuthRegister, ctx, b.realm, &input, node)
+	if err != nil {
 		ctx.Error(http.StatusBadRequest, err.Error())
 		return
 	}
-	if in.Type == "" {
-		in.Type = "user"
+	hash, err := bcrypt.GenerateFromPassword([]byte(input.Secret), bcrypt.DefaultCost)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "credential hashing failed")
+		return
 	}
-	am, err := b.eng.FindAuth(in.Type, in.Method, in.Identifier)
+	data := core.Fields{"password": string(hash)}
+	id, err := b.eng.RegisterAuth(b.realm.NodeType, input.Method, input.Identifier, data, node)
+	if err != nil {
+		ctx.Error(http.StatusBadRequest, err.Error())
+		return
+	}
+	actor := web.Actor{Kind: web.ActorNode, NodeID: id, NodeType: b.realm.NodeType, Realm: b.realm.Name}
+	err = ctx.Engine().Hooks().Fire(web.HookAuthLogin, ctx, actor)
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, err.Error())
 		return
 	}
-	if am == nil || !b.eng.VerifyPassword(am, in.Secret) {
+	_, err = web.AuthSession(ctx, b.realm, id)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "session creation failed")
+	}
+}
+
+func (b *backend) login(ctx *web.CmsCtx) {
+	var input web.LoginInput
+	err := ctx.BindStrictJSON(&input)
+	if err != nil {
+		ctx.Error(http.StatusBadRequest, err.Error())
+		return
+	}
+	if !b.methods[input.Method] {
+		ctx.Error(http.StatusBadRequest, "unsupported password method")
+		return
+	}
+	if input.Identifier == "" || input.Secret == "" {
+		ctx.Error(http.StatusBadRequest, "identifier and secret required")
+		return
+	}
+	method, err := b.eng.FindAuth(b.realm.NodeType, input.Method, input.Identifier)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "login failed")
+		return
+	}
+	if method == nil || !verify(method, input.Secret) {
 		ctx.Error(http.StatusUnauthorized, "invalid credentials")
 		return
 	}
-	if err := ctx.Engine().Hooks().Fire(web.HookAuthLogin, ctx, am.NodeID); err != nil {
-		ctx.Error(http.StatusInternalServerError, err.Error())
+	actor := web.Actor{
+		Kind: web.ActorNode, NodeID: method.NodeID,
+		NodeType: b.realm.NodeType, Realm: b.realm.Name,
+	}
+	err = ctx.Engine().Hooks().Fire(web.HookAuthLogin, ctx, actor)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "login failed")
 		return
 	}
-	_, _ = web.AuthSession(ctx, b.eng, am.NodeID)
+	_, err = web.AuthSession(ctx, b.realm, method.NodeID)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "session creation failed")
+	}
+}
+
+func (b *backend) bind(ctx *web.CmsCtx) {
+	actor := ctx.Actor()
+	if actor.Kind != web.ActorNode {
+		ctx.Error(http.StatusUnauthorized, "login required")
+		return
+	}
+	if actor.Realm != b.realm.Name || actor.NodeType != b.realm.NodeType {
+		ctx.Error(http.StatusForbidden, "actor does not belong to this realm")
+		return
+	}
+	var input web.LoginInput
+	err := ctx.BindStrictJSON(&input)
+	if err != nil {
+		ctx.Error(http.StatusBadRequest, err.Error())
+		return
+	}
+	err = b.validateCredential(input.Method, input.Identifier, input.Secret)
+	if err != nil {
+		ctx.Error(http.StatusBadRequest, err.Error())
+		return
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(input.Secret), bcrypt.DefaultCost)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "credential hashing failed")
+		return
+	}
+	data := core.Fields{"password": string(hash)}
+	err = b.eng.AddAuthMethod(b.realm.NodeType, actor.NodeID, input.Method, input.Identifier, data)
+	if err != nil {
+		ctx.Error(http.StatusBadRequest, err.Error())
+		return
+	}
+	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
+}
+
+func (b *backend) validateCredential(method, identifier, secret string) error {
+	if !b.methods[method] {
+		return fmt.Errorf("unsupported password method")
+	}
+	if identifier == "" || secret == "" {
+		return fmt.Errorf("identifier and secret required")
+	}
+	if len(secret) < b.minSecretLength {
+		return fmt.Errorf("secret must be at least %d characters", b.minSecretLength)
+	}
+	return nil
+}
+
+func verify(method *core.AuthMethod, secret string) bool {
+	hash := method.Data.Str("password")
+	if hash == "" {
+		return false
+	}
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(secret)) == nil
 }

@@ -64,8 +64,10 @@ func Mount(s *web.Site, opts Options) {
 				}
 				list = append(list, items...)
 			}
-			set := urlset{Xmlns: "http://www.sitemaps.org/schemas/sitemap/0.9"}
-			set.URLs = make([]urlEntry, 0, len(list)+1)
+			set := urlset{
+				Xmlns: "http://www.sitemaps.org/schemas/sitemap/0.9",
+				URLs:  make([]urlEntry, 0, len(list)+1),
+			}
 			for i := range list {
 				n := &list[i]
 				loc := baseURL + "/node/"

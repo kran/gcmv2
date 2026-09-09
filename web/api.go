@@ -208,11 +208,11 @@ func (s *Site) apiUpload(ctx *CmsCtx) {
 	saveUpload(s.uploadsDir, ctx)
 }
 
-// apiMine GET /api/nodes/mine?type=&page=&size= — 当前用户发布的节点
-// （author = ctx.User().ID; 含草稿 — 作者可见自己的）。
+// apiMine GET /api/nodes/mine?type=&page=&size= — 当前主体发布的节点
+// （author = Principal.ID; 含草稿 — 作者可见自己的）。
 func (s *Site) apiMine(ctx *CmsCtx) {
-	u := ctx.User()
-	if u == nil {
+	principal, err := ctx.Principal()
+	if err != nil {
 		ctx.Error(http.StatusUnauthorized, "login required")
 		return
 	}
@@ -222,7 +222,7 @@ func (s *Site) apiMine(ctx *CmsCtx) {
 	if typ != "" {
 		list, total, err := s.engine.QueryPage(ctx.R.Context(), core.ListQuery{
 			Type:  typ,
-			Where: gquery.OneOf(gquery.Ref("author"), u.ID),
+			Where: gquery.OneOf(gquery.Ref("author"), principal.ID),
 			Page:  gquery.Page{Number: page, Size: size},
 		})
 		if err != nil {
@@ -236,12 +236,12 @@ func (s *Site) apiMine(ctx *CmsCtx) {
 	list := make([]core.Node, 0)
 	for _, typeName := range s.engine.Types().Names() {
 		field, ok := s.engine.Types().Field(typeName, "author")
-		if !ok || field.To != u.Type || !s.engine.Types().IsRefKind(field.Kind) {
+		if !ok || field.To != principal.Type || !s.engine.Types().IsRefKind(field.Kind) {
 			continue
 		}
 		items, err := s.engine.Query(ctx.R.Context(), core.ListQuery{
 			Type:  typeName,
-			Where: gquery.OneOf(gquery.Ref("author"), u.ID),
+			Where: gquery.OneOf(gquery.Ref("author"), principal.ID),
 			Page:  gquery.Page{Size: size},
 		})
 		if err != nil {
