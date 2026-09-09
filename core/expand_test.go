@@ -244,7 +244,7 @@ func TestExpandBidirectionalKey(t *testing.T) {
 	s := newFilterSvc(t)
 	root, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "根"}})
 	child, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "子", "parent": root}})
-	s.CreateNode(&Node{Type: "article", Display: "t", Status: StatusPublished, Fields: Fields{"title": "a", "categories": []any{child}}})
+	s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "a", "categories": []any{child}}})
 
 	// 展开子分类: 出边 categories（无, 叶子）+ 入边 <-categories（文章 a 引用它）
 	n, err := s.ExpandPath(child, "categories, <-categories")
@@ -280,7 +280,7 @@ func TestExpandMultiLevel(t *testing.T) {
 	child, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "子", "parent": root}})
 	grand, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "孙", "parent": child}})
 	great, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "重孙", "parent": grand}})
-	art, _ := s.CreateNode(&Node{Type: "article", Display: "t", Status: StatusPublished,
+	art, _ := s.CreateNode(&Node{Type: "article", Display: "t",
 		Fields: Fields{"title": "a", "categories": []any{grand}}})
 
 	// 三层出边链: 文章 → categories(grand) → parent(child) → parent(root)

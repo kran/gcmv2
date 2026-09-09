@@ -26,7 +26,8 @@ func testSiteConfigured(t *testing.T, configure func(*Site)) *Site {
 	typesYAML := `
 types:
   user:
-    auth: true
+    capabilities:
+      authentication: true
     fields:
       - { name: name, kind: text }
       - { name: role, kind: select, options: [member, editor] }
@@ -34,7 +35,10 @@ types:
     fields:
       - { name: title, kind: text }
   article:
+    capabilities:
+      publication: { field: publication_state, draft: draft, published: published }
     fields:
+      - { name: publication_state, kind: select, options: [draft, published], default: draft }
       - { name: body, kind: richtext }
 `
 	tp := filepath.Join(dir, "types.yaml")

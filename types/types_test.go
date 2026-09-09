@@ -11,7 +11,8 @@ import (
 const validYAML = `
 types:
   article:
-    search: true
+    capabilities:
+      searchable: { fields: [display, body] }
     fields:
       - { name: body, kind: richtext, required: true }
       - { name: cover, kind: upload-image }
@@ -48,8 +49,8 @@ func TestLoadValid(t *testing.T) {
 	if !ok {
 		t.Fatal("article type missing")
 	}
-	if !td.Search {
-		t.Fatalf("article search: %+v", td)
+	if td.Capabilities.Searchable == nil {
+		t.Fatalf("article searchable capability: %+v", td)
 	}
 	if got := td.TemplateCandidates(); len(got) != 2 || got[0] != "node--article.html" {
 		t.Fatalf("candidates: %v", got)
@@ -247,16 +248,18 @@ func TestRegisterDuplicate(t *testing.T) {
 	ts.RegisterKind(stringKind{})
 }
 
-// view: tree 校验 — 有自引用 ref 通过, 无则 fail-loud。
-func TestViewTree(t *testing.T) {
-	// 合法: category 有 parent 自引用 + view: tree
+// tree capability 校验：parent 必须是自引用；后台 tree view 依赖该能力。
+func TestTreeCapability(t *testing.T) {
 	ts := New()
 	if err := ts.Load([]byte(`
 types:
   category:
-    view: tree
+    capabilities:
+      tree: { parent: parent, order: position }
+    admin: { view: tree }
     fields:
       - { name: name, kind: text }
+      - { name: position, kind: number }
       - { name: parent, kind: ref, to: category }
 `)); err != nil {
 		t.Fatalf("valid tree: %v", err)
@@ -264,30 +267,18 @@ types:
 	if !ts.IsTree("category") {
 		t.Fatal("IsTree must be true")
 	}
-	// 非法: view: tree 无自引用
+
 	ts2 := New()
 	err := ts2.Load([]byte(`
 types:
   article:
-    view: tree
+    capabilities:
+      tree: { parent: title }
     fields:
       - { name: title, kind: text }
 `))
-	if err == nil || !strings.Contains(err.Error(), "requires a self-ref") {
+	if err == nil || !strings.Contains(err.Error(), "must be a self ref") {
 		t.Fatalf("tree without self-ref must fail: %v", err)
-	}
-	// 默认 list
-	ts3 := New()
-	if err := ts3.Load([]byte(`
-types:
-  person:
-    fields:
-      - { name: name, kind: text }
-`)); err != nil {
-		t.Fatal(err)
-	}
-	if ts3.IsTree("person") {
-		t.Fatal("default view must be list")
 	}
 }
 
@@ -384,6 +375,71 @@ types:
 }
 
 // select kind: options 必填/去重; 值必须在 options 内。
+func TestCapabilitiesDefaultsAndImmutable(t *testing.T) {
+	ts := New()
+	err := ts.Load([]byte(`
+types:
+  article:
+    capabilities:
+      searchable: { fields: [display, title] }
+      addressable: { field: slug, unique: global }
+      publication: { field: state, draft: draft, published: published }
+    constraints:
+      unique: [[external_id]]
+      indexes: [[state, position]]
+    admin: { view: list, columns: [slug, state, updated_at] }
+    fields:
+      - { name: title, kind: text, required: true }
+      - { name: slug, kind: slug }
+      - { name: state, kind: select, options: [draft, published], default: draft, required: true }
+      - { name: position, kind: number, default: 0 }
+      - { name: external_id, kind: text, immutable: true }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields, err := ts.ApplyDefaults("article", map[string]any{"title": "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fields["state"] != "draft" || fields["position"] != 0 {
+		t.Fatalf("defaults = %#v", fields)
+	}
+	if err := ts.ValidateFields("article", fields); err != nil {
+		t.Fatal(err)
+	}
+	if err := ts.ValidatePatchFields("article", map[string]any{"external_id": "changed"}); err == nil {
+		t.Fatal("immutable field patch must fail")
+	}
+	if !ts.IsPublished("article", map[string]any{"state": "published"}) {
+		t.Fatal("published capability did not match")
+	}
+	if got := ts.Address("article", map[string]any{"slug": "hello"}); got != "hello" {
+		t.Fatalf("address = %q", got)
+	}
+}
+
+func TestCapabilityValidation(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{"address kind", `types: { article: { capabilities: { addressable: { field: title, unique: global } }, fields: [ { name: title, kind: text } ] } }`, "must use kind"},
+		{"publication field", `types: { article: { capabilities: { publication: { field: state, draft: draft, published: published } }, fields: [ { name: title, kind: text } ] } }`, "not defined"},
+		{"tree parent", `types: { category: { capabilities: { tree: { parent: name } }, fields: [ { name: name, kind: text } ] } }`, "self ref"},
+		{"ref index", `types: { a: { constraints: { indexes: [[owner]] }, fields: [ { name: owner, kind: ref, to: b } ] }, b: { fields: [] } }`, "cannot be a ref"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			err := New().Load([]byte(test.yaml))
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestSelectKind(t *testing.T) {
 	ts := New()
 	// 无 options 拒绝

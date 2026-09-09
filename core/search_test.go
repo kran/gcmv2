@@ -25,14 +25,12 @@ func TestBigram(t *testing.T) {
 // 索引同步: 可搜类型 + 已发布进索引; 草稿/不可搜类型不进; 更新状态双向迁移。
 func TestFTSSync(t *testing.T) {
 	s := newFilterSvc(t)
-	// article search:true ✓（filterTypes 里 article 有 search: true? — 检查）
-	td, _ := s.types.Type("article")
-	if !td.Search {
-		t.Fatal("test types must declare article search: true")
+	if _, ok := s.types.Searchable("article"); !ok {
+		t.Fatal("test types must declare article searchable capability")
 	}
 	// 已发布文章 → 进索引
-	id, _ := s.CreateNode(&Node{Type: "article", Display: "t", Status: StatusPublished,
-		Fields: Fields{"title": "人工智能与制造业", "body": "深度融合路径研究"}})
+	id, _ := s.CreateNode(&Node{Type: "article", Display: "t",
+		Fields: Fields{"title": "人工智能与制造业", "body": "深度融合路径研究", "publication_state": "published"}})
 	rows, total, err := s.Search("人工智能", "", 1, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -41,23 +39,21 @@ func TestFTSSync(t *testing.T) {
 		t.Fatalf("published must be searchable: total=%d", total)
 	}
 	// 草稿 → 不进
-	draftID, _ := s.CreateNode(&Node{Type: "article", Display: "t", Status: StatusDraft,
-		Fields: Fields{"title": "秘密草稿", "body": "不可搜"}})
+	draftID, _ := s.CreateNode(&Node{Type: "article", Display: "t",
+		Fields: Fields{"title": "秘密草稿", "body": "不可搜", "publication_state": "draft"}})
 	_, total, _ = s.Search("秘密", "", 1, 10)
 	if total != 0 {
 		t.Fatal("draft must not be indexed")
 	}
 	// 改状态: 草稿发布 → 进; 发布转草稿 → 出
-	pub := StatusPublished
-	if err := s.PatchNode(draftID, &NodePatch{Status: &pub}); err != nil {
+	if err := patchCurrent(t, s, draftID, &NodePatch{Fields: Fields{"publication_state": "published"}}); err != nil {
 		t.Fatal(err)
 	}
 	_, total, _ = s.Search("秘密", "", 1, 10)
 	if total != 1 {
 		t.Fatal("draft→published must enter index")
 	}
-	draft := StatusDraft
-	if err := s.PatchNode(id, &NodePatch{Status: &draft}); err != nil {
+	if err := patchCurrent(t, s, id, &NodePatch{Fields: Fields{"publication_state": "draft"}}); err != nil {
 		t.Fatal(err)
 	}
 	_, total, _ = s.Search("人工智能", "", 1, 10)
@@ -77,12 +73,12 @@ func TestFTSSync(t *testing.T) {
 // 查询: 类型过滤 + 多词短语精确。
 func TestFTSQuery(t *testing.T) {
 	s := newFilterSvc(t)
-	s.CreateNode(&Node{Type: "article", Display: "t", Status: StatusPublished,
-		Fields: Fields{"title": "人工智能与制造业", "body": "产业路径研究"}})
-	s.CreateNode(&Node{Type: "article", Display: "t", Status: StatusPublished,
-		Fields: Fields{"title": "区域规划", "body": "2026 年规划报告"}})
-	s.CreateNode(&Node{Type: "person", Display: "t", Status: StatusPublished,
-		Fields: Fields{"name": "人工智能专家"}})
+	s.CreateNode(&Node{Type: "article", Display: "t",
+		Fields: Fields{"title": "人工智能与制造业", "body": "产业路径研究", "publication_state": "published"}})
+	s.CreateNode(&Node{Type: "article", Display: "t",
+		Fields: Fields{"title": "区域规划", "body": "2026 年规划报告", "publication_state": "published"}})
+	s.CreateNode(&Node{Type: "person", Display: "t",
+		Fields: Fields{"name": "人工智能专家", "publication_state": "published"}})
 
 	// 多词 phrase: 连续 bigram 才命中
 	_, total, err := s.Search("人工智能", "article", 1, 10)
@@ -109,8 +105,8 @@ func TestFTSQuery(t *testing.T) {
 // Rebuild: 全量重建（类型声明变化后）。
 func TestFTSRebuild(t *testing.T) {
 	s := newFilterSvc(t)
-	s.CreateNode(&Node{Type: "article", Display: "t", Status: StatusPublished,
-		Fields: Fields{"title": "重建测试", "body": "x"}})
+	s.CreateNode(&Node{Type: "article", Display: "t",
+		Fields: Fields{"title": "重建测试", "body": "x", "publication_state": "published"}})
 	// 手动删索引模拟损坏
 	if _, err := s.db.Add("DELETE FROM nodes_fts").Exec(); err != nil {
 		t.Fatal(err)

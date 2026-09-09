@@ -9,8 +9,15 @@ import (
 const traverseTypes = `
 types:
   category:
+    capabilities:
+      addressable: { field: slug, unique: global }
+      publication: { field: publication_state, draft: draft, published: published }
+      tree: { parent: parent, order: position }
     fields:
       - { name: name, kind: textarea }
+      - { name: slug, kind: slug }
+      - { name: publication_state, kind: select, options: [draft, published], default: draft }
+      - { name: position, kind: number, default: 0 }
       - { name: parent, kind: ref, to: category, transitive: true }
       - { name: children, kind: "ref[]", to: category }
       - { name: synonym, kind: "ref[]", to: category, equivalence: true }
@@ -167,9 +174,9 @@ func TestAncestorsDepthOrder(t *testing.T) {
 	s := newFilterSvc(t)
 	// 先建叶后建根 — id 序与层级序相反: leaf(id1) → mid(id2) → top(id3)
 	// 父链: leaf 的父 = mid, mid 的父 = top
-	top, _ := s.CreateNode(&Node{Type: "category", Display: "t", Slug: "top", Status: StatusPublished, Fields: Fields{"name": "顶"}})
-	mid, _ := s.CreateNode(&Node{Type: "category", Display: "t", Slug: "mid", Fields: Fields{"name": "中", "parent": top}})
-	leaf, _ := s.CreateNode(&Node{Type: "category", Display: "t", Slug: "leaf", Fields: Fields{"name": "叶", "parent": mid}})
+	top, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "顶", "slug": "top"}})
+	mid, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "中", "slug": "mid", "parent": top}})
+	leaf, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "叶", "parent": mid}})
 	// Traverse(id 序) 与 Ancestors(深度序) 对照
 	tr, err := s.Traverse("category", leaf, "parent", 20)
 	if err != nil {
@@ -181,7 +188,7 @@ func TestAncestorsDepthOrder(t *testing.T) {
 	}
 	// id 序: top(id1) < mid(id2) → Traverse = [top, mid]（恰好正序, 这里不断言）
 	// 深度序: 根→叶 = [top, mid]
-	if len(anc) != 2 || anc[0].Slug != "top" || anc[1].Slug != "mid" {
+	if len(anc) != 2 || anc[0].Fields.Str("slug") != "top" || anc[1].Fields.Str("slug") != "mid" {
 		t.Fatalf("Ancestors 根→叶: %v (traverse=%v)", anc, tr)
 	}
 }

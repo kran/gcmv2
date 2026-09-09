@@ -20,15 +20,15 @@ func TestApiNodesList(t *testing.T) {
 	s := testSite(t)
 	for i := 0; i < 3; i++ {
 		if _, err := s.Engine().CreateNode(&core.Node{
-			Type: "article", Display: "文章", Status: 1,
-			Fields: map[string]any{"body": "内容"},
+			Type: "article", Display: "文章",
+			Fields: map[string]any{"body": "内容", "publication_state": "published"},
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if _, err := s.Engine().CreateNode(&core.Node{
-		Type: "article", Display: "草稿", Status: 0,
-		Fields: map[string]any{"body": "不可公开"},
+		Type: "article", Display: "草稿",
+		Fields: map[string]any{"body": "不可公开", "publication_state": "draft"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -67,8 +67,8 @@ func TestApiNodesSort(t *testing.T) {
 	s := testSite(t)
 	for _, display := range []string{"甲", "乙"} {
 		_, err := s.Engine().CreateNode(&core.Node{
-			Type: "article", Display: display, Status: 1,
-			Fields: map[string]any{"body": display},
+			Type: "article", Display: display,
+			Fields: map[string]any{"body": display, "publication_state": "published"},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -107,8 +107,8 @@ func TestApiNodesUnknownType(t *testing.T) {
 func TestApiNodeTypeMismatch(t *testing.T) {
 	s := testSite(t)
 	id, err := s.Engine().CreateNode(&core.Node{
-		Type: "article", Display: "文章", Status: 1,
-		Fields: map[string]any{"body": "内容"},
+		Type: "article", Display: "文章",
+		Fields: map[string]any{"body": "内容", "publication_state": "published"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -136,7 +136,7 @@ func TestAPIUploadRequiresLoginAndValidContent(t *testing.T) {
 	}
 
 	userID, err := s.Engine().CreateNode(&core.Node{
-		Type: "user", Display: "上传用户", Status: core.StatusPublished,
+		Type: "user", Display: "上传用户",
 		Fields: map[string]any{"name": "上传用户", "role": "member"},
 	})
 	if err != nil {
@@ -191,6 +191,17 @@ func uploadRequest(t *testing.T, site *Site, token, name string, content []byte)
 	response := httptest.NewRecorder()
 	site.Handler().ServeHTTP(response, req)
 	return response
+}
+
+func TestAPIRejectsLegacyNodeColumns(t *testing.T) {
+	s := testSite(t)
+	w := do(s, http.MethodPost, "/api/nodes/article", map[string]any{
+		"display": "legacy", "status": 1,
+		"fields": map[string]any{"body": "x"},
+	})
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("legacy create property = %d, want 400: %s", w.Code, w.Body.String())
+	}
 }
 
 // TestApiNodesMissingType 缺 type 段 → 路由 404。

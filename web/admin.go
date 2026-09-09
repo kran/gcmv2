@@ -18,7 +18,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -495,7 +494,7 @@ func (b *backend) listNodes(ctx *CmsCtx) {
 	var err error
 	filter := strings.TrimSpace(ctx.Query("filter"))
 	q := strings.TrimSpace(ctx.Query("q"))
-	// filter = Lisp 表达式; q = 标题模糊; status = 状态过滤（1 发布/0 草稿）
+	// filter = Lisp 表达式；q = display 模糊。业务状态由动态字段过滤。
 	params := map[string]any{}
 	if q != "" {
 		params["q"] = "%" + q + "%"
@@ -503,13 +502,6 @@ func (b *backend) listNodes(ctx *CmsCtx) {
 			filter = "(and " + filter + " (like display {:q}))"
 		} else {
 			filter = "(like display {:q})"
-		}
-	}
-	if st := ctx.Query("status"); st != "" {
-		n, err := strconv.Atoi(st)
-		if err == nil {
-			params["st"] = n
-			filter = "(and (= status {:st}) " + filter + ")" // status 过滤
 		}
 	}
 	// 统一 Q: 类型过滤合成（参数化 (= type {:typ})）
@@ -574,13 +566,16 @@ func (b *backend) createNode(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, "type required")
 		return
 	}
-	// admin 与 API 统一: create 用 core.Node（全程量 — display 必填; core 宽松清洗）
-	var node core.Node
-	if err := ctx.BindJson(&node); err != nil {
+	var input struct {
+		Display string      `json:"display"`
+		Fields  core.Fields `json:"fields"`
+	}
+	err := decodeStrictJSON(ctx.R.Body, &input)
+	if err != nil {
 		b.bad(ctx, err)
 		return
 	}
-	node.Type = typ
+	node := core.Node{Type: typ, Display: input.Display, Fields: input.Fields}
 	if node.Display == "" {
 		b.bad(ctx, errors.New("display required"))
 		return
@@ -636,11 +631,17 @@ func (b *backend) updateNode(ctx *CmsCtx) {
 	// admin 与 API 统一: 直接用 NodePatch（差量 — nil=不改）。
 	// fields 清洗由 core 丢弃未知字段 — admin 无需特殊处理。
 	var patch core.NodePatch
-	if err := ctx.BindJson(&patch); err != nil {
+	err = decodeStrictJSON(ctx.R.Body, &patch)
+	if err != nil {
 		b.bad(ctx, err)
 		return
 	}
-	if err := b.eng.PatchNode(id, &patch); err != nil {
+	err = b.eng.PatchNode(id, &patch)
+	if errors.Is(err, core.ErrRevisionConflict) {
+		ctx.Error(http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
 		b.bad(ctx, err)
 		return
 	}
@@ -703,8 +704,8 @@ func (b *backend) tree(ctx *CmsCtx) {
 			return
 		}
 		items = append(items, map[string]any{
-			"id": n.ID, "type": n.Type, "display": n.Display, "slug": n.Slug,
-			"status": n.Status, "sort": n.Sort, "fields": fields,
+			"id": n.ID, "type": n.Type, "display": n.Display,
+			"revision": n.Revision, "fields": fields,
 		})
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{"items": items})
@@ -760,15 +761,14 @@ func (b *backend) inbound(ctx *CmsCtx) {
 		ID       int64  `db:"from_node" json:"id"`
 		Type     string `db:"type" json:"type"`
 		Display  string `db:"display" json:"display"`
-		Slug     string `db:"slug" json:"slug"`
 		ViaField string `db:"MIN(e.field)" json:"via_field"`
 	}
 	// 溯源: 每个来源节点取一条边字段（MIN(field) — GROUP BY 去重）
 	rows, err := b.db.Add(
-		`SELECT e.from_node, n.type, n.display, n.slug, MIN(e.field) FROM edges e JOIN nodes n ON n.id = e.from_node
-		 WHERE e.to_node IN (#{1|expand})
+		`SELECT e.from_node, n.type, n.display, MIN(e.field) FROM edges e JOIN nodes n ON n.id = e.from_node
+		 WHERE e.to_node IN (#{1|expand}) AND n.archived_at IS NULL
 		 GROUP BY e.from_node
-		 ORDER BY n.sort, n.id DESC
+		 ORDER BY n.updated_at DESC, n.id DESC
 		 LIMIT #{2} OFFSET #{3}`,
 		toAny(ids), size, (page-1)*size).FetchList[inboundRow]()
 	if err != nil {
@@ -778,7 +778,7 @@ func (b *backend) inbound(ctx *CmsCtx) {
 	items := make([]map[string]any, 0, len(rows))
 	for _, r := range rows {
 		items = append(items, map[string]any{
-			"id": r.ID, "type": r.Type, "display": r.Display, "slug": r.Slug, "via_field": r.ViaField,
+			"id": r.ID, "type": r.Type, "display": r.Display, "via_field": r.ViaField,
 		})
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{"items": items, "total": total})
@@ -864,7 +864,7 @@ func (b *backend) rebuildSearch(ctx *CmsCtx) {
 
 // ── 实体搜索（引用编辑器用）──────────────────────
 
-// search 按标题/slug 模糊搜索节点（type 可选过滤）。
+// search 按 display 模糊搜索节点（type 可选过滤）。
 func (b *backend) search(ctx *CmsCtx) {
 	q := strings.TrimSpace(ctx.Query("q"))
 	typ := ctx.Query("type")
@@ -878,7 +878,7 @@ func (b *backend) search(ctx *CmsCtx) {
 		params["typ"] = typ
 	}
 	if q != "" {
-		like := `(or (like display {:q}) (like slug {:q}))`
+		like := `(like display {:q})`
 		if f != "" {
 			f = `(and ` + f + ` ` + like + `)`
 		} else {

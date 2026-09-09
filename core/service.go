@@ -41,6 +41,9 @@ func New(db *dba.SQL, ts *types.Types) *Service {
 	if _, err = s.MigrateUp(); err != nil {
 		panic("core: migrate error: " + err.Error())
 	}
+	if err = s.syncSchemaIndexes(); err != nil {
+		panic("core: schema indexes: " + err.Error())
+	}
 
 	s.initSearch()
 	return s

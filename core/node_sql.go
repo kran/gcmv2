@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kran/dba"
@@ -14,13 +15,11 @@ import (
 	_ "modernc.org/sqlite" // sqlite driver 注册
 )
 
-// ErrNotFound 目标节点不存在。
-var ErrNotFound = errors.New("core: node not found")
-
-// 发布状态。
-const (
-	StatusDraft     = 0
-	StatusPublished = 1
+var (
+	// ErrNotFound 目标节点不存在。
+	ErrNotFound = errors.New("core: node not found")
+	// ErrRevisionConflict 节点在客户端读取后已被其他写入修改。
+	ErrRevisionConflict = errors.New("core: node revision conflict")
 )
 
 // ── 读 ────────────────────────────────────────
@@ -37,17 +36,31 @@ func (s *Service) GetNodeById(id int64) (*Node, error) {
 	return n, nil
 }
 
-// GetNodeBySlug 按 slug 取节点; 不存在返回 (nil, nil)。空 slug 永不命中。
-func (s *Service) GetNodeBySlug(slug string) (*Node, error) {
-	if slug == "" {
+// GetNodeByAddress 按 addressable capability 的全局地址查节点。
+func (s *Service) GetNodeByAddress(address string) (*Node, error) {
+	if address == "" {
 		return nil, nil
 	}
-	n, err := s.db.Select("nodes", `slug = #{1}`, slug).FetchOne[Node]()
+	conditions := make([]string, 0)
+	args := make([]any, 0)
+	for _, typeName := range s.types.Names() {
+		capability, ok := s.types.Addressable(typeName)
+		if !ok {
+			continue
+		}
+		start := len(args) + 1
+		conditions = append(conditions, fmt.Sprintf(
+			`(type = #{%d} AND json_extract(fields, #{%d}) = #{%d})`,
+			start, start+1, start+2))
+		args = append(args, typeName, "$."+capability.Field, address)
+	}
+	if len(conditions) == 0 {
+		return nil, nil
+	}
+	query := `SELECT * FROM nodes WHERE archived_at IS NULL AND (` + strings.Join(conditions, " OR ") + `) LIMIT 1`
+	n, err := s.db.Add(query, args...).FetchOne[Node]()
 	if err != nil {
 		return nil, err
-	}
-	if n == nil {
-		return nil, nil
 	}
 	return n, nil
 }
@@ -65,31 +78,52 @@ func (s *Service) CreateNode(n *Node) (int64, error) {
 	if !ok {
 		return 0, fmt.Errorf("core: type %q not defined", n.Type)
 	}
-	if err := s.types.ValidateFields(n.Type, n.Fields); err != nil {
+	fields, err := s.types.ApplyDefaults(n.Type, n.Fields)
+	if err != nil {
 		return 0, err
 	}
-	if err := s.validateSlug(n.Slug, 0); err != nil {
+	if err := s.types.ValidateFields(n.Type, fields); err != nil {
 		return 0, err
 	}
 	if n.Display == "" {
 		return 0, errors.New("core: create: display required")
 	}
-	// 内部拷贝（不触碰调用方）: Fields 剥 ref
+	// 内部拷贝，不触碰调用方。BeforeCreate 可以补充字段，因此事务内会
+	// 再次校验并在校验后拆分引用。
 	m := *n
-	scalar, refs, err := splitRefs(td, s.types, m.Fields)
-	if err != nil {
-		return 0, err
-	}
-	m.Fields = scalar // ref 剥掉后直接赋回 — Fields.Value 自动 JSON
+	m.ID = 0
+	m.Fields = Fields(fields)
+	m.Revision = 1
+	m.ArchivedAt = nil
 	now := time.Now()
 	m.CreatedAt = now
 	m.UpdatedAt = now
 
 	var id int64
 	err = s.db.Transaction(func(tx *dba.SQL) error {
-		if err := s.hooks.Fire(HookNodeBeforeCreate, tx, &m); err != nil {
+		err := s.hooks.Fire(HookNodeBeforeCreate, tx, &m)
+		if err != nil {
 			return err
 		}
+		if m.Type != td.Name {
+			return errors.New("core: create: type is immutable")
+		}
+		if m.Display == "" {
+			return errors.New("core: create: display required")
+		}
+		m.ID = 0
+		m.Revision = 1
+		m.ArchivedAt = nil
+		m.CreatedAt = now
+		m.UpdatedAt = now
+		if err = s.types.ValidateFields(m.Type, m.Fields); err != nil {
+			return err
+		}
+		scalar, refs, err := splitRefs(td, s.types, m.Fields)
+		if err != nil {
+			return err
+		}
+		m.Fields = scalar
 		res, err := tx.Insert("nodes", &m).Exec()
 		if err != nil {
 			return err
@@ -125,83 +159,85 @@ func (s *Service) PatchNode(id int64, patch *NodePatch) error {
 	if existing == nil {
 		return ErrNotFound
 	}
-	// slug 合规 + 查重（排除自身）
-	if patch.Slug != nil {
-		if err := s.validateSlug(*patch.Slug, id); err != nil {
-			return err
-		}
+	if patch.Display == nil && len(patch.Fields) == 0 {
+		return nil
 	}
-	// ref 字段分离: patch.Fields 里属于引用（类型定义判断）→ 走边重建（不进 json_patch）
+	if patch.Revision == nil || *patch.Revision <= 0 {
+		return errors.New("core: patch: revision required")
+	}
 	td, ok := s.types.Type(existing.Type)
 	if !ok {
 		return fmt.Errorf("core: type %q not defined", existing.Type)
 	}
-	if err := s.types.ValidatePatchFields(existing.Type, patch.Fields); err != nil {
-		return err
-	}
-	// ref/标量分离 — 用局部变量（不触碰调用方的 patch）
-	scalarPatch := Fields{}
-	refPatch := map[string]any{}
-	for name, v := range patch.Fields {
-		f, ok := types.FieldByName(td, name)
-		if !ok {
-			return fmt.Errorf("core: field %q not on type %q", name, existing.Type)
-		}
-		if s.types.IsRefKind(f.Kind) {
-			refPatch[name] = v
-		} else {
-			scalarPatch[name] = v
-		}
-	}
-	// 构建 cols（用局部 scalarPatch — 不写回 patch.Fields）
-	cols := map[string]any{}
-	if patch.Slug != nil {
-		cols["slug"] = *patch.Slug
-	}
-	if patch.Status != nil {
-		cols["status"] = *patch.Status
-	}
-	if patch.Sort != nil {
-		cols["sort"] = *patch.Sort
-	}
-	if patch.Display != nil {
-		if *patch.Display == "" {
-			return errors.New("core: patch: display required")
-		}
-		cols["display"] = *patch.Display
-	}
-	if len(scalarPatch) > 0 {
-		b, _ := json.Marshal(scalarPatch)
-		cols["fields"] = dba.Expr(`json_patch(fields, #{1})`, string(b))
-	}
-	// 空 patch 判空 — 先于 hook（无变化不触发 — P3）
-	if len(cols) == 0 && len(refPatch) == 0 {
-		return nil
-	}
+
 	return s.db.Transaction(func(tx *dba.SQL) error {
-		// BeforeUpdate 传 patch（站点审计"改了什么" — P8）
-		if err := s.hooks.Fire(HookNodeBeforeUpdate, tx, patch); err != nil {
+		err := s.hooks.Fire(HookNodeBeforeUpdate, tx, patch)
+		if err != nil {
 			return err
 		}
-		// 列 + fields(Expr) + updated_at — dba.Update 一个搞定
-		cols["updated_at"] = time.Now()
-		if _, err := tx.Update("nodes", cols, "id = #{1}", id).Exec(); err != nil {
+		if err = s.types.ValidatePatchFields(existing.Type, patch.Fields); err != nil {
 			return err
 		}
-		// ref 字段: 删旧边重建（差量 — 只动出现的字段）
-		if len(refPatch) > 0 {
-			for name := range refPatch {
-				if _, err := tx.Add(
-					`DELETE FROM edges WHERE from_node = #{1} AND field = #{2}`, id, name).Exec(); err != nil {
-					return err
-				}
+
+		scalarPatch := Fields{}
+		refPatch := map[string]any{}
+		for name, value := range patch.Fields {
+			field, ok := types.FieldByName(td, name)
+			if !ok {
+				return fmt.Errorf("core: field %q not on type %q", name, existing.Type)
 			}
-			if err := addEdges(tx, s.types, td, id, refPatch); err != nil {
+			if s.types.IsRefKind(field.Kind) {
+				refPatch[name] = value
+			} else {
+				scalarPatch[name] = value
+			}
+		}
+
+		cols := map[string]any{}
+		if patch.Display != nil {
+			if *patch.Display == "" {
+				return errors.New("core: patch: display required")
+			}
+			cols["display"] = *patch.Display
+		}
+		if len(scalarPatch) > 0 {
+			body, err := json.Marshal(scalarPatch)
+			if err != nil {
+				return fmt.Errorf("core: patch fields: %w", err)
+			}
+			cols["fields"] = dba.Expr(`json_patch(fields, #{1})`, string(body))
+		}
+		if len(cols) == 0 && len(refPatch) == 0 {
+			return nil
+		}
+
+		cols["updated_at"] = time.Now()
+		cols["revision"] = dba.Expr(`revision + 1`)
+		result, err := tx.Update("nodes", cols, `id = #{1} AND revision = #{2}`, id, *patch.Revision).Exec()
+		if err != nil {
+			return err
+		}
+		updatedRows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if updatedRows == 0 {
+			return ErrRevisionConflict
+		}
+
+		for name := range refPatch {
+			_, err := tx.Add(`DELETE FROM edges WHERE from_node = #{1} AND field = #{2}`, id, name).Exec()
+			if err != nil {
 				return err
 			}
 		}
-		// AfterUpdate: 事务内重读完整 Node（搜索同步 + 站点拿最终态 —
-		// 不能用 s.GetNodeById（s.db 读不到未提交））
+		if len(refPatch) > 0 {
+			err = addEdges(tx, s.types, td, id, refPatch)
+			if err != nil {
+				return err
+			}
+		}
+
 		updated, err := tx.Select("nodes", `id = #{1}`, id).FetchOne[Node]()
 		if err != nil {
 			return err
@@ -233,23 +269,4 @@ func (s *Service) DeleteNode(id int64) error {
 		}
 		return s.hooks.Fire(HookNodeAfterDelete, tx, id)
 	})
-}
-
-// validateSlug 合规 + 查重（排除自身）— Create/Patch 共用。
-// 空 slug 跳过（合法 — 清空语义）; selfID 为自身 id（Create 传 0 = 无自身）。
-func (s *Service) validateSlug(slug string, selfID int64) error {
-	if slug == "" {
-		return nil
-	}
-	if !types.ValidSlug(slug) {
-		return fmt.Errorf("core: invalid slug %q (must start with letter, only letters/digits/_/-, no consecutive --)", slug)
-	}
-	other, err := s.GetNodeBySlug(slug)
-	if err != nil {
-		return err
-	}
-	if other != nil && other.ID != selfID {
-		return fmt.Errorf("core: slug %q already in use by node %d", slug, other.ID)
-	}
-	return nil
 }

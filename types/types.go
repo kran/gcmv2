@@ -19,14 +19,57 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// TypeDef 类型定义。
+// TypeDef 类型定义。Schema、运行能力和后台展示显式分组，避免展示配置
+// 影响数据不变量。
 type TypeDef struct {
-	Name   string     `json:"name"`                 // 类型名（配置键）
-	Search bool       `yaml:"search" json:"search"` // 参与全文检索（FTS）
-	View   string     `yaml:"view" json:"view"`     // 展示形态: tree / list（空 = list）
-	Icon   string     `yaml:"icon" json:"icon"`     // 管理端图标名（Element Plus icon）; 空 = 默认
-	Auth   bool       `yaml:"auth" json:"auth"`     // 可认证类型（认证信息存 auth_methods 表 — 节点 1:N 登录方式）
-	Fields []FieldDef `yaml:"fields" json:"fields"`
+	Name         string       `json:"name"` // 类型名（配置键）
+	Fields       []FieldDef   `yaml:"fields" json:"fields"`
+	Constraints  Constraints  `yaml:"constraints,omitempty" json:"constraints,omitempty"`
+	Capabilities Capabilities `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
+	Admin        AdminView    `yaml:"admin,omitempty" json:"admin,omitempty"`
+}
+
+// Constraints 类型级数据库约束。v0.9 首期只接受标量字段；引用参与的
+// 组合约束留给关系约束实现，不能用应用层假校验冒充数据库不变量。
+type Constraints struct {
+	Unique  [][]string `yaml:"unique,omitempty" json:"unique,omitempty"`
+	Indexes [][]string `yaml:"indexes,omitempty" json:"indexes,omitempty"`
+}
+
+// Capabilities 类型选择启用的通用行为。
+type Capabilities struct {
+	Searchable     *SearchableCapability  `yaml:"searchable,omitempty" json:"searchable,omitempty"`
+	Addressable    *AddressableCapability `yaml:"addressable,omitempty" json:"addressable,omitempty"`
+	Publication    *PublicationCapability `yaml:"publication,omitempty" json:"publication,omitempty"`
+	Authentication bool                   `yaml:"authentication,omitempty" json:"authentication,omitempty"`
+	Tree           *TreeCapability        `yaml:"tree,omitempty" json:"tree,omitempty"`
+}
+
+type SearchableCapability struct {
+	Fields []string `yaml:"fields" json:"fields"`
+}
+
+type AddressableCapability struct {
+	Field  string `yaml:"field" json:"field"`
+	Unique string `yaml:"unique" json:"unique"`
+}
+
+type PublicationCapability struct {
+	Field     string `yaml:"field" json:"field"`
+	Draft     string `yaml:"draft" json:"draft"`
+	Published string `yaml:"published" json:"published"`
+}
+
+type TreeCapability struct {
+	Parent string `yaml:"parent" json:"parent"`
+	Order  string `yaml:"order,omitempty" json:"order,omitempty"`
+}
+
+// AdminView 仅影响后台展示，不参与数据校验和公开策略。
+type AdminView struct {
+	View    string   `yaml:"view,omitempty" json:"view,omitempty"`
+	Icon    string   `yaml:"icon,omitempty" json:"icon,omitempty"`
+	Columns []string `yaml:"columns,omitempty" json:"columns,omitempty"`
 }
 
 // TemplateCandidates 模板级联候选名: node--{type}.html → node.html。
@@ -47,6 +90,8 @@ type FieldDef struct {
 	Item        *FieldDef  `yaml:"item,omitempty" json:"item,omitempty"`       // kind=array: 元素定义（递归）
 	Fields      []FieldDef `yaml:"fields,omitempty" json:"fields,omitempty"`   // kind=object: 子字段（递归）
 	Required    bool       `yaml:"required" json:"required"`
+	Default     any        `yaml:"default,omitempty" json:"default,omitempty"`
+	Immutable   bool       `yaml:"immutable,omitempty" json:"immutable,omitempty"`
 	Symmetric   bool       `yaml:"symmetric" json:"symmetric"`     // 对称: 存一次查双向
 	Transitive  bool       `yaml:"transitive" json:"transitive"`   // 传递: 可达性遍历
 	Equivalence bool       `yaml:"equivalence" json:"equivalence"` // 等价类展开
@@ -80,6 +125,7 @@ func defaultKinds() []Kind {
 		imageKind{},
 		galleryKind{},
 		fileKind{},
+		slugKind{},
 		refKind{},
 		refListKind{},
 	}
@@ -195,14 +241,15 @@ func (t *Types) Field(typeName, fieldName string) (FieldDef, bool) {
 var (
 	nameRe   = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 	reserved = map[string]bool{"node": true, "types": true, "settings": true}
-	// 节点列字段名: slug/status/sort 是 Node 的列（不是类型字段）,
-	// 类型定义声明它们会存进 fields JSON 而非列 — 防歧义, 直接拒绝
-	reservedField = map[string]bool{"slug": true, "status": true, "sort": true}
-	// nodeColumns 节点列全集（穿透路径第二段: 无 $. 前缀即列）;
-	// schema 常量唯一声明处（core 经 types.IsNodeColumn 引用）。
+	// Node 的真正通用列不得在动态字段中重复声明。
+	reservedField = map[string]bool{
+		"id": true, "type": true, "display": true, "revision": true,
+		"fields": true, "created_at": true, "updated_at": true, "archived_at": true,
+	}
+	// nodeColumns 节点列全集（穿透路径第二段: 无 $. 前缀即列）。
 	nodeColumns = map[string]bool{
-		"id": true, "type": true, "display": true, "slug": true,
-		"status": true, "sort": true, "created_at": true, "updated_at": true,
+		"id": true, "type": true, "display": true, "revision": true,
+		"fields": true, "created_at": true, "updated_at": true, "archived_at": true,
 	}
 )
 
@@ -215,9 +262,6 @@ func (t *Types) validate(defs map[string]TypeDef) error {
 		}
 		if reserved[name] {
 			return fmt.Errorf("types: type %q is reserved", name)
-		}
-		if td.View == "tree" && !hasSelfRef(td) {
-			return fmt.Errorf("types: type %q: view 'tree' requires a self-ref field (ref to own type)", name)
 		}
 		seen := map[string]bool{}
 		for _, f := range td.Fields {
@@ -233,8 +277,15 @@ func (t *Types) validate(defs map[string]TypeDef) error {
 			seen[f.Name] = true
 			// 复合字段: 结构语法（递归 normalize, 不进 kinds 注册表 — 非值类型）
 			if f.Kind == "array" || f.Kind == "object" {
-				if err := normalizeComposite(name, f, 0); err != nil {
+				err := normalizeComposite(name, f, 0)
+				if err != nil {
 					return err
+				}
+				if f.Default != nil {
+					err = t.ValidateValue(name, f, f.Default)
+					if err != nil {
+						return fmt.Errorf("types: %q.%s default: %w", name, f.Name, err)
+					}
 				}
 				continue
 			}
@@ -245,6 +296,14 @@ func (t *Types) validate(defs map[string]TypeDef) error {
 			if err := k.ValidateField(t, name, f, defs); err != nil {
 				return err
 			}
+			if f.Default != nil {
+				if err := t.ValidateValue(name, f, f.Default); err != nil {
+					return fmt.Errorf("types: %q.%s default: %w", name, f.Name, err)
+				}
+			}
+		}
+		if err := t.validateTypeConfig(name, td); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -260,20 +319,10 @@ func FieldByName(td TypeDef, name string) (FieldDef, bool) {
 	return FieldDef{}, false
 }
 
-// hasSelfRef 类型是否有自引用 ref 字段（to == 自身类型）。
-func hasSelfRef(td TypeDef) bool {
-	for _, f := range td.Fields {
-		if f.To == td.Name {
-			return true
-		}
-	}
-	return false
-}
-
-// IsTree 该类型是否树视图（view: tree 且校验通过）。
+// IsTree 该类型是否启用树能力。
 func (t *Types) IsTree(typeName string) bool {
 	td, ok := t.defs[typeName]
-	return ok && td.View == "tree"
+	return ok && td.Capabilities.Tree != nil
 }
 
 // IsRefKind 该 kind 是否引用系（ClassRef / ClassRefList）。
@@ -399,6 +448,9 @@ func (t *Types) ValidatePatchFields(typeName string, fields map[string]any) erro
 		field, ok := FieldByName(td, name)
 		if !ok {
 			return fmt.Errorf("types: %q: unknown field %q", typeName, name)
+		}
+		if field.Immutable {
+			return fmt.Errorf("types: %q: immutable field %q cannot be patched", typeName, name)
 		}
 		if value == nil {
 			if field.Required {

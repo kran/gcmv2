@@ -14,7 +14,7 @@ import (
 // ── 前台用户认证: 多登录方式（auth_methods）+ 会话（sessions） ──
 //
 // 结构（PB 参考）:
-//   - 可认证类型在 types.yaml 声明（auth: true）— 节点存 nodes（资料在 fields）
+//   - 可认证类型声明 capabilities.authentication — 节点资料存 fields
 //   - 认证信息（email/密码 hash）存 auth_methods — 一个节点多行 = 多登录方式
 //   - 会话 node 级（sessions）— 任何方式登录进同一会话; token 双轨
 //     （cookie 与 Bearer 是同一个字符串 — 两种携带方式）
@@ -52,7 +52,7 @@ func (s *Service) RegisterAuth(typeName, method, identifier string, data Fields,
 	if !ok {
 		return 0, fmt.Errorf("core: auth: type %q not defined", typeName)
 	}
-	if !td.Auth {
+	if !td.Capabilities.Authentication {
 		return 0, fmt.Errorf("core: auth: type %q is not auth-enabled", typeName)
 	}
 	if method == "" || identifier == "" {
@@ -120,7 +120,7 @@ func (s *Service) AddAuthMethod(typeName string, nodeID int64, method, identifie
 		return errors.New("core: auth: method and identifier required")
 	}
 	td, ok := s.types.Type(typeName)
-	if !ok || !td.Auth {
+	if !ok || !td.Capabilities.Authentication {
 		return fmt.Errorf("core: auth: type %q is not auth-enabled", typeName)
 	}
 	node, err := s.GetNodeById(nodeID)

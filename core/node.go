@@ -11,17 +11,17 @@ import (
 	"github.com/spf13/cast"
 )
 
-// ── 底表列（固定 8 个 — nodes 表固有列） ──────────
+// ── Node 通用列 ───────────────────────────────
 //
 // 类型字段名不得与这些保留名冲突（types 校验期拒绝）:
-//   id / type / title / slug / status / sort / created_at / updated_at
+//   id / type / display / revision / fields / created_at / updated_at / archived_at
 
 // Node 节点 — 值模型（读/模板/JSON 展示用）。
 //
-// 公开值字段: 模板 .Node.Title 直接访问; JSON 默认序列化（tag）;
-// 引擎读取直接 n.Slug。无指针无 Getter — 读场景零负担。
+// Display 是所有实体统一的可读标签；slug、发布状态和人工排序均由类型字段
+// 与 capability 声明，不再是 Node 固定语义。
 //
-// 写路径不经过 Node（差量用 NodePatch — 指针字段 nil 区分未提供）:
+// 写路径差量使用 NodePatch：
 //
 //	CreateNode(n *Node)  全量插入
 //	PatchNode(id, patch) 非 nil 列写 + fields json_patch merge
@@ -88,16 +88,15 @@ func (f Fields) Value() (driver.Value, error) {
 
 // Node 节点 — 值模型（读/模板/JSON/DB 直接可用）。
 type Node struct {
-	ID        int64     `db:"id,omitempty" json:"id"` // omitempty: 插入跳零值走自增
-	Type      string    `db:"type" json:"type"`
-	Display   string    `db:"display" json:"display"` // 公共显示文本（固有列 — 创建必传; 与 fields 无投影关系）
-	Slug      string    `db:"slug" json:"slug"`       // URL 段（'' = 无 URL）
-	Status    int       `db:"status" json:"status"`
-	Sort      int       `db:"sort" json:"sort"`
-	CreatedAt time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
+	ID         int64      `db:"id,omitempty" json:"id"` // omitempty: 插入跳零值走自增
+	Type       string     `db:"type" json:"type"`
+	Display    string     `db:"display" json:"display"`
+	Revision   int64      `db:"revision" json:"revision"`
+	CreatedAt  time.Time  `db:"created_at" json:"created_at"`
+	UpdatedAt  time.Time  `db:"updated_at" json:"updated_at"`
+	ArchivedAt *time.Time `db:"archived_at" json:"archived_at,omitempty"`
 
-	// 类型字段（Scan/Value 自动 JSON 转换）
+	// 类型字段（Scan/Value 自动 JSON 转换；ref/ref[] 存 edges）
 	Fields Fields `db:"fields" json:"fields"`
 
 	// Expand 引用展开容器（ExpandPath 填充 — 不落库）: map[字段名] → *Node / []*Node

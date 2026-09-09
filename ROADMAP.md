@@ -1,6 +1,6 @@
 # gcmv2 Roadmap
 
-> 基线：v0.8.4
+> 基线：v0.8.4；当前开发目标：v0.9.0
 >
 > 本文不是功能愿望清单，而是 gcm 从原型走向稳定“类型 + 关系”应用内核的工程路线。
 
@@ -26,6 +26,19 @@ gcm 目前证明了以下想法可行：
 - 设计确定后直接修改框架、现有站点和测试；破坏性变化用简短迁移说明记录。
 - 数据库中的用户数据需要安全迁移，但“数据迁移”不等于“永久保留旧代码路径”。
 - 每次只保留一个权威实现，避免新旧 API 长期并存。
+
+---
+
+# 0. 设计文档
+
+ADR 状态与实现进度：
+
+- [x] [ADR-001：Node、Schema 与 Capability 的边界](docs/adr/001-node-schema-capabilities.md) — Accepted / Implemented
+- [x] [ADR-002：统一 Query AST，Lisp 作为文本前端](docs/adr/002-query-ast.md)
+- [x] [ADR-003：Auth Realm 与统一 Actor](docs/adr/003-auth-realm-actor.md)
+- [x] [ADR-004：Edge、关系 Node 与引用完整性](docs/adr/004-relations.md)
+
+> `[x]` 表示文档已完成；是否接受和实现以每条后的状态及 ADR 正文为准。
 
 ---
 
@@ -85,12 +98,12 @@ HostMux 可以托管多个 Site，但每个 Site 仍然独立数据库。
 
 ## 2.1 Entity 不变量
 
-- [ ] Node.ID 创建后不可修改。
-- [ ] Node.Type 创建后不可修改。
-- [ ] Node.Display 是所有实体唯一必备的可读标签。
-- [ ] scalar/object/array 字段只存 Fields JSON。
-- [ ] ref/ref[] 只存 Edge，不同时在 Fields 中保留副本。
-- [ ] Create、Patch、Import、Batch 必须经过同一套字段校验。
+- [x] Node.ID 创建后不可修改。
+- [x] Node.Type 创建后不可修改。
+- [x] Node.Display 是所有实体唯一必备的可读标签。
+- [x] scalar/object/array 字段只存 Fields JSON。
+- [x] ref/ref[] 只存 Edge，不同时在 Fields 中保留副本。
+- [ ] Create、Patch 已统一 Schema 校验；Import、Batch 尚未实现。
 - [ ] 所有写操作在单事务中完成实体、引用、索引、审计和 outbox 写入。
 
 ## 2.2 通用列语义重新评审
@@ -105,15 +118,15 @@ id / type / display / slug / status / sort / fields / timestamps
 
 需要做出明确设计：
 
-- [ ] `display` 保留为通用实体标签。
-- [ ] `slug` 改为类型可选的 addressable 能力，或明确只是可选外部键。
-- [ ] `sort` 明确是手工排序元数据，不作为所有列表默认业务排序。
-- [ ] `status` 不再默认解释为 draft/published。
-- [ ] 发布能力下沉为 Type capability 或 publication 插件。
-- [ ] CRM 业务状态放在 Workflow 字段中，不复用 CMS publication status。
-- [ ] 制定现有 status 列的兼容迁移方案。
+- [x] `display` 保留为通用实体标签。
+- [x] `slug` 改为类型可选的 addressable capability 字段。
+- [x] `sort` 改为类型自己的 position 等字段，不再作为默认排序。
+- [x] `status` 已从 Node 删除，不再默认解释为 draft/published。
+- [x] 发布能力下沉为 publication capability。
+- [x] CRM/认证状态使用自己的字段；association 会员使用 approval_state。
+- [x] association 已提供旧列的一次性数据迁移。
 
-建议方向：数据库列可以暂时保留以兼容，但 core 不再给所有类型强加“草稿/发布”语义；只有声明 `publishable` 的类型才使用发布策略。
+建议方向：升级工具把旧列数据迁入显式字段，随后新运行时代码停止读取并删除旧列；不同时维护两套状态语义。只有声明 `publishable` 的类型才使用发布策略。
 
 ## 2.3 删除和引用不变量
 
@@ -181,17 +194,17 @@ employment(contact, account, role, start_at, end_at)  关系 Node
 - [x] Create 和 Patch 已统一字段类型校验；Patch 单独定义 null/required 语义。
 - [ ] 普通 Node.Fields 不包含 ref，但缺少明确的 RefID/RefIDs API，容易误用。
 - [ ] 直接 SQL seed 不会触发搜索同步。
-- [ ] 类型配置变化后没有自动索引重建策略。
+- [x] TypeDef 标量 unique/index 和全局 address 索引在启动时按 Schema 同步。
 - [ ] 业务 Web Hook 与 Core Hook 的作用范围容易混淆。
 - [ ] Engine 接口逐渐变大，但尚未明确哪些能力属于稳定公共 API。
 - [ ] DB 查询普遍不接收 request context，取消和超时无法贯穿。
 
 ## 3.3 CMS 假设泄漏
 
-- [ ] status 被全局解释为 draft/published。
+- [x] status 已从 Node 通用列删除，公开范围由 publication capability 决定。
 - [ ] Web 默认挂载首页、Node 页面和公开内容 API。
 - [ ] public/admin/auth/render 被 Site 一次性装配，能力边界不够可选。
-- [ ] TypeDef 的 view/search/auth 同时混合数据 Schema、能力和 UI 元数据。
+- [x] TypeDef 已分为 Fields/Constraints/Capabilities/Admin。
 - [x] 删除无效 `title:` 配置，并通过严格 YAML 解析拒绝再次出现。
 
 ## 3.4 已修复但尚未发布
@@ -744,7 +757,7 @@ task          待办任务
 - 空集合和 NULL
 - 事务回滚
 - 并发写入
-- 数据迁移和旧版本兼容
+- 数据迁移和升级后不变量
 
 ---
 

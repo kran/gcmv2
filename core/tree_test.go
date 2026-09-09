@@ -8,10 +8,10 @@ import (
 // 树形态: root → a → b; root → c（c 下架 status=0 不入树）
 func buildTreeForTree(t *testing.T, s *Service) (root, a, b int64) {
 	t.Helper()
-	root, _ = s.CreateNode(&Node{Type: "category", Display: "t", Slug: "root", Status: 1, Sort: 1, Fields: Fields{"name": "root"}})
-	a, _ = s.CreateNode(&Node{Type: "category", Display: "t", Slug: "a", Status: 1, Sort: 1, Fields: Fields{"name": "a", "parent": root}})
-	b, _ = s.CreateNode(&Node{Type: "category", Display: "t", Slug: "b", Status: 1, Sort: 2, Fields: Fields{"name": "b", "parent": a}})
-	c, _ := s.CreateNode(&Node{Type: "category", Display: "t", Slug: "c", Status: 0, Fields: Fields{"name": "c", "parent": root}})
+	root, _ = s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "root", "slug": "root", "publication_state": "published", "position": 1}})
+	a, _ = s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "a", "slug": "a", "publication_state": "published", "position": 1, "parent": root}})
+	b, _ = s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "b", "slug": "b", "publication_state": "published", "position": 2, "parent": a}})
+	c, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "c", "slug": "c", "publication_state": "draft", "parent": root}})
 	_ = c
 	return
 }
@@ -20,7 +20,7 @@ func TestTreeBasics(t *testing.T) {
 	s := newTraverseService(t)
 	root, a, b := buildTreeForTree(t, s)
 
-	tr, err := s.LoadTree("category", "parent")
+	tr, err := s.LoadTree("category")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,13 +95,13 @@ func TestTreeBasics(t *testing.T) {
 func TestTreeCycleSafe(t *testing.T) {
 	s := newTraverseService(t)
 	// 造环: a.parent = b, b.parent = a
-	a, _ := s.CreateNode(&Node{Type: "category", Display: "t", Slug: "a", Status: 1, Fields: Fields{"name": "a"}})
-	b, _ := s.CreateNode(&Node{Type: "category", Display: "t", Slug: "b", Status: 1, Fields: Fields{"name": "b", "parent": a}})
-	if err := s.PatchNode(a, &NodePatch{Fields: Fields{"parent": b}}); err != nil {
+	a, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "a", "slug": "a", "publication_state": "published"}})
+	b, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "b", "slug": "b", "publication_state": "published", "parent": a}})
+	if err := patchCurrent(t, s, a, &NodePatch{Fields: Fields{"parent": b}}); err != nil {
 		t.Fatal(err)
 	}
 
-	tr, err := s.LoadTree("category", "parent")
+	tr, err := s.LoadTree("category")
 	if err != nil {
 		t.Fatal(err)
 	}

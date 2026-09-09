@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/kran/cho"
@@ -52,13 +53,16 @@ func (s *Site) apiCreateNode(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, "type not found")
 		return
 	}
-	// 创建全程量 — core.Node 值模型（display 必填; status 默认草稿）
-	var node core.Node
-	if err := ctx.BindJson(&node); err != nil {
+	var input struct {
+		Display string      `json:"display"`
+		Fields  core.Fields `json:"fields"`
+	}
+	err := decodeStrictJSON(ctx.R.Body, &input)
+	if err != nil {
 		ctx.Error(http.StatusBadRequest, err.Error())
 		return
 	}
-	node.Type = typ // 强制（URL 定的 — 不信任 client 传 type）
+	node := core.Node{Type: typ, Display: input.Display, Fields: input.Fields}
 	if node.Display == "" {
 		ctx.Error(http.StatusBadRequest, "display required")
 		return
@@ -77,7 +81,12 @@ func (s *Site) apiCreateNode(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, err.Error())
 		return
 	}
-	_ = ctx.Json(http.StatusCreated, map[string]any{"id": id, "node": node})
+	created, err := s.engine.GetNodeById(id)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = ctx.Json(http.StatusCreated, map[string]any{"id": id, "node": created})
 }
 
 // apiViewNode GET /api/nodes/{type}/{id} — 公开读（可 hook 扩展）。
@@ -97,7 +106,7 @@ func (s *Site) apiViewNode(ctx *CmsCtx) {
 		ctx.Error(http.StatusInternalServerError, err.Error())
 		return
 	}
-	if n == nil || n.Type != typ || n.Status != core.StatusPublished {
+	if n == nil || n.Type != typ || !s.engine.Types().IsPublished(n.Type, n.Fields) {
 		ctx.Error(http.StatusNotFound, "not found")
 		return
 	}
@@ -127,7 +136,8 @@ func (s *Site) apiUpdateNode(ctx *CmsCtx) {
 	}
 	// 差量语义: client 提交 NodePatch（全指针 — nil = 不改字段; PATCH）
 	var patch core.NodePatch
-	if err := ctx.BindJson(&patch); err != nil {
+	err = decodeStrictJSON(ctx.R.Body, &patch)
+	if err != nil {
 		ctx.Error(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -140,7 +150,12 @@ func (s *Site) apiUpdateNode(ctx *CmsCtx) {
 		ctx.Error(http.StatusForbidden, err.Error())
 		return
 	}
-	if err := s.engine.PatchNode(id, &patch); err != nil {
+	err = s.engine.PatchNode(id, &patch)
+	if errors.Is(err, core.ErrRevisionConflict) {
+		ctx.Error(http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
 		ctx.Error(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -224,10 +239,10 @@ func (s *Site) apiMine(ctx *CmsCtx) {
 }
 
 // apiTree GET /api/tree/{type} — tree 类型数据（行业/地区/分类/组织机构）:
-// 返回嵌套树 [{id, slug, display, children}]。前端组树或直接渲染。
+// 返回嵌套树；父字段、排序和公开状态均来自类型 capability。
 func (s *Site) apiTree(ctx *CmsCtx) {
 	typ := ctx.PathValue("type")
-	tree, err := s.engine.LoadTree(typ, "parent")
+	tree, err := s.engine.LoadTree(typ)
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, err.Error())
 		return

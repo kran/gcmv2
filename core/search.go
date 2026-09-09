@@ -5,7 +5,7 @@ package core
 // 设计:
 //   - 接口: Sync/DeleteNode/Search/Rebuild — 换引擎（jieba 分词 / Bleve 等）只换实现,
 //     调用方零改动。
-//   - "哪些节点进索引"是业务规则（类型 search:true + 已发布）, 由 Service 判断,
+//   - "哪些节点进索引"由 searchable/publication capability 决定, Service 判断,
 //     引擎无脑"给什么索引什么"。
 //   - Sync 收 tx: SQLite 实现与 nodes 同事务（强一致）; 外部引擎忽略 tx 自行管理。
 //   - 默认实现: SQLite FTS5 表 + bigram 预分词（CJK 2 字符滑窗, 英文/数字保留原词）。
@@ -97,20 +97,21 @@ type ftsIndex struct {
 // NewFTSIndex 建默认检索引擎（FTS5 表由迁移 00002 创建）。
 func NewFTSIndex(svc *Service) SearchIndex { return &ftsIndex{svc: svc} }
 
-// searchableText 拼接可搜文本: title 列 + 全部 string/text/richtext 标量字段值。
+// searchableText 只拼接 searchable.fields 显式声明的值。
 func (s *Service) searchableText(n *Node) string {
-	td, ok := s.types.Type(n.Type)
+	capability, ok := s.types.Searchable(n.Type)
 	if !ok {
-		return n.Display
+		return ""
 	}
-	parts := []string{n.Display}
-	for _, f := range td.Fields {
-		if !s.types.IsRefKind(f.Kind) {
-			if v, ok := n.Fields[f.Name]; ok {
-				if str, ok := v.(string); ok && str != "" {
-					parts = append(parts, str)
-				}
-			}
+	parts := make([]string, 0, len(capability.Fields))
+	for _, field := range capability.Fields {
+		if field == "display" {
+			parts = append(parts, n.Display)
+			continue
+		}
+		value, ok := n.Fields[field].(string)
+		if ok && value != "" {
+			parts = append(parts, value)
 		}
 	}
 	return strings.Join(parts, " ")
@@ -181,20 +182,19 @@ func (f *ftsIndex) Search(q, typ string, page, size int) ([]Node, int64, error) 
 	return rows, total, nil
 }
 
-// Rebuild 全量重建: 全表清空 + 全部已发布可搜类型重索引。
+// Rebuild 全量重建：是否索引由 capability 判定。
 func (f *ftsIndex) Rebuild() error {
 	return f.svc.db.Transaction(func(tx *dba.SQL) error {
 		if _, err := tx.Add(`DELETE FROM nodes_fts`).Exec(); err != nil {
 			return err
 		}
-		var rows []Node
-		q := tx.Add(`SELECT * FROM nodes WHERE status = #{1}`, StatusPublished)
+		q := tx.Add(`SELECT * FROM nodes WHERE archived_at IS NULL`)
 		rows, err := q.FetchList[Node]()
 		if err != nil {
 			return err
 		}
 		for i := range rows {
-			if !f.svc.searchableType(rows[i].Type) {
+			if !f.svc.shouldIndex(&rows[i]) {
 				continue
 			}
 			if err := f.Sync(tx, &rows[i]); err != nil {
@@ -211,16 +211,20 @@ func (s *Service) RebuildSearch() error {
 	return s.search.Rebuild()
 }
 
-// searchableType 类型是否声明可搜索（search: true）。
-func (s *Service) searchableType(typeName string) bool {
-	td, ok := s.types.Type(typeName)
-	if !ok {
+func (s *Service) shouldIndex(node *Node) bool {
+	if node == nil || node.ArchivedAt != nil {
 		return false
 	}
-	return td.Search
+	if _, ok := s.types.Searchable(node.Type); !ok {
+		return false
+	}
+	if _, hasPublication := s.types.Publication(node.Type); hasPublication {
+		return s.types.IsPublished(node.Type, node.Fields)
+	}
+	return true
 }
 
-// Search 全文搜索原语（类型 search:true + 已发布才在索引里; 引擎由
+// Search 全文搜索原语（索引范围由 capability 决定; 引擎由
 // SetSearchIndex 替换）。typ 空 = 全类型。
 func (s *Service) Search(q, typ string, page, size int) ([]Node, int64, error) {
 	return s.search.Search(q, typ, page, size)
@@ -246,7 +250,7 @@ func (s *Service) initSearch() {
 
 // searchSync 搜索索引同步（AfterCreate/AfterUpdate; 事务内）。
 func (s *Service) searchSync(tx *dba.SQL, n *Node) error {
-	if s.searchableType(n.Type) && n.Status == StatusPublished {
+	if s.shouldIndex(n) {
 		return s.search.Sync(tx, n)
 	}
 	return s.search.Delete(tx, n.ID)

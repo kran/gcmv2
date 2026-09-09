@@ -18,12 +18,21 @@ func testSiteWithTemplates(t *testing.T) *Site {
 	typesYAML := `
 types:
   article:
+    capabilities:
+      addressable: { field: slug, unique: global }
+      publication: { field: publication_state, draft: draft, published: published }
     fields:
+      - { name: slug, kind: slug }
+      - { name: publication_state, kind: select, options: [draft, published], default: draft }
       - { name: body, kind: richtext }
   category:
-    view: tree
+    capabilities:
+      publication: { field: publication_state, draft: draft, published: published }
+      tree: { parent: parent }
+    admin: { view: tree }
     fields:
       - { name: name, kind: text }
+      - { name: publication_state, kind: select, options: [draft, published], default: draft }
       - { name: parent, kind: ref, to: category }
 `
 	tp := filepath.Join(dir, "types.yaml")
@@ -56,7 +65,7 @@ func TestDefaultHome(t *testing.T) {
 
 func TestNodeHandlerByID(t *testing.T) {
 	s := testSiteWithTemplates(t)
-	id, err := s.Engine().CreateNode(&core.Node{Type: "article", Display: "文章一", Status: 1})
+	id, err := s.Engine().CreateNode(&core.Node{Type: "article", Display: "文章一", Fields: core.Fields{"publication_state": "published"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +80,7 @@ func TestNodeHandlerByID(t *testing.T) {
 
 func TestNodeHandlerBySlug(t *testing.T) {
 	s := testSiteWithTemplates(t)
-	id, err := s.Engine().CreateNode(&core.Node{Type: "article", Display: "文章二", Slug: "article-2", Status: 1})
+	id, err := s.Engine().CreateNode(&core.Node{Type: "article", Display: "文章二", Fields: core.Fields{"slug": "article-2", "publication_state": "published"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +95,7 @@ func TestNodeHandlerBySlug(t *testing.T) {
 
 func TestNodeHandlerDraft404(t *testing.T) {
 	s := testSiteWithTemplates(t)
-	id, _ := s.Engine().CreateNode(&core.Node{Type: "article", Display: "草稿", Status: 0})
+	id, _ := s.Engine().CreateNode(&core.Node{Type: "article", Display: "草稿", Fields: core.Fields{"publication_state": "draft"}})
 	// 草稿 → 404
 	w := do(s, "GET", "/node/"+itoa(id), nil)
 	if w.Code != http.StatusNotFound {
@@ -117,7 +126,7 @@ func TestNodeHandlerCandidates(t *testing.T) {
 	tdir := s.render.root
 	os.WriteFile(filepath.Join(tdir, "node--article.html"),
 		[]byte(`article-tpl:{{ .Node.Display }}`), 0o644)
-	id, _ := s.Engine().CreateNode(&core.Node{Type: "article", Display: "候选", Status: 1})
+	id, _ := s.Engine().CreateNode(&core.Node{Type: "article", Display: "候选", Fields: core.Fields{"publication_state": "published"}})
 	w := do(s, "GET", "/node/"+itoa(id), nil)
 	if w.Body.String() != "article-tpl:候选" {
 		t.Fatalf("candidate body = %q", w.Body.String())
@@ -134,7 +143,7 @@ func TestDebugErrorPage(t *testing.T) {
 	// 破坏模板（语法错误）→ debug 详情页
 	tdir := s.render.root
 	os.WriteFile(filepath.Join(tdir, "node.html"), []byte(`{{ bad syntax`), 0o644)
-	id, _ := s.Engine().CreateNode(&core.Node{Type: "article", Display: "x", Status: 1})
+	id, _ := s.Engine().CreateNode(&core.Node{Type: "article", Display: "x", Fields: core.Fields{"publication_state": "published"}})
 	w := do(s, "GET", "/node/"+itoa(id), nil)
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("debug error = %d", w.Code)

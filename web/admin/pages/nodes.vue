@@ -20,12 +20,7 @@
     <div class="nodes-list">
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
         <span style="font-size:16px;">{{ query.type || '未选择类型' }}</span>
-        <el-select v-model="query.status" placeholder="状态" size="small" style="width:110px"
-                   clearable @change="refresh">
-          <el-option label="已发布" :value="1" />
-          <el-option label="草稿" :value="0" />
-        </el-select>
-        <el-input v-model="query.q" placeholder="搜索标题/别名" size="small" style="width:180px"
+        <el-input v-model="query.q" placeholder="搜索显示名称" size="small" style="width:180px"
                   clearable @change="refresh" />
         <!-- 树过滤（多个: 每个树引用字段一个 popover 下拉, 按目标类型名区分） -->
         <el-popover v-for="ft in filterTrees" :key="ft.field" trigger="click" placement="bottom-start"
@@ -60,18 +55,11 @@
       <!-- 树视图（view: tree 类型, 全量不分页; el-table 树形模式, 行操作: 编辑/新建子/删除） -->
       <el-table v-if="treeMode" :data="treeNodes" v-loading="loading" row-key="id"
                 :tree-props="{ children: 'children' }" default-expand-all >
-        <el-table-column label="标题" min-width="360" show-overflow-tooltip>
+        <el-table-column label="标题" min-width="260" show-overflow-tooltip>
           <template #default="{ row: r }"><a class="node-title-link" @click.prevent="openEdit(r)">{{ titleOf(r) }}</a></template>
         </el-table-column>
-        <el-table-column label="slug" min-width="160" show-overflow-tooltip>
-          <template #default="{ row: r }">{{ r.slug || '#' + r.id }}</template>
-        </el-table-column>
-        <el-table-column label="状态" width="90">
-          <template #default="{ row: r }">
-            <el-tag :type="r.status === 1 ? 'success' : 'info'" size="small">
-              {{ r.status === 1 ? '已发布' : '草稿' }}
-            </el-tag>
-          </template>
+        <el-table-column v-for="c in adminColumns" :key="c" :label="fieldLabel(c)" min-width="130" show-overflow-tooltip>
+          <template #default="{ row: r }">{{ fieldValue(r, c) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row: r }">
@@ -83,20 +71,12 @@
 
       <el-table v-else :data="rows" v-loading="loading">
         <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column label="标题" min-width="360" show-overflow-tooltip>
+        <el-table-column label="标题" min-width="260" show-overflow-tooltip>
           <template #default="{ row: r }"><a class="node-title-link" @click.prevent="openEdit(r)">{{ titleOf(r) }}</a></template>
         </el-table-column>
-        <el-table-column label="slug" min-width="160" show-overflow-tooltip>
-          <template #default="{ row: r }">{{ r.slug || '#' + r.id }}</template>
+        <el-table-column v-for="c in adminColumns" :key="c" :label="fieldLabel(c)" min-width="130" show-overflow-tooltip>
+          <template #default="{ row: r }">{{ fieldValue(r, c) }}</template>
         </el-table-column>
-        <el-table-column label="状态" width="90">
-          <template #default="{ row: r }">
-            <el-tag :type="r.status === 1 ? 'success' : 'info'" size="small">
-              {{ r.status === 1 ? '已发布' : '草稿' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="sort" label="排序" width="70" />
         <el-table-column label="更新时间" width="165">
           <template #default="{ row: r }">{{ fmt(r.updated_at) }}</template>
         </el-table-column>
@@ -146,12 +126,18 @@ export default {
             treeNodes: [],
             parentField: 'parent',
             filterTrees: [],   // 多个树过滤: [{def, field, label, nodes, active, activeLabel}]
-            query: { type: '', status: null, q: '', page: 1, size: 25 },
+            query: { type: '', q: '', page: 1, size: 25 },
             rebuilding: false,
             createVisible: false,
             editVisible: false,
             editNode: null,
         }
+    },
+    computed: {
+        adminColumns() {
+            const def = this.typeDefs[this.query.type] || {}
+            return ((def.admin && def.admin.columns) || []).filter(c => !['id', 'display', 'updated_at'].includes(c))
+        },
     },
     async mounted() { await this.loadTypes() },
     methods: {
@@ -160,10 +146,20 @@ export default {
             this.editNode = node
             this.editVisible = true
         },
-        // 图标来自类型配置（icon 字段）; 空 = 默认
+        // 图标来自 Admin View，不参与数据语义。
         typeIcon(t) {
             const def = this.typeDefs[t] || {}
-            return def.icon || 'Files'
+            return (def.admin && def.admin.icon) || 'Files'
+        },
+        fieldLabel(name) {
+            const def = this.typeDefs[this.query.type] || {}
+            const field = (def.fields || []).find(f => f.name === name)
+            return (field && field.label) || name
+        },
+        fieldValue(node, name) {
+            const value = node.fields && node.fields[name]
+            if (Array.isArray(value)) return value.join(', ')
+            return value === undefined || value === null ? '' : value
         },
         async loadTypes() {
             const res = await window.$api.types()
@@ -177,16 +173,15 @@ export default {
             this.query.page = 1
             this.query.filter = '' // 类型切换清残留（旧类型的字段对不上新类型, fail-loud 报错）
             const def = this.typeDefs[t] || {}
-            this.treeMode = def.view === 'tree'
+            this.treeMode = !!(def.admin && def.admin.view === 'tree')
             this.setupFilterTree(def)
             if (this.treeMode) this.loadTree()
             else this.refresh()
         },
-        // 自引用 ref 字段名（树组装用）: to == 自身类型的第一个 ref
+        // 树父字段由 capability 明确声明。
         selfRefField(def) {
-            const name = def && def.name
-            const f = (def.fields || []).find(x => x.to === name)
-            return f ? f.name : ''
+            return def && def.capabilities && def.capabilities.tree
+                ? def.capabilities.tree.parent : ''
         },
         async loadTree() {
             if (!this.query.type) return
@@ -284,7 +279,6 @@ export default {
             this.loading = true
             try {
                 const params = { type: this.query.type, page: this.query.page, size: this.query.size, sort: '-id' }
-                if (this.query.status !== null && this.query.status !== '') params.status = this.query.status
                 if (this.query.q) params.q = this.query.q
                 if (this.query.filter) params.filter = this.query.filter
                 const res = await window.$api.nodes(params)

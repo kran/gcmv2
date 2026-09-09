@@ -29,7 +29,7 @@ type urlEntry struct {
 	Priority string `xml:"priority,omitempty"`
 }
 
-// Mount 安装 sitemap 插件: GET /sitemap.xml — 全部已发布节点（slug 优先）。
+// Mount 安装 sitemap 插件: GET /sitemap.xml — 全部已发布节点（address 优先）。
 // 站点绝对地址读 site.Config()["base_url"]（协议要求绝对 URL — 缺失 panic）。
 // Options sitemap 插件配置（站点侧负责）。
 type Options struct {
@@ -45,8 +45,8 @@ func Mount(s *web.Site, opts Options) {
 	}
 	s.Hook(web.HookBeforeMount, func(site *web.Site) error {
 		site.Router().Get("/sitemap.xml", func(ctx *web.CmsCtx) {
-			list, _, err := s.Engine().QueryPage(core.ListQuery{
-				Filter: `(= status 1)`, Page: 1, Size: 10000,
+			list, err := s.Engine().Query(core.ListQuery{
+				Size: 10000,
 				Sort: []core.SortField{{Field: "id"}},
 			})
 			if err != nil {
@@ -57,9 +57,13 @@ func Mount(s *web.Site, opts Options) {
 			set.URLs = make([]urlEntry, 0, len(list)+1)
 			for i := range list {
 				n := &list[i]
+				if !s.Engine().Types().IsPublished(n.Type, n.Fields) {
+					continue
+				}
 				loc := baseURL + "/node/"
-				if n.Slug != "" {
-					loc += n.Slug
+				address := s.Engine().Types().Address(n.Type, n.Fields)
+				if address != "" {
+					loc += address
 				} else {
 					loc += strconv.FormatInt(n.ID, 10)
 				}

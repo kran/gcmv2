@@ -126,8 +126,8 @@ func TestAdminPasswordFlow(t *testing.T) {
 	}
 	// 建节点（article）
 	w = do(s, "POST", "/admin/nodes?type=article", map[string]any{
-		"display": "后台文章", "status": 1, "sort": 0,
-		"fields": map[string]any{"body": "正文"},
+		"display": "后台文章",
+		"fields":  map[string]any{"body": "正文", "publication_state": "published"},
 	}, ck)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("create = %d: %s", w.Code, w.Body.String())
@@ -151,7 +151,8 @@ func TestAdminPasswordFlow(t *testing.T) {
 	}
 	// 更新
 	w = do(s, "PUT", "/admin/nodes/"+itoa(created.ID), map[string]any{
-		"slug": "", "status": 0, "sort": 5,
+		"revision": n.Revision,
+		"fields":   map[string]any{"publication_state": "draft"},
 	}, ck)
 	if w.Code != http.StatusOK {
 		t.Fatalf("update = %d: %s", w.Code, w.Body.String())

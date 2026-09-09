@@ -14,7 +14,7 @@ package core
 //
 // 语法（2026-08 定案）:
 //
-//	取值:    status(列) / $label(JSON) / ->categories(出边) / <-comments(入边)
+//	取值:    created_at(列) / $label(JSON) / ->categories(出边) / <-comments(入边)
 //	数组:    [1 2 3] 字面量 / {:args} 占位符
 //	引用:    (edge 字段 目标) — 一元=存在性; 目标=值(折叠)/谓词(开层)
 //	集合:    (in 字段 集合) — 字段=列(标量 IN)/引用(边 EXISTS)
@@ -170,7 +170,7 @@ const (
 
 // fieldOf 解析字段 token 的前缀:
 //
-//	无前缀 = 列       status
+//	无前缀 = 列       created_at
 //	$name  = JSON     $label（兼容 $.label）
 //	->name = 出边引用  ->categories
 //	<-name = 入边引用  <-comments
@@ -388,7 +388,7 @@ func (c *lispCompiler) inFn(args []lispExpr) (string, error) {
 		}
 		return c.varRef(c.inSQLRef(kind, refType, field, setRef), c.inFieldArg(kind, refType, field)), nil
 	}
-	// 单值原子（非数组）: (in status 5) → 单元素集合
+	// 单值原子（非数组）: (in type "article") → 单元素集合
 	val, err := c.valueOf(args[1])
 	if err != nil {
 		return "", err
@@ -497,21 +497,25 @@ func (c *lispCompiler) inSQLRef(kind fieldKind, refType, field, setRef string) s
 	return "EXISTS(SELECT 1 FROM edges WHERE field = #{1} AND " + linkCol + " = " + c.link + " AND " + joinCol + " IN (" + setRef + "))"
 }
 
-// subtreeFn: (subtree "slug") — 返回 id 列表（参数传给 in 的 expand）。
+// subtreeFn: (subtree "address") — 按 addressable/tree capability 返回 id 集合。
 func (c *lispCompiler) subtreeFn(args []lispExpr) (string, error) {
 	if len(args) != 1 {
 		return "", fmt.Errorf("filter-lisp: subtree takes 1 arg")
 	}
-	slug, _ := pathOfC(args[0])
-	cat, err := c.svc.GetNodeBySlug(slug)
-	if err != nil || cat == nil {
-		return "", fmt.Errorf("filter-lisp: subtree %q not found", slug)
+	address, _ := pathOfC(args[0])
+	root, err := c.svc.GetNodeByAddress(address)
+	if err != nil || root == nil {
+		return "", fmt.Errorf("filter-lisp: subtree %q not found", address)
 	}
-	ids, err := c.svc.Subtree(cat.Type, cat.ID, "parent", 20)
+	tree, ok := c.svc.types.Tree(root.Type)
+	if !ok {
+		return "", fmt.Errorf("filter-lisp: type %q is not tree-enabled", root.Type)
+	}
+	ids, err := c.svc.Subtree(root.Type, root.ID, tree.Parent, 20)
 	if err != nil {
 		return "", err
 	}
-	ids = append([]int64{cat.ID}, ids...)
+	ids = append([]int64{root.ID}, ids...)
 	if len(ids) > maxArrayItems {
 		return "", fmt.Errorf("filter-lisp: subtree exceeds %d nodes", maxArrayItems)
 	}

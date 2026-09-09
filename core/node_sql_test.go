@@ -1,7 +1,9 @@
 package core
 
 import (
+	"errors"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/kran/dba"
@@ -12,26 +14,43 @@ import (
 const testTypesYAML = `
 types:
   category:
-    search: true
+    capabilities:
+      searchable: { fields: [display, name] }
+      addressable: { field: slug, unique: global }
+      publication: { field: publication_state, draft: draft, published: published }
+      tree: { parent: parent, order: position }
+    admin: { view: tree, columns: [slug, publication_state, position] }
     fields:
       - { name: name, kind: text }
+      - { name: slug, kind: slug }
+      - { name: publication_state, kind: select, options: [draft, published], default: draft }
+      - { name: position, kind: number, default: 0 }
       - { name: parent, kind: ref, to: category }
       - { name: children, kind: "ref[]", to: category }
   person:
-    search: true
+    capabilities:
+      searchable: { fields: [display, name] }
+      publication: { field: publication_state, draft: draft, published: published }
     fields:
       - { name: name, kind: text }
+      - { name: publication_state, kind: select, options: [draft, published], default: draft }
   article:
-    search: true
+    capabilities:
+      searchable: { fields: [display, title, body] }
+      addressable: { field: slug, unique: global }
+      publication: { field: publication_state, draft: draft, published: published }
     fields:
       - { name: title, kind: text }
+      - { name: slug, kind: slug }
+      - { name: publication_state, kind: select, options: [draft, published], default: draft }
+      - { name: position, kind: number, default: 0 }
       - { name: body, kind: richtext }
       - { name: views, kind: number }
       - { name: authors, kind: "ref[]", to: person }
       - { name: categories, kind: "ref[]", to: category }
 `
 
-func testDB(t *testing.T) *dba.SQL {
+func testDB(t testing.TB) *dba.SQL {
 	t.Helper()
 	db, err := dba.Open("sqlite", filepath.Join(t.TempDir(), "test.db")+"?_pragma=foreign_keys(1)")
 	if err != nil {
@@ -53,12 +72,41 @@ func newTestService(t *testing.T) *Service {
 	return New(testDB(t), ts)
 }
 
+func patchCurrent(t *testing.T, s *Service, id int64, patch *NodePatch) error {
+	t.Helper()
+	node, err := s.GetNodeById(id)
+	if err != nil {
+		return err
+	}
+	if node == nil {
+		return ErrNotFound
+	}
+	patch.Revision = &node.Revision
+	return s.PatchNode(id, patch)
+}
+
+func TestNodeSchemaMigration(t *testing.T) {
+	db := testDB(t)
+	columns, err := db.Add(`SELECT name FROM pragma_table_info('nodes') ORDER BY cid`).FetchList[string]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"id", "type", "display", "fields", "created_at", "updated_at", "revision", "archived_at"}
+	if !slices.Equal(columns, want) {
+		t.Fatalf("nodes columns = %v, want %v", columns, want)
+	}
+	table, err := db.Add(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'legacy_node_columns'`).FetchOne[string]()
+	if err != nil || table == nil {
+		t.Fatalf("legacy migration table missing: table=%v err=%v", table, err)
+	}
+}
+
 // ── Create ─────────────────────────────────────
 
 func TestCreateAndGet(t *testing.T) {
 	s := newTestService(t)
-	id, err := s.CreateNode(&Node{Type: "article", Display: "t", Slug: "news", Status: 1,
-		Fields: map[string]any{"title": "标题", "body": "正文", "views": 5}})
+	id, err := s.CreateNode(&Node{Type: "article", Display: "t",
+		Fields: map[string]any{"title": "标题", "slug": "news", "publication_state": "published", "body": "正文", "views": 5}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +117,7 @@ func TestCreateAndGet(t *testing.T) {
 	if err != nil || n == nil {
 		t.Fatal(err)
 	}
-	if n.Display != "t" || n.Slug != "news" || n.Status != 1 {
+	if n.Display != "t" || n.Fields.Str("slug") != "news" || n.Fields.Str("publication_state") != "published" || n.Revision != 1 {
 		t.Fatalf("node = %+v", n)
 	}
 	if n.Fields["body"] != "正文" || n.Fields["views"] != float64(5) {
@@ -82,10 +130,10 @@ func TestCreateAndGet(t *testing.T) {
 
 func TestCreateSlugDup(t *testing.T) {
 	s := newTestService(t)
-	if _, err := s.CreateNode(&Node{Type: "article", Display: "t", Slug: "a", Fields: map[string]any{"title": "t1"}}); err != nil {
+	if _, err := s.CreateNode(&Node{Type: "article", Display: "t", Fields: map[string]any{"title": "t1", "slug": "a"}}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := s.CreateNode(&Node{Type: "article", Display: "t", Slug: "a", Fields: map[string]any{"title": "t2"}})
+	_, err := s.CreateNode(&Node{Type: "article", Display: "t", Fields: map[string]any{"title": "t2", "slug": "a"}})
 	if err == nil {
 		t.Fatal("slug dup should fail")
 	}
@@ -112,36 +160,32 @@ func TestCreateRefs(t *testing.T) {
 
 // ── Patch（差量 + json_patch merge） ─────────────
 
-func TestPatchColumns(t *testing.T) {
+func TestPatchFieldsAndRevision(t *testing.T) {
 	s := newTestService(t)
-	id, _ := s.CreateNode(&Node{Type: "article", Display: "t", Slug: "a", Status: 0, Sort: 3,
-		Fields: map[string]any{"title": "t", "body": "b"}})
+	id, _ := s.CreateNode(&Node{Type: "article", Display: "t",
+		Fields: map[string]any{"title": "t", "slug": "a", "publication_state": "draft", "position": 3, "body": "b"}})
 
-	// PATCH: 改 slug + status（Sort 未提供 — 保留）
-	slug := "b"
-	status := 1
-	if err := s.PatchNode(id, &NodePatch{Slug: &slug, Status: &status}); err != nil {
+	if err := patchCurrent(t, s, id, &NodePatch{Fields: Fields{"slug": "b", "publication_state": "published"}}); err != nil {
 		t.Fatal(err)
 	}
 	n, _ := s.GetNodeById(id)
-	if n.Slug != "b" || n.Status != 1 || n.Sort != 3 {
-		t.Fatalf("patch cols = %+v", n)
+	if n.Fields.Str("slug") != "b" || n.Fields.Str("publication_state") != "published" || n.Fields.Int("position") != 3 {
+		t.Fatalf("patch fields = %+v", n)
 	}
-	if n.Fields["body"] != "b" {
-		t.Fatal("fields body lost")
+	if n.Revision != 2 {
+		t.Fatalf("revision = %d, want 2", n.Revision)
 	}
 }
 
 func TestPatchSlugEmpty(t *testing.T) {
 	s := newTestService(t)
-	id, _ := s.CreateNode(&Node{Type: "article", Display: "t", Slug: "a", Fields: map[string]any{"title": "t"}})
-	empty := ""
-	if err := s.PatchNode(id, &NodePatch{Slug: &empty}); err != nil {
+	id, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: map[string]any{"title": "t", "slug": "a"}})
+	if err := patchCurrent(t, s, id, &NodePatch{Fields: Fields{"slug": ""}}); err != nil {
 		t.Fatal(err)
 	}
 	n, _ := s.GetNodeById(id)
-	if n.Slug != "" {
-		t.Fatalf("slug should be cleared, got %q", n.Slug)
+	if n.Fields.Str("slug") != "" {
+		t.Fatalf("slug should be cleared, got %q", n.Fields.Str("slug"))
 	}
 }
 
@@ -151,7 +195,7 @@ func TestPatchFieldsMerge(t *testing.T) {
 		Fields: map[string]any{"title": "t", "body": "旧", "views": 100}})
 
 	// PATCH fields: 只给 body — views 保留（json_patch merge）
-	if err := s.PatchNode(id, &NodePatch{Fields: map[string]any{"body": "新"}}); err != nil {
+	if err := patchCurrent(t, s, id, &NodePatch{Fields: map[string]any{"body": "新"}}); err != nil {
 		t.Fatal(err)
 	}
 	n, _ := s.GetNodeById(id)
@@ -169,7 +213,7 @@ func TestPatchFieldsNullDelete(t *testing.T) {
 		Fields: map[string]any{"title": "t", "body": "旧"}})
 
 	// PATCH fields: body = nil → 删除字段（json_patch RFC 7396）
-	if err := s.PatchNode(id, &NodePatch{Fields: map[string]any{"body": nil}}); err != nil {
+	if err := patchCurrent(t, s, id, &NodePatch{Fields: map[string]any{"body": nil}}); err != nil {
 		t.Fatal(err)
 	}
 	n, _ := s.GetNodeById(id)
@@ -184,7 +228,7 @@ func TestPatchRefNullClear(t *testing.T) {
 	id, _ := s.CreateNode(&Node{Type: "article", Display: "t",
 		Fields: map[string]any{"title": "t", "categories": []any{cat}}})
 	// 清空 ref（null = 只删边不加边 — PATCH 语义）
-	if err := s.PatchNode(id, &NodePatch{Fields: map[string]any{"categories": nil}}); err != nil {
+	if err := patchCurrent(t, s, id, &NodePatch{Fields: map[string]any{"categories": nil}}); err != nil {
 		t.Fatal(err)
 	}
 	edges, _, _ := s.OutEdges("article", id, "categories", 1, 10)
@@ -200,7 +244,7 @@ func TestPatchRefReplace(t *testing.T) {
 	id, _ := s.CreateNode(&Node{Type: "article", Display: "t",
 		Fields: map[string]any{"title": "t", "categories": []any{cat1}}})
 	// 换引用（只动出现的字段 — 差量）
-	if err := s.PatchNode(id, &NodePatch{Fields: map[string]any{"categories": []any{cat2}}}); err != nil {
+	if err := patchCurrent(t, s, id, &NodePatch{Fields: map[string]any{"categories": []any{cat2}}}); err != nil {
 		t.Fatal(err)
 	}
 	edges, _, _ := s.OutEdges("article", id, "categories", 1, 10)
@@ -264,12 +308,66 @@ types:
 		{"name": nil},
 		{"name": ""},
 	} {
-		if err := s.PatchNode(id, &NodePatch{Fields: fields}); err == nil {
+		if err := patchCurrent(t, s, id, &NodePatch{Fields: fields}); err == nil {
 			t.Fatalf("invalid patch must fail: %#v", fields)
 		}
 	}
-	if err := s.PatchNode(id, &NodePatch{Fields: Fields{"state": nil}}); err != nil {
+	if err := patchCurrent(t, s, id, &NodePatch{Fields: Fields{"state": nil}}); err != nil {
 		t.Fatalf("optional field delete: %v", err)
+	}
+}
+
+func TestCreateDefaultsAndAddress(t *testing.T) {
+	s := newTestService(t)
+	id, err := s.CreateNode(&Node{
+		Type: "article", Display: "defaulted",
+		Fields: Fields{"title": "defaulted", "slug": "defaulted"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := s.GetNodeByAddress("defaulted")
+	if err != nil || node == nil || node.ID != id {
+		t.Fatalf("address lookup: node=%#v err=%v", node, err)
+	}
+	if node.Fields.Str("publication_state") != "draft" || node.Fields.Int("position") != 0 {
+		t.Fatalf("defaults = %#v", node.Fields)
+	}
+}
+
+func TestPatchRevisionConflict(t *testing.T) {
+	s := newTestService(t)
+	id, _ := s.CreateNode(&Node{Type: "article", Display: "before", Fields: Fields{"title": "before"}})
+	node, _ := s.GetNodeById(id)
+	staleRevision := node.Revision
+	first := "first"
+	if err := s.PatchNode(id, &NodePatch{Revision: &staleRevision, Display: &first}); err != nil {
+		t.Fatal(err)
+	}
+	second := "second"
+	err := s.PatchNode(id, &NodePatch{Revision: &staleRevision, Display: &second})
+	if !errors.Is(err, ErrRevisionConflict) {
+		t.Fatalf("stale patch error = %v", err)
+	}
+}
+
+func TestSchemaUniqueIndex(t *testing.T) {
+	ts := newTypes(t, `
+types:
+  contact:
+    constraints:
+      unique: [[external_id]]
+    fields:
+      - { name: external_id, kind: text, required: true }
+`)
+	s := New(testDB(t), ts)
+	_, err := s.CreateNode(&Node{Type: "contact", Display: "one", Fields: Fields{"external_id": "same"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.CreateNode(&Node{Type: "contact", Display: "two", Fields: Fields{"external_id": "same"}})
+	if err == nil {
+		t.Fatal("duplicate schema unique value must fail")
 	}
 }
 
@@ -300,8 +398,8 @@ func TestDelete(t *testing.T) {
 func TestQueryPage(t *testing.T) {
 	s := newTestService(t)
 	for i := 0; i < 5; i++ {
-		s.CreateNode(&Node{Type: "article", Display: "t", Sort: i,
-			Fields: map[string]any{"title": "t" + string(rune('a'+i)), "views": i}})
+		s.CreateNode(&Node{Type: "article", Display: "t",
+			Fields: map[string]any{"title": "t" + string(rune('a'+i)), "views": i, "position": i}})
 	}
 	list, total, err := s.QueryPage(ListQuery{Page: 1, Size: 2})
 	if err != nil {
@@ -328,7 +426,7 @@ func TestQueryPage(t *testing.T) {
 }
 
 // newTypes 独立类型容器（自定义类型定义用）。
-func newTypes(t *testing.T, yaml string) *types.Types {
+func newTypes(t testing.TB, yaml string) *types.Types {
 	t.Helper()
 	ts := types.New()
 	if err := ts.Load([]byte(yaml)); err != nil {
@@ -347,12 +445,12 @@ func TestPatchDisplayEmpty(t *testing.T) {
 	s := newTestService(t)
 	id, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"body": "x"}})
 	empty := ""
-	if err := s.PatchNode(id, &NodePatch{Display: &empty}); err == nil {
+	if err := patchCurrent(t, s, id, &NodePatch{Display: &empty}); err == nil {
 		t.Fatal("empty display should be rejected")
 	}
 	// 非空可改
 	ok := "新名字"
-	if err := s.PatchNode(id, &NodePatch{Display: &ok}); err != nil {
+	if err := patchCurrent(t, s, id, &NodePatch{Display: &ok}); err != nil {
 		t.Fatal(err)
 	}
 	n, _ := s.GetNodeById(id)

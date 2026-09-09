@@ -23,12 +23,11 @@ window.$api = {
     search: function (query) { return Panel.get('/admin/search', query) },
 
     // refLabel: 节点显示名（任何消费端统一）— 后台列表/引用选择器用。
-    // 优先级: title 投影列 → slug → 类型定义字段序第一个非空字符串标量
-    // （关系节点兜底, 如 employment 的 role）→ expand 引用合成 → #id。
+    // 优先级: display → 类型定义字段序第一个非空字符串标量
+    // （关系节点兜底）→ expand 引用合成 → #id。
     refLabel: function (n, def) {
         if (!n) { console.log('[refLabel] null node'); return '#?' }
         if (n.display) return n.display
-        if (n.slug) return n.slug
         if (def) {
             for (const f of def.fields || []) {
                 const v = (n.fields || {})[f.name]
@@ -41,8 +40,7 @@ window.$api = {
             for (const m of arr) if (m && m.display) parts.push(m.display)
         }
         if (parts.length) return parts.join('·')
-        // 兜底: 打日志定位 — 为什么没走到 title/slug/def/expand
-        console.log('[refLabel] 兜底 #id:', { id: n.id, type: n.type, display: n.display, slug: n.slug,
+        console.log('[refLabel] 兜底 #id:', { id: n.id, type: n.type, display: n.display,
             hasDef: !!def, fields: n.fields, expandKeys: Object.keys(n.expand || {}) })
         return '#' + n.id
     },

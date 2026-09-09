@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased — v0.9.0
+
+### Breaking changes
+
+- `core.Node` no longer contains `Slug`, `Status`, or `Sort`; these are explicit Schema fields selected by capabilities.
+- `core.Node` adds `Revision` and `ArchivedAt` system metadata.
+- `core.NodePatch` now contains `Revision`, `Display`, and `Fields`; effective updates require the current revision.
+- `GetNodeBySlug` is replaced by `GetNodeByAddress`.
+- `LoadTree(typeName, field)` is replaced by `LoadTree(typeName)` and reads the declared tree capability.
+- Flat TypeDef properties `search`, `view`, `icon`, and `auth` are removed. Use `capabilities` and `admin`.
+- Public node routes only expose types with a publication capability.
+- Node create/update HTTP bodies reject unknown top-level properties.
+
+### Added
+
+- Schema field defaults and immutable fields.
+- Type-level scalar unique constraints and indexes backed by SQLite expression/partial indexes.
+- Explicit searchable, addressable, publication, authentication, and tree capabilities.
+- Admin view metadata separated from Schema and runtime capabilities.
+- Optimistic locking through `Node.Revision`.
+- `slug` field kind and global address uniqueness.
+- Core migration `00009_node_schema_capabilities.sql` preserves old fixed-column values in `legacy_node_columns` for one-time site migration.
+
+### Migration
+
+- Move old `slug`, `status`, and `sort` values into fields selected by each type's capabilities.
+- Update callers to send `revision` with effective patches.
+- Remove `legacy_node_columns` after the site migration has verified its data.
+- No runtime fallback reads old columns and no source compatibility layer is provided.
+
 ## v0.8.4
 
 Security and correctness hardening. This release intentionally changes unstable v0 APIs instead of retaining compatibility adapters.

@@ -18,7 +18,7 @@ type SortField struct {
 // ListQuery 结构化查询: 过滤（Lisp 表达式）、排序、展开、分页。
 type ListQuery struct {
 	Filter string      // Lisp filter（空 = 不过滤）
-	Sort   []SortField // 空 = 默认 sort ASC, id DESC
+	Sort   []SortField // 空 = 默认 updated_at DESC, id DESC
 	Expand string      // 展开表达式（"authors, categories" — 批量路径展开）
 	Page   int
 	Size   int
@@ -77,7 +77,7 @@ func (s *Service) buildQuery(q ListQuery, params []map[string]any) (*dba.SQL, er
 	if len(params) > 0 {
 		p = params[0]
 	}
-	db := s.db.Add(`SELECT ${F:*} FROM nodes WHERE ${where} ${order:ORDER BY sort ASC, id DESC}`)
+	db := s.db.Add(`SELECT ${F:*} FROM nodes WHERE archived_at IS NULL AND (${where}) ${order:ORDER BY updated_at DESC, id DESC}`)
 	var err error
 	if q.Filter != "" {
 		db, err = s.CompileLispInto(db, q.Filter, p)

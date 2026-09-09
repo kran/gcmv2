@@ -1,15 +1,16 @@
 <template>
     <div class="fr">
         <template v-for="f in fields" :key="f.name">
-            <div class="fr-item">
+            <div class="fr-item" :class="{ 'fr-readonly': editing && f.immutable }">
                 <div class="fr-label">
                     <span>{{ f.label || f.name }}</span>
                     <span class="fr-kind">{{ f.kind }}</span>
                     <span v-if="f.required" class="fr-req">*</span>
+                    <span v-if="editing && f.immutable" class="fr-kind">只读</span>
                 </div>
 
                 <!-- 标量 -->
-                <el-input v-if="f.kind === 'text'" :model-value="get(f.name)"
+                <el-input v-if="f.kind === 'text' || f.kind === 'slug'" :model-value="get(f.name)"
                     @update:model-value="set(f.name, $event)" />
                 <div v-else-if="f.kind === 'upload-image'" class="fr-image">
                     <el-input :model-value="get(f.name)" @update:model-value="set(f.name, $event)"
@@ -130,6 +131,7 @@ export default {
         refPreset: { type: Object, default: () => ({}) },
         // 类型定义表（refLabel 显示兜底用）: {typeName: TypeDef}
         defs: { type: Object, default: () => ({}) },
+        editing: { type: Boolean, default: false },
     },
     emits: ['update:modelValue'],
     data() {
@@ -148,7 +150,7 @@ export default {
     methods: {
         // 内置控件分支集合（其余 kind → 站点扩展组件动态加载）
         builtinWidgets() {
-            return ['text', 'textarea', 'richtext', 'number', 'timestamp', 'gallery', 'bool',
+            return ['text', 'slug', 'textarea', 'richtext', 'number', 'timestamp', 'gallery', 'bool',
                 'upload-image', 'upload-file', 'ref', 'ref[]', 'array', 'object']
         },
         resolveExtraWidgets() {
@@ -170,6 +172,8 @@ export default {
         },
         get(name) { return this.modelValue ? this.modelValue[name] : undefined },
         set(name, v) {
+            const field = (this.fields || []).find(f => f.name === name)
+            if (this.editing && field && field.immutable) return
             this.$emit('update:modelValue', { ...(this.modelValue || {}), [name]: v })
         },
         setItem(name, i, v) {
@@ -244,6 +248,7 @@ function defaultItem(item) {
 </script>
 <style>
 .fr-item { margin-bottom: 12px; width: 100%; min-width: 0; }
+.fr-readonly { opacity: .7; pointer-events: none; }
 .fr-item .el-input, .fr-item .el-textarea, .fr-item .el-select,
 .fr-item .el-input-number, .fr-item .el-color-picker { width: 100%; }
 .fr-label { font-size: 13px; font-weight: 600; color: #444; margin-bottom: 4px; }

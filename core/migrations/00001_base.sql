@@ -1,8 +1,7 @@
 -- +goose Up
--- gcm 基线 schema（历史 00001~00007 整合 — 最终态）。
--- IF NOT EXISTS 幂等: 旧库（已按历史迁移建表, 版本表有 version 1）
--- 跳过本迁移 — schema/数据不动; 新库一次建全。
--- 外键声明在 CREATE 里（SQLite 不能 ALTER 加 FK — 整合后无需重建迁移）。
+-- gcm 历史基线 schema（整合旧 00001~00007）。
+-- 新数据库也先建立该历史形状，再由后续迁移升级到当前 Node Schema；
+-- 不要把本文件当作当前运行时结构。
 
 -- ① 节点表: 一切实体（内容 / term / 关系节点），type 区分
 CREATE TABLE IF NOT EXISTS nodes (

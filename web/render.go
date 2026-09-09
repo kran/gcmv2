@@ -91,15 +91,15 @@ func (e *Render) queryFuncs() template.FuncMap {
 			fail(err)
 			return n
 		},
-		// list: 按类型列表（status<0 不过滤; 占位符绑定参数化）
-		"list": func(typ string, status, page, size int) []core.Node {
-			params := map[string]any{"typ": typ}
-			f := `(= type {:typ})`
-			if status >= 0 {
-				f = `(and (= type {:typ}) (= status {:st}))`
-				params["st"] = status
+		// list: 按 publication capability 返回公开类型列表。
+		"list": func(typ string, page, size int) []core.Node {
+			publication, ok := eng.Types().Publication(typ)
+			if !ok {
+				panic(fmt.Errorf("render: type %q is not publication-enabled", typ))
 			}
-			list, err := eng.Query(core.ListQuery{Filter: f, Page: page, Size: size}, params)
+			params := map[string]any{"typ": typ, "published": publication.Published}
+			filter := `(and (= type {:typ}) (= $` + publication.Field + ` {:published}))`
+			list, err := eng.Query(core.ListQuery{Filter: filter, Page: page, Size: size}, params)
 			fail(err)
 			return list
 		},
@@ -113,7 +113,7 @@ func (e *Render) queryFuncs() template.FuncMap {
 			}
 			return st.Value
 		},
-		// search: 全文检索（FTS5+bigram; 只索引 search:true 类型的已发布节点）
+		// search: 全文检索（索引范围由 searchable/publication capability 决定）
 		"search": func(q, typ string, page, size int) []core.Node {
 			list, _, err := eng.Search(q, typ, page, size)
 			fail(err)
@@ -148,7 +148,7 @@ func (e *Render) queryFuncs() template.FuncMap {
 			return e.graph(start, field, maxHops, eng.EquivalenceClass)
 		},
 		// filterList: Lisp filter 筛选列表（表达式 + 分页）。
-		// 用法: {{ filterList "article" "(and (= status 1) (in categories (subtree {:slug})))" (dict "slug" "x") 1 10 }}
+		// 用法: {{ filterList "article" "(in ->categories (subtree {:address}))" (dict "address" "news") 1 10 }}
 		"filterList": func(typ, expr string, params map[string]any, page, size int) []core.Node {
 			// typ 合成进 filter（参数化 (= type {:typ})）
 			f := expr
@@ -323,14 +323,13 @@ func (e *Render) funcMap() template.FuncMap {
 		"safeHTML": func(v any) template.HTML { return template.HTML(fmt.Sprint(v)) },
 		// img 图片裁剪 URL: 本地 /uploads/ 才拼 ?w=&h=&mode=&fmt=（CDN/外部 URL 原样返回）。
 		// 单边 0 = 按比例; mode: cover(默认)/fit/crop; fmt: jpg/png（照片类 jpg 降体积）。
-		// url 节点前台地址（slug 优先, id 兜底; nil → "#"）:
-		//   {{ $n | url }} — Node 无 URL 字段, 函数拼（core 不加方法）
+		// url 节点前台地址（addressable capability 优先，id 兜底）。
 		"url": func(n *core.Node) string {
 			if n == nil {
 				return "#"
 			}
-			if n.Slug != "" {
-				return "/node/" + n.Slug
+			if address := e.eng.Types().Address(n.Type, n.Fields); address != "" {
+				return "/node/" + address
 			}
 			return "/node/" + strconv.FormatInt(n.ID, 10)
 		},

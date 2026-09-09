@@ -19,7 +19,12 @@ func testSite(t *testing.T) *web.Site {
 	os.WriteFile(tp, []byte(`
 types:
   article:
+    capabilities:
+      addressable: { field: slug, unique: global }
+      publication: { field: publication_state, draft: draft, published: published }
     fields:
+      - { name: slug, kind: slug }
+      - { name: publication_state, kind: select, options: [draft, published], default: draft }
       - { name: body, kind: richtext }
 `), 0o644)
 	tdir := filepath.Join(dir, "templates")
@@ -34,14 +39,14 @@ func TestSitemap(t *testing.T) {
 	s := testSite(t)
 	eng := s.Engine()
 	// 已发布（slug）
-	eng.CreateNode(&core.Node{Type: "article", Display: "甲", Slug: "article-a", Status: 1,
-		Fields: map[string]any{"body": "x"}})
+	eng.CreateNode(&core.Node{Type: "article", Display: "甲",
+		Fields: map[string]any{"body": "x", "slug": "article-a", "publication_state": "published"}})
 	// 已发布（无 slug → id）
-	eng.CreateNode(&core.Node{Type: "article", Display: "乙", Status: 1,
-		Fields: map[string]any{"body": "y"}})
+	eng.CreateNode(&core.Node{Type: "article", Display: "乙",
+		Fields: map[string]any{"body": "y", "publication_state": "published"}})
 	// 草稿 — 不出现
-	eng.CreateNode(&core.Node{Type: "article", Display: "草稿", Status: 0,
-		Fields: map[string]any{"body": "z"}})
+	eng.CreateNode(&core.Node{Type: "article", Display: "草稿",
+		Fields: map[string]any{"body": "z", "publication_state": "draft"}})
 
 	req := mustReq(t, "GET", "/sitemap.xml")
 	w := do(s, req)

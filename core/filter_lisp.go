@@ -5,9 +5,9 @@
 //	站点:  RegisterLispFuncC(name, fn) — 自定义函数（任意 AST → SQL 片段,
 //	       可组合/嵌套 — 图原语、集合、业务查询都进表达式层）。
 //
-//	取值:  status(列) / $name(JSON) / ->field(出边) / <-type.field(入边)
+//	取值:  created_at(列) / $name(JSON) / ->field(出边) / <-type.field(入边)
 //	引用:  (edge 字段 目标) — 一元=存在性; 值=折叠; 谓词=开层
-//	集合:  (in 字段 集合) — 数组字面量 [1 2 3] / 占位符 / (subtree "slug")
+//	集合:  (in 字段 集合) — 数组字面量 [1 2 3] / 占位符 / (subtree "address")
 //
 //	值: 数字 / "字符串" / true / false / {:占位符}
 package core

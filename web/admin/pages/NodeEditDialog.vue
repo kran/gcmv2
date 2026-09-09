@@ -5,21 +5,9 @@
             <el-form-item label="显示">
                 <el-input v-model="form.display" placeholder="公共显示文本（列表/搜索/导航显示）" />
             </el-form-item>
-            <el-form-item label="slug">
-                <el-input v-model="form.slug" placeholder="URL 段（留空 = /node/{id}）" />
-            </el-form-item>
-            <el-form-item label="状态">
-                <el-radio-group v-model="form.status">
-                    <el-radio :value="1">已发布</el-radio>
-                    <el-radio :value="0">草稿</el-radio>
-                </el-radio-group>
-            </el-form-item>
-            <el-form-item label="排序">
-                <el-input-number v-model="form.sort" :min="0" />
-            </el-form-item>
             <el-divider style="margin:8px 0 16px;" />
             <field-renderer v-if="def" :fields="def.fields" v-model="form.fields"
-                            :ref-preset="form.refPreset || {}" :defs="defs" />
+                            :ref-preset="form.refPreset || {}" :defs="defs" :editing="isEdit" />
         </el-form>
         <template #footer>
             <div style="display:flex;justify-content:flex-end;gap:8px;">
@@ -47,7 +35,7 @@ export default {
     },
     emits: ['update:visible', 'changed'],
     data() {
-        return { form: { display: '', slug: '', status: 1, sort: 0, fields: {}, refPreset: {} }, saving: false, def: null }
+        return { form: { display: '', revision: 0, fields: {}, refPreset: {} }, saving: false, def: null }
     },
     computed: {
         // v-model:visible 代理 — prop 只读, 内部写走 emit
@@ -67,7 +55,11 @@ export default {
     methods: {
         loadCreate() {
             this.def = this.defs[this.typeName] || null
-            this.form = { display: '', slug: '', status: 1, sort: 0, fields: {}, refPreset: {} }
+            var defaults = {}
+            ;((this.def && this.def.fields) || []).forEach(function (f) {
+                if (f.default !== undefined && f.default !== null) defaults[f.name] = structuredClone(f.default)
+            })
+            this.form = { display: '', revision: 0, fields: defaults, refPreset: {} }
             if (this.presetField && this.presetValue) {
                 this.form.fields[this.presetField] = this.presetValue
                 // ref 字段显示名（否则只显示裸 id）
@@ -83,9 +75,7 @@ export default {
             window.$api.node(r.id).then((full) => {
                 this.form = {
                     display: full.display || '',
-                    slug: full.slug || '',
-                    status: full.status,
-                    sort: full.sort || 0,
+                    revision: full.revision,
                     fields: full.fields || {},
                     refPreset: {},
                 }
@@ -105,13 +95,14 @@ export default {
         },
         save() {
             this.saving = true
-            var body = {
-                display: this.form.display,
-                slug: this.form.slug,
-                status: this.form.status,
-                sort: this.form.sort,
-                fields: this.form.fields || {},
+            var fields = { ...(this.form.fields || {}) }
+            if (this.isEdit) {
+                ;((this.def && this.def.fields) || []).forEach(function (f) {
+                    if (f.immutable) delete fields[f.name]
+                })
             }
+            var body = { display: this.form.display, fields: fields }
+            if (this.isEdit) body.revision = this.form.revision
             var p = this.isEdit
                 ? window.$api.updateNode(this.node.id, body)
                 : window.$api.createNode(this.typeName, body)

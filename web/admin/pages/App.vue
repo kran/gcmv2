@@ -199,13 +199,13 @@ export default {
             }
         }
 
-        // tree 类型独立菜单: 每个 view=tree 的类型一个树管理页（静态路由 /tree/:type — index.html 注册）
+        // tree 类型独立菜单：Admin View 只控制展示，Tree capability 控制数据语义。
         async function loadTreeMenus() {
             try {
                 var res = await $api.types()
                 var defs = res.types || {}
                 Object.keys(defs).forEach(function (t) {
-                    if ((defs[t].view || '') !== 'tree') return
+                    if (!defs[t].admin || defs[t].admin.view !== 'tree') return
                     var key = 'tree-' + t
                     var exists = menuData.value.some(function (m) { return m.key === key })
                     if (exists) return // 重复执行（checkAuth + doLogin 都可能调）不重复 push

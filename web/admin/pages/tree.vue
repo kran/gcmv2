@@ -44,14 +44,13 @@
                         <template #default="{ row }">{{ row.type }}</template>
                     </el-table-column>
                     <el-table-column label="标题" min-width="360" show-overflow-tooltip>
-                        <template #default="{ row }"><a class="node-title-link" @click.prevent="openEdit(row)">{{ row.display || row.slug || '#' + row.id }}</a></template>
+                        <template #default="{ row }"><a class="node-title-link" @click.prevent="openEdit(row)">{{ row.display || '#' + row.id }}</a></template>
                     </el-table-column>
                     <el-table-column label="溯源" min-width="160" show-overflow-tooltip>
                         <template #default="{ row }">
                             <code style="font-size:12px;">{{ row.via_field }}</code>
                         </template>
                     </el-table-column>
-                    <el-table-column prop="slug" label="slug" min-width="160" show-overflow-tooltip />
                     <el-table-column label="操作" width="170" fixed="right">
                         <template #default="{ row }">
                             <node-ops :node="row" :defs="defsByType" @changed="loadInbound" />
@@ -115,7 +114,7 @@ export default {
             this.editVisible = true
         },
         titleOf(n) {
-            return n.display || n.slug || '#' + n.id
+            return n.display || '#' + n.id
         },
         async loadTypes() {
             var res = await $api.types()
@@ -136,7 +135,8 @@ export default {
         async loadTree() {
             try {
                 var res = await $api.get('/admin/tree', { type: this.typeName })
-                this.treeNodes = this.buildTree(res.items || [], 'parent')
+                const tree = this.def && this.def.capabilities && this.def.capabilities.tree
+                this.treeNodes = this.buildTree(res.items || [], tree ? tree.parent : 'parent')
                 console.log('[tree] nodes:', this.treeNodes.length, JSON.parse(JSON.stringify(this.treeNodes.slice(0, 3))))
             } catch (e) { console.error('[tree] loadTree failed:', e) }
         },

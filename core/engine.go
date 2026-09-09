@@ -21,11 +21,11 @@ type Engine interface {
 	QueryPage(q ListQuery, params ...map[string]any) ([]Node, int64, error)
 	Query(q ListQuery, params ...map[string]any) ([]Node, error)
 	GetNodeById(id int64) (*Node, error)
-	GetNodeBySlug(slug string) (*Node, error)
+	GetNodeByAddress(address string) (*Node, error)
 	FullFields(id int64) (map[string]any, error)
 
 	// ── 图原语 ──
-	LoadTree(typeName, field string) (*Tree, error)
+	LoadTree(typeName string) (*Tree, error)
 	Subtree(typeName string, start int64, field string, maxHops int) ([]int64, error)
 	Ancestors(typeName string, start int64, field string, maxHops int) ([]*Node, error)
 	Traverse(typeName string, start int64, field string, maxHops int) ([]int64, error)

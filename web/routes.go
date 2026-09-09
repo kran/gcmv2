@@ -14,7 +14,7 @@ import (
 
 // ── 内容路由 ──────────────────────────────────
 
-// nodeHandler /node/{id|slug}: 纯数字按 id, 否则按 slug。不存在/未发布 → 404。
+// nodeHandler /node/{id|address}: 纯数字按 id，否则按 addressable capability 查询。
 func (s *Site) nodeHandler(ctx *CmsCtx) {
 	raw := ctx.PathValue("id")
 	var n *core.Node
@@ -22,14 +22,14 @@ func (s *Site) nodeHandler(ctx *CmsCtx) {
 	if id, e := strconv.ParseInt(raw, 10, 64); e == nil {
 		n, err = s.engine.GetNodeById(id)
 	} else {
-		n, err = s.engine.GetNodeBySlug(raw)
+		n, err = s.engine.GetNodeByAddress(raw)
 	}
 	if err != nil {
 		slog.Error("node lookup failed", "path", raw, "err", err)
 		ctx.String(http.StatusInternalServerError, "500 internal server error")
 		return
 	}
-	if n == nil || n.Status != core.StatusPublished {
+	if n == nil || !s.engine.Types().IsPublished(n.Type, n.Fields) {
 		s.render404(ctx)
 		return
 	}
@@ -42,7 +42,7 @@ func (s *Site) nodeHandler(ctx *CmsCtx) {
 	data := map[string]any{"Node": n, "ID": n.ID}
 	// 渲染候选（节点级联 + 站点 hook 追加）
 	cands := core.NewList[string]()
-	cands.Append(nodeCandidates(n)...)
+	cands.Append(nodeCandidates(s.engine.Types(), n)...)
 	if err := s.engine.Hooks().Fire(HookCandidates, ctx, n, cands); err != nil {
 		slog.Error("candidates hook failed", "path", raw, "err", err)
 		ctx.String(http.StatusInternalServerError, "500 internal server error")
@@ -71,13 +71,13 @@ func (s *Site) render404(ctx *CmsCtx) {
 	ctx.String(http.StatusNotFound, "404 page not found")
 }
 
-// nodeCandidates 节点模板级联候选:
-// node--{type}--{slug}.html → node--{type}.html → node.html。
-// slug 白名单校验（防路径穿越 — 候选名拼进模板根）。
-func nodeCandidates(n *core.Node) []string {
+// nodeCandidates 节点模板级联候选。address 由 capability 指定，仍经过
+// slug kind 校验，避免候选名路径穿越。
+func nodeCandidates(ts *types.Types, n *core.Node) []string {
 	if n != nil && n.Type != "" {
-		if n.Slug != "" && types.ValidSlug(n.Slug) {
-			return []string{"node--" + n.Type + "--" + n.Slug + ".html", "node--" + n.Type + ".html", "node.html"}
+		address := ts.Address(n.Type, n.Fields)
+		if address != "" && types.ValidSlug(address) {
+			return []string{"node--" + n.Type + "--" + address + ".html", "node--" + n.Type + ".html", "node.html"}
 		}
 		return []string{"node--" + n.Type + ".html", "node.html"}
 	}
@@ -93,6 +93,11 @@ func (s *Site) apiNodes(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, "type not found")
 		return
 	}
+	publication, ok := s.engine.Types().Publication(typ)
+	if !ok {
+		ctx.Error(http.StatusNotFound, "type is not public")
+		return
+	}
 	page := max(int(ctx.QueryNum("page", 1)), 1)
 	size := min(max(int(ctx.QueryNum("size", 20)), 1), 100)
 	if strings.TrimSpace(ctx.Query("filter")) != "" || strings.TrimSpace(ctx.Query("expand")) != "" {
@@ -104,9 +109,9 @@ func (s *Site) apiNodes(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, err.Error())
 		return
 	}
-	f := `(and (= type {:typ}) (= status 1))`
+	f := `(and (= type {:typ}) (= $` + publication.Field + ` {:published}))`
 	q := core.ListQuery{Filter: f, Sort: sort, Page: page, Size: size}
-	list, total, err := s.engine.QueryPage(q, map[string]any{"typ": typ})
+	list, total, err := s.engine.QueryPage(q, map[string]any{"typ": typ, "published": publication.Published})
 	if err != nil {
 		// filter 编译错误 → 400（客户端参数）
 		ctx.String(http.StatusBadRequest, "api: "+err.Error())

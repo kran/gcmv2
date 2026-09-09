@@ -6,7 +6,7 @@
         <el-button size="small" link class="op-btn" @click="doDelete">删除</el-button>
     </div>
     <node-edit-dialog v-model:visible="editVisible" :node="node" :type-name="typeName"
-                      :preset-field="'parent'" :preset-value="parentId"
+                      :preset-field="parentField" :preset-value="parentId"
                       :preset-label="parentLabel"
                       :is-edit="isEdit" :defs="defs" @changed="$emit('changed')" />
 
@@ -23,7 +23,7 @@
                          style="padding:8px 12px;background:#f9fafb;border-radius:6px;margin-bottom:4px;display:flex;align-items:center;gap:8px;">
                         <el-tag size="small">{{ n.type }}</el-tag>
                         <span style="font-weight:600;">{{ titleOf(n) }}</span>
-                        <code style="color:#9ca3af;font-size:12px;">{{ n.slug || '#' + n.id }}</code>
+                        <code style="color:#9ca3af;font-size:12px;">#{{ n.id }}</code>
                     </div>
                 </div>
             </template>
@@ -41,6 +41,11 @@ export default {
     computed: {
         parentLabel() {
             return window.$api.refLabel(this.node, this.defs[this.node.type] || null) + ' #' + this.node.id
+        },
+        parentField() {
+            const def = this.defs[this.typeName || this.node.type] || {}
+            const tree = def.capabilities && def.capabilities.tree
+            return tree ? tree.parent : ''
         },
     },
     props: {
