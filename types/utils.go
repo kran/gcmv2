@@ -8,7 +8,7 @@ import (
 // isNumber 接受 JSON 解码（float64）与程序直构（int/uint 全家族）两种来源。
 func isNumber(v any) bool {
 	switch v.(type) {
-	case float64, float32, int, int8, int16, int32, int64,
+	case json.Number, float64, float32, int, int8, int16, int32, int64,
 		uint, uint8, uint16, uint32, uint64:
 		return true
 	}

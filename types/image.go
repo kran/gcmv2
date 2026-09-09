@@ -23,6 +23,9 @@ func (imageKind) IsEmpty(v any) bool {
 	return !ok || strings.TrimSpace(s) == ""
 }
 func (imageKind) Class() Class { return ClassField }
+func (imageKind) QueryOps() QueryOps {
+	return QueryOps{Equal: true}
+}
 
 func (imageKind) ValidateField(t *Types, typeName string, f FieldDef, defs map[string]TypeDef) error {
 	return rejectRefAttrs(typeName, f)

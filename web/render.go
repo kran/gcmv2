@@ -13,6 +13,7 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"html/template"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/Masterminds/sprig/v3"
 	"github.com/kran/gcmv2/core"
+	gquery "github.com/kran/gcmv2/query"
 	"github.com/kran/gcmv2/types"
 	"jaytaylor.com/html2text"
 )
@@ -97,9 +99,10 @@ func (e *Render) queryFuncs() template.FuncMap {
 			if !ok {
 				panic(fmt.Errorf("render: type %q is not publication-enabled", typ))
 			}
-			params := map[string]any{"typ": typ, "published": publication.Published}
-			filter := `(and (= type {:typ}) (= $` + publication.Field + ` {:published}))`
-			list, err := eng.Query(core.ListQuery{Filter: filter, Page: page, Size: size}, params)
+			where := gquery.EQ(gquery.Field(publication.Field), publication.Published)
+			list, err := eng.Query(context.Background(), core.ListQuery{
+				Type: typ, Where: where, Page: gquery.Page{Number: page, Size: size},
+			})
 			fail(err)
 			return list
 		},
@@ -150,16 +153,11 @@ func (e *Render) queryFuncs() template.FuncMap {
 		// filterList: Lisp filter 筛选列表（表达式 + 分页）。
 		// 用法: {{ filterList "article" "(in ->categories (subtree {:address}))" (dict "address" "news") 1 10 }}
 		"filterList": func(typ, expr string, params map[string]any, page, size int) []core.Node {
-			// typ 合成进 filter（参数化 (= type {:typ})）
-			f := expr
-			if params == nil {
-				params = map[string]any{}
-			}
-			if typ != "" {
-				params["typ"] = typ
-				f = `(and (= type {:typ}) ` + expr + `)`
-			}
-			list, err := e.eng.Query(core.ListQuery{Filter: f, Page: page, Size: size}, params)
+			where, err := gquery.ParseLisp(expr, params)
+			fail(err)
+			list, err := e.eng.Query(context.Background(), core.ListQuery{
+				Type: typ, Where: where, Page: gquery.Page{Number: page, Size: size},
+			})
 			fail(err)
 			return list
 		},
@@ -169,57 +167,41 @@ func (e *Render) queryFuncs() template.FuncMap {
 		//   {{ $arts | expand "authors" }}                   → []*core.Node（批量, 查询次数与列表大小无关）
 		// 输入: *core.Node / core.Node / int64 / int / float64 / []core.Node / []*core.Node / []int64 / []int / []any(id)
 		"expand": func(expr string, v any) any {
-			switch t := v.(type) {
+			switch value := v.(type) {
 			case *core.Node:
-				n, err := eng.ExpandPath(t.ID, expr)
-				fail(err)
-				return n
+				return expandTemplateNodes(eng, expr, []int64{value.ID}, false)
 			case core.Node:
-				n, err := eng.ExpandPath(t.ID, expr)
-				fail(err)
-				return n
+				return expandTemplateNodes(eng, expr, []int64{value.ID}, false)
 			case int64, int, float64:
-				nid, err := types.ToID(v)
+				id, err := types.ToID(v)
 				fail(err)
-				n, err := eng.ExpandPath(nid, expr)
-				fail(err)
-				return n
+				return expandTemplateNodes(eng, expr, []int64{id}, false)
 			case []core.Node:
-				expanded, err := eng.ExpandPathMany(nodeIDs(t), expr)
-				fail(err)
-				return expanded
+				return expandTemplateNodes(eng, expr, nodeIDs(value), true)
 			case []*core.Node:
-				ids := make([]int64, 0, len(t))
-				for _, n := range t {
-					if n != nil {
-						ids = append(ids, n.ID)
+				ids := make([]int64, 0, len(value))
+				for _, node := range value {
+					if node != nil {
+						ids = append(ids, node.ID)
 					}
 				}
-				expanded, err := eng.ExpandPathMany(ids, expr)
-				fail(err)
-				return expanded
+				return expandTemplateNodes(eng, expr, ids, true)
 			case []int64:
-				expanded, err := eng.ExpandPathMany(t, expr)
-				fail(err)
-				return expanded
+				return expandTemplateNodes(eng, expr, value, true)
 			case []int:
-				ids := make([]int64, 0, len(t))
-				for _, id := range t {
-					ids = append(ids, int64(id))
+				ids := make([]int64, len(value))
+				for i, id := range value {
+					ids[i] = int64(id)
 				}
-				expanded, err := eng.ExpandPathMany(ids, expr)
-				fail(err)
-				return expanded
+				return expandTemplateNodes(eng, expr, ids, true)
 			case []any:
-				ids := make([]int64, 0, len(t))
-				for _, item := range t {
-					nid, err := types.ToID(item)
+				ids := make([]int64, 0, len(value))
+				for _, item := range value {
+					id, err := types.ToID(item)
 					fail(err)
-					ids = append(ids, nid)
+					ids = append(ids, id)
 				}
-				expanded, err := eng.ExpandPathMany(ids, expr)
-				fail(err)
-				return expanded
+				return expandTemplateNodes(eng, expr, ids, true)
 			default:
 				fail(fmt.Errorf("expand: unsupported input %T (want core.Node / id / list of them)", v))
 				return nil
@@ -232,6 +214,37 @@ func (e *Render) queryFuncs() template.FuncMap {
 			return t.Format(layout)
 		},
 	}
+}
+
+func expandTemplateNodes(eng core.Engine, expression string, ids []int64, many bool) any {
+	if len(ids) == 0 {
+		if many {
+			return []*core.Node{}
+		}
+		return (*core.Node)(nil)
+	}
+	var paths []gquery.ExpandPath
+	var err error
+	if strings.TrimSpace(expression) == "" || strings.TrimSpace(expression) == "*" {
+		node, getErr := eng.GetNodeById(ids[0])
+		fail(getErr)
+		if node == nil {
+			fail(core.ErrNotFound)
+		}
+		paths = eng.AutoExpand(node.Type)
+	} else {
+		paths, err = gquery.ParseExpand(expression)
+		fail(err)
+	}
+	expanded, err := eng.ExpandMany(context.Background(), ids, paths...)
+	fail(err)
+	if many {
+		return expanded
+	}
+	if len(expanded) == 0 {
+		return (*core.Node)(nil)
+	}
+	return expanded[0]
 }
 
 // nodeIDs 节点切片 → id 列表。

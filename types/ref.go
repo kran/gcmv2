@@ -19,4 +19,5 @@ func (refKind) IsEmpty(v any) bool { _, err := ToID(v); return err != nil }
 func (refKind) ValidateField(t *Types, typeName string, f FieldDef, defs map[string]TypeDef) error {
 	return validateRefField(t, typeName, f, defs)
 }
-func (refKind) Class() Class { return ClassRef }
+func (refKind) Class() Class       { return ClassRef }
+func (refKind) QueryOps() QueryOps { return QueryOps{} }

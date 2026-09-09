@@ -22,3 +22,6 @@ func (boolKind) ValidateField(t *Types, typeName string, f FieldDef, defs map[st
 	return rejectRefAttrs(typeName, f)
 }
 func (boolKind) Class() Class { return ClassField }
+func (boolKind) QueryOps() QueryOps {
+	return QueryOps{Equal: true, Sortable: true}
+}

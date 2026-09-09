@@ -23,6 +23,9 @@ func (fileKind) IsEmpty(v any) bool {
 	return !ok || strings.TrimSpace(s) == ""
 }
 func (fileKind) Class() Class { return ClassField }
+func (fileKind) QueryOps() QueryOps {
+	return QueryOps{Equal: true}
+}
 
 func (fileKind) ValidateField(t *Types, typeName string, f FieldDef, defs map[string]TypeDef) error {
 	return rejectRefAttrs(typeName, f)

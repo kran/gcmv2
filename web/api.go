@@ -3,9 +3,11 @@ package web
 import (
 	"errors"
 	"net/http"
+	"sort"
 
 	"github.com/kran/cho"
 	"github.com/kran/gcmv2/core"
+	gquery "github.com/kran/gcmv2/query"
 )
 
 // ── 内容 node API（纯 hook 权限 — 深度/独特校验由站点 hook 承担） ──
@@ -218,9 +220,11 @@ func (s *Site) apiMine(ctx *CmsCtx) {
 	page := int(ctx.QueryNum("page", 1))
 	size := int(ctx.QueryNum("size", 20))
 	if typ != "" {
-		f := `(and (= type {:typ}) (in ->author {:uid}))`
-		list, total, err := s.engine.QueryPage(core.ListQuery{Filter: f, Page: page, Size: size},
-			map[string]any{"typ": typ, "uid": u.ID})
+		list, total, err := s.engine.QueryPage(ctx.R.Context(), core.ListQuery{
+			Type:  typ,
+			Where: gquery.OneOf(gquery.Ref("author"), u.ID),
+			Page:  gquery.Page{Number: page, Size: size},
+		})
 		if err != nil {
 			ctx.Error(http.StatusInternalServerError, err.Error())
 			return
@@ -228,12 +232,27 @@ func (s *Site) apiMine(ctx *CmsCtx) {
 		_ = ctx.Json(http.StatusOK, map[string]any{"items": list, "total": total, "page": page, "size": size})
 		return
 	}
-	// 全部类型（当前用户所有发布）
-	list, err := s.engine.Query(core.ListQuery{
-		Filter: `(in ->author {:uid})`, Size: size}, map[string]any{"uid": u.ID})
-	if err != nil {
-		ctx.Error(http.StatusInternalServerError, err.Error())
-		return
+
+	list := make([]core.Node, 0)
+	for _, typeName := range s.engine.Types().Names() {
+		field, ok := s.engine.Types().Field(typeName, "author")
+		if !ok || field.To != u.Type || !s.engine.Types().IsRefKind(field.Kind) {
+			continue
+		}
+		items, err := s.engine.Query(ctx.R.Context(), core.ListQuery{
+			Type:  typeName,
+			Where: gquery.OneOf(gquery.Ref("author"), u.ID),
+			Page:  gquery.Page{Size: size},
+		})
+		if err != nil {
+			ctx.Error(http.StatusInternalServerError, err.Error())
+			return
+		}
+		list = append(list, items...)
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].UpdatedAt.After(list[j].UpdatedAt) })
+	if len(list) > size {
+		list = list[:size]
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{"items": list, "total": len(list), "page": 1, "size": len(list)})
 }

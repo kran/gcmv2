@@ -12,6 +12,12 @@
 - Flat TypeDef properties `search`, `view`, `icon`, and `auth` are removed. Use `capabilities` and `admin`.
 - Public node routes only expose types with a publication capability.
 - Node create/update HTTP bodies reject unknown top-level properties.
+- `ListQuery.Filter string` and variadic parameter maps are removed; use `Type` plus typed `query.Expr`.
+- `Query` and `QueryPage` now require `context.Context`.
+- `core.SortField` is replaced by `query.SortField` with a typed `query.Path`.
+- `ListQuery.Expand string` is replaced by typed `[]query.ExpandPath`.
+- `ExpandPath/ExpandPathMany` are replaced by context-aware `Expand/ExpandMany`; incoming paths require an explicit source Type.
+- Raw-SQL Lisp extension registration is removed.
 
 ### Added
 
@@ -22,6 +28,12 @@
 - Optimistic locking through `Node.Revision`.
 - `slug` field kind and global address uniqueness.
 - Core migration `00009_node_schema_capabilities.sql` preserves old fixed-column values in `legacy_node_columns` for one-time site migration.
+- Closed Filter AST and Go query builder in the `query` package.
+- Lisp-to-AST parser; Lisp no longer compiles directly to SQL.
+- Strict JSON QuerySpec decoder and authenticated `POST /admin/query/{type}` endpoint.
+- Schema-aware validation for fields, Kind-declared query operations, values, relations, sorts, complexity, and relation depth.
+- Stable ID tie-breaking for every explicit sort.
+- Per-hop Schema validation for Expand, including mixed root Types, relation cardinality, and target Type integrity.
 
 ### Migration
 

@@ -9,20 +9,18 @@ import (
 // Service 核心引擎 — 每站点一个实例, 绑定本站 db + 本站类型系统。
 // 节点 CRUD 与引用落边是一个事务（ref 字段值进 edges, fields 只存标量）。
 type Service struct {
-	db         *dba.SQL
-	types      *types.Types
-	hooks      *HookBus
-	lispFuncsC map[string]LispFuncC // Lisp filter 站点扩展函数
-	search     SearchIndex          // 全文检索引擎（默认 FTS5; SetSearchIndex 可换）
+	db     *dba.SQL
+	types  *types.Types
+	hooks  *HookBus
+	search SearchIndex // 全文检索引擎（默认 FTS5; SetSearchIndex 可换）
 }
 
 // New 建引擎: 定义标准 hook 事件。
 func New(db *dba.SQL, ts *types.Types) *Service {
 	s := &Service{
-		db:         db,
-		types:      ts,
-		hooks:      NewHookBus(),
-		lispFuncsC: map[string]LispFuncC{},
+		db:    db,
+		types: ts,
+		hooks: NewHookBus(),
 	}
 
 	//define hooks

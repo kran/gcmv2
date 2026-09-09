@@ -1,9 +1,8 @@
 package types
 
-import (
-	"fmt"
-	"slices"
-)
+import "strings"
+
+import "fmt"
 
 const (
 	AddressUniqueGlobal = "global"
@@ -108,8 +107,8 @@ func (t *Types) validateTypeConfig(typeName string, td TypeDef) error {
 			if err != nil {
 				return err
 			}
-			if !slices.Contains([]string{KindString, KindText, KindRichtext, KindSlug}, f.Kind) {
-				return fmt.Errorf("types: type %q: searchable field %q must be textual", typeName, name)
+			if !t.FieldQueryOps(f).Text {
+				return fmt.Errorf("types: type %q: searchable field %q must support text queries", typeName, name)
 			}
 		}
 	}
@@ -132,14 +131,17 @@ func (t *Types) validateTypeConfig(typeName string, td TypeDef) error {
 		if err != nil {
 			return err
 		}
-		if f.Kind != KindSelect {
-			return fmt.Errorf("types: type %q: publication field %q must use kind select", typeName, f.Name)
+		if !t.FieldQueryOps(f).Equal {
+			return fmt.Errorf("types: type %q: publication field %q must support equality", typeName, f.Name)
 		}
 		if publication.Draft == "" || publication.Published == "" || publication.Draft == publication.Published {
 			return fmt.Errorf("types: type %q: publication draft/published must be non-empty and different", typeName)
 		}
-		if !slices.Contains(f.Options, publication.Draft) || !slices.Contains(f.Options, publication.Published) {
-			return fmt.Errorf("types: type %q: publication values must be options of field %q", typeName, f.Name)
+		if err := t.ValidateValue(typeName, f, publication.Draft); err != nil {
+			return fmt.Errorf("types: type %q: invalid publication draft value: %w", typeName, err)
+		}
+		if err := t.ValidateValue(typeName, f, publication.Published); err != nil {
+			return fmt.Errorf("types: type %q: invalid publication published value: %w", typeName, err)
 		}
 	}
 
@@ -148,16 +150,17 @@ func (t *Types) validateTypeConfig(typeName string, td TypeDef) error {
 		if err != nil {
 			return err
 		}
-		if parent.Kind != KindRef || parent.To != typeName {
-			return fmt.Errorf("types: type %q: tree.parent %q must be a self ref", typeName, tree.Parent)
+		parentKind, ok := t.Kind(parent.Kind)
+		if !ok || parentKind.Class() != ClassRef || parent.To != typeName {
+			return fmt.Errorf("types: type %q: tree.parent %q must be a single self ref", typeName, tree.Parent)
 		}
 		if tree.Order != "" {
 			order, err := field(tree.Order)
 			if err != nil {
 				return err
 			}
-			if order.Kind != KindNumber {
-				return fmt.Errorf("types: type %q: tree.order %q must use kind number", typeName, tree.Order)
+			if !t.FieldQueryOps(order).Sortable {
+				return fmt.Errorf("types: type %q: tree.order %q must be sortable", typeName, tree.Order)
 			}
 		}
 	}
@@ -191,7 +194,7 @@ func (t *Types) validateConstraintGroups(typeName string, td TypeDef, kind strin
 			return fmt.Errorf("types: type %q: %s group must not be empty", typeName, kind)
 		}
 		seenFields := map[string]bool{}
-		key := ""
+		var key strings.Builder
 		for _, name := range group {
 			if seenFields[name] {
 				return fmt.Errorf("types: type %q: %s group repeats field %q", typeName, kind, name)
@@ -204,12 +207,12 @@ func (t *Types) validateConstraintGroups(typeName string, td TypeDef, kind strin
 			if t.IsRefKind(f.Kind) {
 				return fmt.Errorf("types: type %q: %s field %q cannot be a ref in v0.9", typeName, kind, name)
 			}
-			key += "\x00" + name
+			key.WriteString("\x00" + name)
 		}
-		if seenGroups[key] {
+		if seenGroups[key.String()] {
 			return fmt.Errorf("types: type %q: duplicate %s group %v", typeName, kind, group)
 		}
-		seenGroups[key] = true
+		seenGroups[key.String()] = true
 	}
 	return nil
 }

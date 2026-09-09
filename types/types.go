@@ -325,6 +325,19 @@ func (t *Types) IsTree(typeName string) bool {
 	return ok && td.Capabilities.Tree != nil
 }
 
+// FieldQueryOps 返回字段 Kind 声明的查询能力。array/object 是结构语法，
+// 只支持 exists/missing，因此返回零值。
+func (t *Types) FieldQueryOps(field FieldDef) QueryOps {
+	if field.Kind == "array" || field.Kind == "object" {
+		return QueryOps{}
+	}
+	kind, ok := t.kinds[field.Kind]
+	if !ok {
+		panic(fmt.Sprintf("types: kind %q not registered", field.Kind))
+	}
+	return kind.QueryOps()
+}
+
 // IsRefKind 该 kind 是否引用系（ClassRef / ClassRefList）。
 // 复合字段（array/object）返回 false: 结构语法存 fields JSON, 非引用。
 // 未知 kind panic: Load 已保证字段 kind 存在（复合字段除外）, 未知即程序

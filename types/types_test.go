@@ -198,6 +198,9 @@ func (dateKind) Validate(v any) error {
 }
 func (dateKind) IsEmpty(v any) bool { s, ok := v.(string); return !ok || s == "" }
 func (dateKind) Class() Class       { return ClassField }
+func (dateKind) QueryOps() QueryOps {
+	return QueryOps{Equal: true, Ordered: true, Sortable: true}
+}
 func (dateKind) ValidateField(t *Types, typeName string, f FieldDef, defs map[string]TypeDef) error {
 	return rejectRefAttrs(typeName, f)
 }
@@ -214,6 +217,10 @@ func TestRegisterKind(t *testing.T) {
 		t.Fatalf("Load with custom kind: %v", err)
 	}
 	f, _ := ts.Field("employment", "start_date")
+	operations := ts.FieldQueryOps(f)
+	if !operations.Equal || !operations.Ordered || !operations.Sortable || operations.Text {
+		t.Fatalf("custom date query operations = %#v", operations)
+	}
 	if err := ts.ValidateValue("employment", f, "2024-01-15T00:00:00Z"); err != nil {
 		t.Fatalf("valid date: %v", err)
 	}
@@ -277,7 +284,7 @@ types:
     fields:
       - { name: title, kind: text }
 `))
-	if err == nil || !strings.Contains(err.Error(), "must be a self ref") {
+	if err == nil || !strings.Contains(err.Error(), "must be a single self ref") {
 		t.Fatalf("tree without self-ref must fail: %v", err)
 	}
 }

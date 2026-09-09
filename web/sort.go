@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kran/gcmv2/core"
+	gquery "github.com/kran/gcmv2/query"
 )
 
-// parseSort 解析公开 API 的简洁排序语法：field,-field。
-// 字段是否合法由 core 根据列和类型定义再次校验。
-func parseSort(raw string) ([]core.SortField, error) {
+// parseSort parses field,-field. Dynamic fields use the explicit $field form;
+// core validates every path against the query Type.
+func parseSort(raw string) ([]gquery.SortField, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, nil
@@ -18,7 +18,7 @@ func parseSort(raw string) ([]core.SortField, error) {
 	if len(parts) > 4 {
 		return nil, fmt.Errorf("sort: at most 4 fields")
 	}
-	result := make([]core.SortField, 0, len(parts))
+	result := make([]gquery.SortField, 0, len(parts))
 	for _, part := range parts {
 		field := strings.TrimSpace(part)
 		if field == "" {
@@ -29,7 +29,11 @@ func parseSort(raw string) ([]core.SortField, error) {
 		if field == "" {
 			return nil, fmt.Errorf("sort: empty field")
 		}
-		result = append(result, core.SortField{Field: field, Desc: desc})
+		path := gquery.System(field)
+		if strings.HasPrefix(field, "$") {
+			path = gquery.Field(strings.TrimPrefix(field, "$"))
+		}
+		result = append(result, gquery.SortField{Path: path, Desc: desc})
 	}
 	return result, nil
 }

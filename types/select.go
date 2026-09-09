@@ -24,6 +24,9 @@ func (selectKind) IsEmpty(v any) bool {
 	return !ok || strings.TrimSpace(s) == ""
 }
 func (selectKind) Class() Class { return ClassField }
+func (selectKind) QueryOps() QueryOps {
+	return QueryOps{Equal: true, Sortable: true}
+}
 
 func (selectKind) ValidateField(t *Types, typeName string, f FieldDef, defs map[string]TypeDef) error {
 	if err := rejectRefAttrs(typeName, f); err != nil {

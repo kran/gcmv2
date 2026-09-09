@@ -23,6 +23,9 @@ func (richtextKind) IsEmpty(v any) bool {
 	return !ok || strings.TrimSpace(s) == ""
 }
 func (richtextKind) Class() Class { return ClassField }
+func (richtextKind) QueryOps() QueryOps {
+	return QueryOps{Text: true}
+}
 
 func (richtextKind) ValidateField(t *Types, typeName string, f FieldDef, defs map[string]TypeDef) error {
 	return rejectRefAttrs(typeName, f)

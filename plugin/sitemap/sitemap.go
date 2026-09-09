@@ -13,6 +13,7 @@ import (
 	"strconv"
 
 	"github.com/kran/gcmv2/core"
+	gquery "github.com/kran/gcmv2/query"
 	"github.com/kran/gcmv2/web"
 )
 
@@ -45,21 +46,28 @@ func Mount(s *web.Site, opts Options) {
 	}
 	s.Hook(web.HookBeforeMount, func(site *web.Site) error {
 		site.Router().Get("/sitemap.xml", func(ctx *web.CmsCtx) {
-			list, err := s.Engine().Query(core.ListQuery{
-				Size: 10000,
-				Sort: []core.SortField{{Field: "id"}},
-			})
-			if err != nil {
-				ctx.Error(http.StatusInternalServerError, "sitemap: "+err.Error())
-				return
+			list := make([]core.Node, 0)
+			for _, typeName := range s.Engine().Types().Names() {
+				publication, ok := s.Engine().Types().Publication(typeName)
+				if !ok {
+					continue
+				}
+				items, err := s.Engine().Query(ctx.R.Context(), core.ListQuery{
+					Type:  typeName,
+					Where: gquery.EQ(gquery.Field(publication.Field), publication.Published),
+					Sort:  []gquery.SortField{gquery.Asc(gquery.System("id"))},
+					Page:  gquery.Page{Size: 10000},
+				})
+				if err != nil {
+					ctx.Error(http.StatusInternalServerError, "sitemap: "+err.Error())
+					return
+				}
+				list = append(list, items...)
 			}
 			set := urlset{Xmlns: "http://www.sitemaps.org/schemas/sitemap/0.9"}
 			set.URLs = make([]urlEntry, 0, len(list)+1)
 			for i := range list {
 				n := &list[i]
-				if !s.Engine().Types().IsPublished(n.Type, n.Fields) {
-					continue
-				}
 				loc := baseURL + "/node/"
 				address := s.Engine().Types().Address(n.Type, n.Fields)
 				if address != "" {

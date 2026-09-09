@@ -34,9 +34,10 @@ gcm 目前证明了以下想法可行：
 ADR 状态与实现进度：
 
 - [x] [ADR-001：Node、Schema 与 Capability 的边界](docs/adr/001-node-schema-capabilities.md) — Accepted / Implemented
-- [x] [ADR-002：统一 Query AST，Lisp 作为文本前端](docs/adr/002-query-ast.md)
+- [x] [ADR-002：统一 Query AST，Lisp 作为文本前端](docs/adr/002-query-ast.md) — Accepted / Core Implemented
 - [x] [ADR-003：Auth Realm 与统一 Actor](docs/adr/003-auth-realm-actor.md)
 - [x] [ADR-004：Edge、关系 Node 与引用完整性](docs/adr/004-relations.md)
+- [x] [v0.9 Core 边界复审](docs/core-review-v0.9.md)
 
 > `[x]` 表示文档已完成；是否接受和实现以每条后的状态及 ADR 正文为准。
 
@@ -264,20 +265,20 @@ Lisp Parser ────────┘
 
 ## 4.3 Filter AST
 
-- [ ] 从私有 `lispExpr` 提炼稳定的 Filter AST。
-- [ ] Parser 只负责 Lisp 文本到 AST。
-- [ ] Compiler 只负责已校验 AST 到参数化 SQL。
-- [ ] AST 节点不可携带原始 SQL。
-- [ ] AST 可以由 Go Builder 安全组合。
-- [ ] AST 支持深拷贝或不可变组合，便于 Policy 追加条件。
+- [x] 从私有 `lispExpr` 提炼独立 `query` 包的 Filter AST。
+- [x] Parser 只负责 Lisp 文本到 AST。
+- [x] Compiler 只负责已校验 AST 到参数化 SQL。
+- [x] AST 节点不可携带原始 SQL。
+- [x] AST 可以由 Go Builder 安全组合。
+- [x] Builder 复制集合输入，Policy 可通过新建 And 节点组合而不修改用户条件。
 
 概念示例，最终 API 另行评审：
 
 ```go
 query.And(
-    query.Eq(query.Field("stage"), "qualified"),
+    query.EQ(query.Field("stage"), "qualified"),
     query.GTE(query.Field("amount"), 100000),
-    query.In(query.Ref("owner"), ownerIDs),
+    query.OneOf(query.Ref("owner"), ownerIDs...),
 )
 ```
 
@@ -285,14 +286,14 @@ query.And(
 
 编译 SQL 前必须知道当前 Type：
 
-- [ ] `$field` 必须存在于 TypeDef。
-- [ ] `->field` 必须是 ref/ref[]。
-- [ ] `<-type.field` 必须存在且目标类型匹配。
-- [ ] number/timestamp 才能使用大小比较。
-- [ ] string/text 才能使用 contains/prefix。
-- [ ] select 值必须属于 options。
-- [ ] sort 字段必须存在且允许排序。
-- [ ] 无效字段返回稳定错误码和表达式位置。
+- [x] `$field` 必须存在于当前 TypeDef。
+- [x] `->field` 必须是 ref/ref[]。
+- [x] `<-type.field` 必须存在且目标类型匹配。
+- [x] 大小比较由 Kind.QueryOps().Ordered 决定。
+- [x] contains/prefix 由 Kind.QueryOps().Text 决定。
+- [x] 查询值复用 Kind 校验，select 值必须属于 options。
+- [x] sort 字段必须存在且 Kind 声明 Sortable。
+- [ ] 错误已有稳定分类，但文本表达式位置尚未加入错误对象。
 
 内部迁移工具如需宽松查询，应使用显式 Unsafe API，不能让默认编译器静默放行。
 
@@ -303,25 +304,25 @@ query.And(
 ```json
 {
   "where": {
-    "and": [
-      {"field": "stage", "op": "eq", "value": "qualified"},
-      {"ref": "owner", "op": "in", "values": [12, 18]},
-      {"field": "amount", "op": "gte", "value": 100000}
+    "op": "and",
+    "args": [
+      {"op": "eq", "field": "stage", "value": "qualified"},
+      {"op": "in", "ref": "owner", "values": [12, 18]},
+      {"op": "gte", "field": "amount", "value": 100000}
     ]
   },
   "sort": [
-    {"field": "updated_at", "direction": "desc"}
+    {"column": "updated_at", "desc": true}
   ],
-  "page": 1,
-  "size": 20
+  "page": {"number": 1, "size": 20}
 }
 ```
 
-- [ ] 增加 JSON QuerySpec 到 AST 的解析器。
-- [ ] 复杂通用查询使用 POST `/api/query/{type}`，避免超长 URL。
-- [ ] QuerySpec 字段、操作符和排序全部走白名单。
-- [ ] 普通业务客户端继续使用 `/customers?owner_id=` 等简单业务参数。
-- [ ] 完整 Query API 默认只向管理员或受信客户端开放。
+- [x] 增加严格 JSON QuerySpec 到 AST 的解析器。
+- [x] 管理端复杂查询使用受认证的 POST `/admin/query/{type}`。
+- [x] QuerySpec 字段、操作符和排序全部走 Schema 白名单。
+- [x] 普通业务客户端继续使用简单业务参数。
+- [x] 完整 Query API 当前只向管理员开放。
 
 ## 4.6 公网业务 API 原则
 
@@ -342,12 +343,12 @@ Lisp 不再作为公共业务契约。
 
 ## 4.7 查询操作符补齐
 
-- [ ] `is-null` / `not-null`。
-- [ ] `exists` / `missing`。
+- [x] `is-null` / `not-null`（Builder: IsNull/IsNotNull）。
+- [x] `exists` / `missing`。
 - [ ] `between`。
-- [ ] `contains` / `prefix`，不暴露 SQL LIKE 通配符细节。
+- [x] `contains` / `prefix`，自动转义 SQL LIKE 通配符。
 - [ ] ref 的 `any` / `all` / `none`。
-- [ ] 关系目标谓词。
+- [x] 关系目标谓词（RelatedTo/related）。
 - [ ] 明确时间范围语义。
 - [ ] FTS `match` 是否进入 AST 另行评审，不强行合并。
 
@@ -357,7 +358,8 @@ Lisp 不再作为公共业务契约。
 - [x] sort 不允许表达式或任意 SQL。
 - [x] JSON 字段排序由 Schema 编译出 `json_extract`，客户端不接触 SQL。
 - [x] 保留页码分页并限制公开 page size。
-- [ ] 增加稳定排序和游标分页。
+- [x] 显式排序自动追加 ID，保证页码分页稳定。
+- [ ] 增加游标分页。
 - [ ] 游标必须包含完整排序键和 ID，避免翻页重复/遗漏。
 
 ## 4.9 查询成本限制
@@ -369,7 +371,7 @@ Lisp 不再作为公共业务契约。
 - [x] Filter 嵌套和 expand 路径深度均受限。
 - [x] expand 表达式限制为 1024 bytes、32 条路径、每批 1000 条引用。
 - [x] 公开 page size 上限为 100。
-- [ ] request context 取消。
+- [x] Query/QueryPage 接收 request context，并有取消测试。
 - [ ] SQLite 查询超时/中断策略。
 - [ ] 仅管理员可使用 explain/debug。
 
@@ -411,11 +413,11 @@ type AggregateQuery struct {
 
 ## 4.12 直接替换原则
 
-- [ ] AST/Builder 可用后直接删除 `ListQuery.Filter string`，不长期保留双查询路径。
-- [ ] Lisp Parser 直接输出新 AST，不保留第二套旧编译器。
-- [ ] 后台、模板和现有站点一次性改到新查询入口。
+- [x] 已删除 `ListQuery.Filter string`，没有双查询路径。
+- [x] Lisp Parser 直接输出新 AST，旧 Lisp-to-SQL 编译器已删除。
+- [x] 后台、模板和 association 已一次性改到新查询入口。
 - [x] 公网 `/api/nodes/{type}` 已直接移除原始 Lisp filter/expand，不增加兼容开关。
-- [ ] 只提供简短迁移说明和编译期可发现的 API 变化，不增加适配代码。
+- [x] 变更写入 Changelog/ADR，未增加旧 API 适配代码。
 
 ---
 

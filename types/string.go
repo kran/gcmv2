@@ -24,6 +24,9 @@ func (stringKind) IsEmpty(v any) bool {
 	return !ok || strings.TrimSpace(s) == ""
 }
 func (stringKind) Class() Class { return ClassField }
+func (stringKind) QueryOps() QueryOps {
+	return QueryOps{Equal: true, Text: true, Sortable: true}
+}
 
 func (stringKind) ValidateField(t *Types, typeName string, f FieldDef, defs map[string]TypeDef) error {
 	return rejectRefAttrs(typeName, f)

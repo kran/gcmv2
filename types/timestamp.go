@@ -23,3 +23,6 @@ func (timestampKind) ValidateField(t *Types, typeName string, f FieldDef, defs m
 	return rejectRefAttrs(typeName, f)
 }
 func (timestampKind) Class() Class { return ClassField }
+func (timestampKind) QueryOps() QueryOps {
+	return QueryOps{Equal: true, Ordered: true, Sortable: true}
+}

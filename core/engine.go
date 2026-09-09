@@ -1,6 +1,9 @@
 package core
 
 import (
+	"context"
+
+	"github.com/kran/gcmv2/query"
 	"github.com/kran/gcmv2/types"
 )
 
@@ -18,8 +21,8 @@ type Engine interface {
 	DeleteNode(id int64) error
 
 	// ── 读 ──
-	QueryPage(q ListQuery, params ...map[string]any) ([]Node, int64, error)
-	Query(q ListQuery, params ...map[string]any) ([]Node, error)
+	QueryPage(ctx context.Context, q ListQuery) ([]Node, int64, error)
+	Query(ctx context.Context, q ListQuery) ([]Node, error)
 	GetNodeById(id int64) (*Node, error)
 	GetNodeByAddress(address string) (*Node, error)
 	FullFields(id int64) (map[string]any, error)
@@ -36,8 +39,9 @@ type Engine interface {
 	Search(q, typ string, page, size int) ([]Node, int64, error)
 	RebuildSearch() error
 	EquivalenceClass(typeName string, start int64, field string, maxHops int) ([]int64, error)
-	ExpandPath(id int64, expr string) (*Node, error)
-	ExpandPathMany(ids []int64, expr string) ([]*Node, error)
+	Expand(ctx context.Context, id int64, paths ...query.ExpandPath) (*Node, error)
+	ExpandMany(ctx context.Context, ids []int64, paths ...query.ExpandPath) ([]*Node, error)
+	AutoExpand(typeName string) []query.ExpandPath
 
 	// ── 认证（前台用户 — 多登录方式 + 会话） ──
 	RegisterAuth(typeName, method, identifier string, data Fields, n *Node) (int64, error)
@@ -59,7 +63,6 @@ type Engine interface {
 
 	// others
 	Migrator() *Migrator
-	RegisterLispFuncC(name string, fn LispFuncC)
 }
 
 // ── hook 事件名（对称命名 — 写路径扩展点） ──

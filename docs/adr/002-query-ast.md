@@ -1,6 +1,6 @@
 # ADR-002：统一 Query AST，Lisp 作为文本前端
 
-- 状态：Proposed
+- 状态：Accepted / Core Implemented
 - 目标版本：v0.9.0
 - 日期：2026-09-09
 
@@ -123,9 +123,9 @@ Lisp 的 `$`、`->`、`<-` 只存在于文本语法，不进入其他 API。
 type ListQuery struct {
     Type   string
     Where  Expr
-    Sort   []SortField
-    Expand []ExpandPath
-    Page   Page
+    Sort   []query.SortField
+    Expand []query.ExpandPath
+    Page   query.Page
 }
 ```
 
@@ -188,6 +188,21 @@ AST 必须在 SQL 编译前结合 TypeDef 校验。
 - 最大关系深度默认 4
 - 任意方向通配只允许受信管理查询
 
+### Kind 查询能力
+
+Query Compiler 不按 `kind` 名称维护类型白名单。每个 Kind 通过 `QueryOps()` 显式声明：
+
+```go
+type QueryOps struct {
+    Equal    bool
+    Ordered  bool
+    Text     bool
+    Sortable bool
+}
+```
+
+这同时驱动比较操作、contains/prefix、IN、排序和 searchable 字段校验。自定义 Kind 必须显式声明能力，不提供隐式回退。
+
 ### 值校验
 
 查询值复用 Kind 的值转换/校验规则，但查询操作不应调用“required”规则。
@@ -215,10 +230,10 @@ where := query.And(
 result, err := engine.Query(ctx, core.ListQuery{
     Type:  "opportunity",
     Where: where,
-    Sort: []core.SortField{
-        {Path: query.System("updated_at"), Desc: true},
+    Sort: []query.SortField{
+        query.Desc(query.System("updated_at")),
     },
-    Page: core.Page{Number: 1, Size: 20},
+    Page: query.Page{Number: 1, Size: 20},
 })
 ```
 
@@ -275,7 +290,7 @@ Parser 输出与 Go Builder 相同的 AST。
     ]
   },
   "sort": [
-    {"field": "updated_at", "desc": true}
+    {"column": "updated_at", "desc": true}
   ],
   "page": {"number": 1, "size": 20}
 }
@@ -415,14 +430,31 @@ web/     HTTP 参数和响应
 
 如果实际实现证明拆包只增加循环依赖，则保留在 core；不要为了目录美观强拆。
 
+## 实施结果
+
+v0.9 开发分支已完成查询核心改造：
+
+- 新增独立 `query` 包，包含封闭 AST、Go Builder、Lisp Parser 和严格 JSON QuerySpec。
+- `core.ListQuery` 现在强制携带 Type，并使用 Expr、结构化 Sort、Expand 路径列表和 Page。
+- Query/QueryPage 接收 context.Context。
+- SQL Compiler 在执行前按当前 Type 校验字段、Kind、操作符、值和关系方向。
+- 关系查询支持出边、明确来源类型的入边、相关节点谓词和 subtree 集合。
+- 删除旧 Filter string、直接 Lisp-to-SQL 编译器和 Raw SQL Lisp 扩展注册。
+- 所有显式排序自动追加 ID，保证分页顺序稳定。
+- 新增受管理员认证保护的 `POST /admin/query/{type}`。
+- association 业务查询全部改用 Go Builder。
+- Expand 改用 typed `query.ExpandPath`，逐跳维护 Schema Type；入边显式声明来源 Type。
+
+Policy 合并属于下一实现阶段；AggregateQuery/Export 仍属于后续报表阶段，不在本次混入占位实现。
+
 ## 验收条件
 
-- [ ] Go Builder、Lisp、QuerySpec 产生同一种 AST。
-- [ ] SQL Compiler 不接受原始 SQL。
-- [ ] 当前 Type 的字段和操作符全部经过 Schema 校验。
+- [x] Go Builder、Lisp、QuerySpec 产生同一种 AST。
+- [x] SQL Compiler 不接受原始 SQL。
+- [x] 当前 Type 的字段和操作符经过 Schema 校验。
 - [ ] Policy 可以安全追加且无法被用户弱化。
-- [ ] 公网业务 API 不接触 Lisp。
+- [x] 公网业务 API 不接触 Lisp。
 - [ ] count/list/export/aggregate 使用同一 Where 和 Policy。
-- [ ] 查询复杂度和 Context 取消有测试。
-- [ ] association 全部查询迁移到新 Builder。
-- [ ] 旧 Filter string 和旧编译路径被删除。
+- [x] 查询复杂度和 Context 取消有测试。
+- [x] association 全部查询迁移到新 Builder。
+- [x] 旧 Filter string 和旧编译路径被删除。

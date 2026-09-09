@@ -35,4 +35,5 @@ func (galleryKind) ValidateField(t *Types, typeName string, f FieldDef, defs map
 	return rejectRefAttrs(typeName, f)
 }
 
-func (galleryKind) Class() Class { return ClassField }
+func (galleryKind) Class() Class       { return ClassField }
+func (galleryKind) QueryOps() QueryOps { return QueryOps{} }

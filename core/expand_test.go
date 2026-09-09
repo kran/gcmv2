@@ -4,9 +4,30 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	gquery "github.com/kran/gcmv2/query"
 )
 
-// ── ExpandPath: 表达式驱动的路径展开 ──────────────
+func expandText(t *testing.T, service *Service, id int64, expression string) (*Node, error) {
+	t.Helper()
+	paths, err := gquery.ParseExpand(expression)
+	if err != nil {
+		return nil, err
+	}
+	return service.Expand(t.Context(), id, paths...)
+}
+
+func expandManyText(t *testing.T, service *Service, ids []int64, expression string) ([]*Node, error) {
+	t.Helper()
+	paths, err := gquery.ParseExpand(expression)
+	if err != nil {
+		return nil, err
+	}
+	return service.ExpandMany(t.Context(), ids, paths...)
+}
+
+// ── Expand: typed relation paths ─────────────────
 
 const expandPathTypes = `
 types:
@@ -42,7 +63,7 @@ func TestExpandPathParallel(t *testing.T) {
 	art, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{
 		"title": "甲", "authors": []any{p1, p2}, "categories": []any{cat}}})
 
-	root, err := s.ExpandPath(art, "authors, categories")
+	root, err := expandText(t, s, art, "authors, categories")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +87,7 @@ func TestExpandPathChain(t *testing.T) {
 	mid, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "中层", "broader": top}})
 	art, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "甲", "categories": []any{mid}}})
 
-	root, err := s.ExpandPath(art, "categories.broader")
+	root, err := expandText(t, s, art, "categories.broader")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,11 +110,11 @@ func TestExpandPathIn(t *testing.T) {
 	s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "甲", "categories": []any{cat}}})
 	s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "乙", "categories": []any{cat}}})
 
-	root, err := s.ExpandPath(cat, "<-categories")
+	root, err := expandText(t, s, cat, "<-article.categories")
 	if err != nil {
 		t.Fatal(err)
 	}
-	arts := root.Expand["<-categories"].([]*Node)
+	arts := root.Expand["<-article.categories"].([]*Node)
 	if len(arts) != 2 {
 		t.Fatalf("articles: %d", len(arts))
 	}
@@ -107,11 +128,11 @@ func TestExpandPathMixed(t *testing.T) {
 	p1, _ := s.CreateNode(&Node{Type: "person", Display: "t", Fields: Fields{"name": "张三"}})
 	s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "甲", "categories": []any{cat}, "authors": []any{p1}}})
 
-	root, err := s.ExpandPath(cat, "<-categories.authors")
+	root, err := expandText(t, s, cat, "<-article.categories.authors")
 	if err != nil {
 		t.Fatal(err)
 	}
-	arts := root.Expand["<-categories"].([]*Node)
+	arts := root.Expand["<-article.categories"].([]*Node)
 	if len(arts) != 1 {
 		t.Fatalf("articles: %d", len(arts))
 	}
@@ -121,23 +142,21 @@ func TestExpandPathMixed(t *testing.T) {
 	}
 }
 
-// 宽松: 未知字段/非 ref 字段不报错（空展开）; 空/`*` = 自动展开。
 func TestExpandPathValidation(t *testing.T) {
 	ts := newTypes(t, expandPathTypes)
 	s := New(testDB(t), ts)
 	art, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "甲"}})
-	if n, err := s.ExpandPath(art, "ghost"); err != nil {
-		t.Fatalf("unknown field must be silent: %v", err)
-	} else if v, has := n.Expand["ghost"]; !has || len(v.([]*Node)) != 0 {
-		t.Fatalf("unknown field expand must be empty container: %v", n.Expand)
+	if _, err := expandText(t, s, art, "ghost"); err == nil {
+		t.Fatal("unknown relation must fail")
 	}
-	if _, err := s.ExpandPath(art, "  "); err != nil {
-		t.Fatalf("empty expr = auto expand: %v", err)
+	if _, err := expandText(t, s, art, "  "); err == nil {
+		t.Fatal("empty expression must fail")
 	}
-	if n, err := s.ExpandPath(art, "title"); err != nil {
-		t.Fatalf("non-ref field must be silent: %v", err)
-	} else if v, has := n.Expand["title"]; !has || len(v.([]*Node)) != 0 {
-		t.Fatalf("non-ref field expand must be empty container: %v", n.Expand)
+	if _, err := expandText(t, s, art, "title"); err == nil {
+		t.Fatal("non-ref relation must fail")
+	}
+	if _, err := expandText(t, s, art, "<-categories"); err == nil {
+		t.Fatal("incoming relation without source type must fail")
 	}
 }
 
@@ -147,7 +166,7 @@ func TestExpandPathAuto(t *testing.T) {
 	s := New(testDB(t), ts)
 	p1, _ := s.CreateNode(&Node{Type: "person", Display: "t", Fields: Fields{"name": "张三"}})
 	art, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "甲", "authors": []any{p1}}})
-	n, err := s.ExpandPath(art, "*")
+	n, err := s.Expand(t.Context(), art, s.AutoExpand("article")...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +189,7 @@ func TestExpandPathMany(t *testing.T) {
 	a2, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "乙", "categories": []any{cat}, "authors": []any{p2}}})
 
 	// 故意按 id 倒序传入，返回顺序必须与请求一致，不能依赖 SQL IN 的返回顺序。
-	list, err := s.ExpandPathMany([]int64{a2, a1}, "authors, categories")
+	list, err := expandManyText(t, s, []int64{a2, a1}, "authors, categories")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,6 +212,59 @@ func TestExpandPathMany(t *testing.T) {
 	}
 }
 
+func TestExpandMixedTypesUsesEachSchema(t *testing.T) {
+	ts := newTypes(t, `
+types:
+  person:
+    fields: [{ name: name, kind: text }]
+  primary_contact:
+    fields: [{ name: people, kind: ref, to: person }]
+  contact_group:
+    fields: [{ name: people, kind: "ref[]", to: person }]
+`)
+	s := New(testDB(t), ts)
+	person1, _ := s.CreateNode(&Node{Type: "person", Display: "一", Fields: Fields{"name": "一"}})
+	person2, _ := s.CreateNode(&Node{Type: "person", Display: "二", Fields: Fields{"name": "二"}})
+	primary, _ := s.CreateNode(&Node{Type: "primary_contact", Display: "主联系人", Fields: Fields{"people": person1}})
+	group, _ := s.CreateNode(&Node{Type: "contact_group", Display: "联系人组", Fields: Fields{"people": []any{person1, person2}}})
+
+	nodes, err := s.ExpandMany(t.Context(), []int64{primary, group}, gquery.Expand(gquery.Ref("people")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := nodes[0].Expand["people"].(*Node); !ok {
+		t.Fatalf("primary shape = %T", nodes[0].Expand["people"])
+	}
+	people, ok := nodes[1].Expand["people"].([]*Node)
+	if !ok || len(people) != 2 {
+		t.Fatalf("group shape = %T %#v", nodes[1].Expand["people"], nodes[1].Expand["people"])
+	}
+}
+
+func TestExpandRejectsCorruptTargetType(t *testing.T) {
+	ts := newTypes(t, `
+types:
+  person:
+    fields: [{ name: name, kind: text }]
+  article:
+    fields: [{ name: author, kind: ref, to: person }]
+`)
+	s := New(testDB(t), ts)
+	article, _ := s.CreateNode(&Node{Type: "article", Display: "文章", Fields: Fields{}})
+	wrong, _ := s.CreateNode(&Node{Type: "article", Display: "错误目标", Fields: Fields{}})
+	_, err := s.db.Insert("edges", map[string]any{
+		"from_node": article, "field": "author", "to_node": wrong,
+		"sort": 0, "created_at": time.Now(),
+	}).Exec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.Expand(t.Context(), article, gquery.Expand(gquery.Ref("author")))
+	if err == nil {
+		t.Fatal("corrupt target type must fail")
+	}
+}
+
 // 爆炸防护: 单字段超 1000 引用 → fail-loud（不静默截断）。
 func TestExpandOverflowFails(t *testing.T) {
 	s := newFilterSvc(t)
@@ -210,11 +282,11 @@ func TestExpandOverflowFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 单节点版
-	if _, err := s.ExpandPath(aid, "categories"); err == nil {
+	if _, err := expandText(t, s, aid, "categories"); err == nil {
 		t.Fatal("single: 1500 refs must fail (not silently truncate)")
 	}
 	// 批量版
-	_, err = s.ExpandPathMany([]int64{aid}, "categories")
+	_, err = expandManyText(t, s, []int64{aid}, "categories")
 	if err == nil {
 		t.Fatal("batch: 1500 refs must fail")
 	}
@@ -225,51 +297,43 @@ func TestExpandDeepPathFails(t *testing.T) {
 	s := newFilterSvc(t)
 	p, _ := s.CreateNode(&Node{Type: "person", Display: "t", Fields: Fields{"name": "张三"}})
 	a, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "x", "authors": []any{p}}})
-	_, err := s.ExpandPath(a, "authors.authors.authors.authors.authors")
+	_, err := expandText(t, s, a, "authors.authors.authors.authors.authors")
 	if err == nil {
 		t.Fatal("5-segment path must fail (max 4)")
 	}
-	paths := make([]string, maxExpandPaths+1)
+	paths := make([]string, gquery.MaxExpandPaths+1)
 	for i := range paths {
 		paths[i] = "authors"
 	}
-	_, err = s.ExpandPath(a, strings.Join(paths, ","))
+	_, err = expandText(t, s, a, strings.Join(paths, ","))
 	if err == nil || !strings.Contains(err.Error(), "paths") {
 		t.Fatalf("too many expand paths must fail: %v", err)
 	}
 }
 
-// 双向同名字段展开: 出边 "categories" 与入边 "<-categories" 各自独立（key 不冲突）。
+// 出边和明确来源类型的入边可并行展开，响应 key 不冲突。
 func TestExpandBidirectionalKey(t *testing.T) {
 	s := newFilterSvc(t)
 	root, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "根"}})
 	child, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "子", "parent": root}})
 	s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"title": "a", "categories": []any{child}}})
 
-	// 展开子分类: 出边 categories（无, 叶子）+ 入边 <-categories（文章 a 引用它）
-	n, err := s.ExpandPath(child, "categories, <-categories")
+	n, err := expandText(t, s, child, "parent, <-article.categories")
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, hasOut := n.Expand["categories"]
-	in, hasIn := n.Expand["<-categories"]
-	if !hasOut || !hasIn {
-		t.Fatalf("both directions must exist: %v", n.Expand)
+	parent, hasParent := n.Expand["parent"].(*Node)
+	incoming, hasIncoming := n.Expand["<-article.categories"].([]*Node)
+	if !hasParent || parent.ID != root || !hasIncoming || len(incoming) != 1 {
+		t.Fatalf("expansion = %#v", n.Expand)
 	}
-	if len(out.([]*Node)) != 0 {
-		t.Fatalf("out should be empty: %v", out)
-	}
-	inList := in.([]*Node)
-	if len(inList) != 1 || inList[0].Type != "article" {
-		t.Fatalf("in should have the article: %v", inList)
-	}
-	// 批量版同验证
-	nodes, err := s.ExpandPathMany([]int64{child}, "categories, <-categories")
+
+	nodes, err := expandManyText(t, s, []int64{child}, "parent, <-article.categories")
 	if err != nil || len(nodes) != 1 {
 		t.Fatal(err)
 	}
-	if _, ok := nodes[0].Expand["<-categories"]; !ok {
-		t.Fatal("batch: in key missing")
+	if _, ok := nodes[0].Expand["<-article.categories"]; !ok {
+		t.Fatal("batch incoming key missing")
 	}
 }
 
@@ -284,7 +348,7 @@ func TestExpandMultiLevel(t *testing.T) {
 		Fields: Fields{"title": "a", "categories": []any{grand}}})
 
 	// 三层出边链: 文章 → categories(grand) → parent(child) → parent(root)
-	n, err := s.ExpandPath(art, "categories.parent.parent")
+	n, err := expandText(t, s, art, "categories.parent.parent")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,27 +367,22 @@ func TestExpandMultiLevel(t *testing.T) {
 	}
 
 	// 多层入边: child 的 <-parent = [grand]; grand 的 <-parent = [great]
-	m, err := s.ExpandPath(child, "<-parent.<-parent")
+	m, err := expandText(t, s, child, "<-category.parent.<-category.parent")
 	if err != nil {
 		t.Fatal(err)
 	}
-	in1 := m.Expand["<-parent"].([]*Node)
+	in1 := m.Expand["<-category.parent"].([]*Node)
 	if len(in1) != 1 || in1[0].ID != grand {
 		t.Fatalf("in level1: %v", in1)
 	}
-	in2 := in1[0].Expand["<-parent"].([]*Node)
+	in2 := in1[0].Expand["<-category.parent"].([]*Node)
 	if len(in2) != 1 || in2[0].ID != great {
 		t.Fatalf("in level2: %v", in2)
 	}
 
-	// 批量三层
-	nodes, err := s.ExpandPathMany([]int64{art, child}, "categories.parent")
-	if err != nil || len(nodes) != 2 {
-		t.Fatal(err)
-	}
-	for _, x := range nodes {
-		if x.Expand["categories"] == nil && x.Expand["<-parent"] == nil {
-			t.Fatalf("batch node %d must have expansion", x.ID)
-		}
+	// 混合根类型不能偷用其他 Type 的同名字段，必须 fail-loud。
+	_, err = expandManyText(t, s, []int64{art, child}, "categories.parent")
+	if err == nil {
+		t.Fatal("mixed root types with an invalid path must fail")
 	}
 }

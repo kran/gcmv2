@@ -86,6 +86,7 @@ func TestAdminNodes(t *testing.T) {
 		{"PUT", "/admin/nodes/1"},
 		{"DELETE", "/admin/nodes/1"},
 		{"GET", "/admin/nodes/1"},
+		{"POST", "/admin/query/article"},
 		{"GET", "/admin/tree?type=category"},
 		{"GET", "/admin/expand?node=1"},
 		{"POST", "/admin/settings"},
@@ -138,6 +139,14 @@ func TestAdminPasswordFlow(t *testing.T) {
 	json.Unmarshal(w.Body.Bytes(), &created)
 	if created.ID == 0 {
 		t.Fatal("no id")
+	}
+	w = do(s, "POST", "/admin/query/article", map[string]any{
+		"where": map[string]any{"op": "eq", "field": "publication_state", "value": "published"},
+		"sort":  []map[string]any{{"column": "id", "desc": true}},
+		"page":  map[string]any{"number": 1, "size": 10},
+	}, ck)
+	if w.Code != http.StatusOK {
+		t.Fatalf("query = %d: %s", w.Code, w.Body.String())
 	}
 	// 读回
 	w = do(s, "GET", "/admin/nodes/"+itoa(created.ID), nil, ck)

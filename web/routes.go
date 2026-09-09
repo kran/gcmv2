@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/kran/gcmv2/core"
+	gquery "github.com/kran/gcmv2/query"
 	"github.com/kran/gcmv2/types"
 )
 
@@ -109,9 +110,13 @@ func (s *Site) apiNodes(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, err.Error())
 		return
 	}
-	f := `(and (= type {:typ}) (= $` + publication.Field + ` {:published}))`
-	q := core.ListQuery{Filter: f, Sort: sort, Page: page, Size: size}
-	list, total, err := s.engine.QueryPage(q, map[string]any{"typ": typ, "published": publication.Published})
+	q := core.ListQuery{
+		Type:  typ,
+		Where: gquery.EQ(gquery.Field(publication.Field), publication.Published),
+		Sort:  sort,
+		Page:  gquery.Page{Number: page, Size: size},
+	}
+	list, total, err := s.engine.QueryPage(ctx.R.Context(), q)
 	if err != nil {
 		// filter 编译错误 → 400（客户端参数）
 		ctx.String(http.StatusBadRequest, "api: "+err.Error())

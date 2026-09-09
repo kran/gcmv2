@@ -4,6 +4,7 @@
 package web
 
 import (
+	"context"
 	"crypto/rand"
 	"embed"
 	"encoding/hex"
@@ -18,12 +19,14 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/kran/cho"
 	"github.com/kran/dba"
 	"github.com/kran/gcmv2/core"
+	gquery "github.com/kran/gcmv2/query"
 	"github.com/spf13/pathologize"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -380,6 +383,7 @@ func (s *Site) mountAdmin() {
 			authed.Get("/me", b.me)
 			authed.Get("/types", b.types)
 			authed.Get("/nodes", b.listNodes)
+			authed.Post("/query/{type}", b.queryNodes)
 			authed.Post("/nodes", b.createNode)
 			authed.Get("/nodes/{id}", b.getNode)
 			authed.Put("/nodes/{id}", b.updateNode)
@@ -487,28 +491,18 @@ func (b *backend) listNodes(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, "type required")
 		return
 	}
-	// filter 参数: 完整查询能力（树过滤/任意字段筛选）; q 参数: 标题模糊搜索
-	// （like 参数化, 与 filter 叠加）。表达式经 filter 引擎编译 + 参数化。
-	var list []core.Node
-	var total int64
-	var err error
+	var where gquery.Expr
 	filter := strings.TrimSpace(ctx.Query("filter"))
-	q := strings.TrimSpace(ctx.Query("q"))
-	// filter = Lisp 表达式；q = display 模糊。业务状态由动态字段过滤。
-	params := map[string]any{}
-	if q != "" {
-		params["q"] = "%" + q + "%"
-		if filter != "" {
-			filter = "(and " + filter + " (like display {:q}))"
-		} else {
-			filter = "(like display {:q})"
-		}
-	}
-	// 统一 Q: 类型过滤合成（参数化 (= type {:typ})）
-	params["typ"] = typ
-	f := `(= type {:typ})`
 	if filter != "" {
-		f = `(and (= type {:typ}) ` + filter + `)`
+		parsed, err := gquery.ParseLisp(filter, nil)
+		if err != nil {
+			b.bad(ctx, err)
+			return
+		}
+		where = parsed
+	}
+	if text := strings.TrimSpace(ctx.Query("q")); text != "" {
+		where = gquery.And(where, gquery.Contains(gquery.System("display"), text))
 	}
 	// 默认 id 降序（新节点在前）; sort 参数可选覆盖。
 	sortFields, sortErr := parseSort(ctx.Query("sort"))
@@ -517,12 +511,14 @@ func (b *backend) listNodes(ctx *CmsCtx) {
 		return
 	}
 	if len(sortFields) == 0 {
-		sortFields = []core.SortField{{Field: "id", Desc: true}}
+		sortFields = []gquery.SortField{gquery.Desc(gquery.System("id"))}
 	}
-	list, total, err = b.eng.QueryPage(core.ListQuery{Filter: f, Sort: sortFields, Page: page, Size: size}, params)
+	list, total, err := b.eng.QueryPage(ctx.R.Context(), core.ListQuery{
+		Type: typ, Where: where, Sort: sortFields,
+		Page: gquery.Page{Number: page, Size: size},
+	})
 	if err != nil {
-		// filter 编译错误（filter-lisp: 前缀）= 客户端参数 → 400; 其余 → 500
-		if strings.Contains(err.Error(), "filter-lisp:") {
+		if isQueryError(err) {
 			b.bad(ctx, err)
 		} else {
 			b.internal(ctx, err)
@@ -530,7 +526,7 @@ func (b *backend) listNodes(ctx *CmsCtx) {
 		return
 	}
 	// 列表默认展开全部出边 ref 字段（一层, 批量 — 查询次数=字段数, 与页大小无关）
-	expanded, err := b.expandMany(list)
+	expanded, err := b.expandMany(ctx.R.Context(), list)
 	if err != nil {
 		b.internal(ctx, err)
 		return
@@ -540,8 +536,39 @@ func (b *backend) listNodes(ctx *CmsCtx) {
 	})
 }
 
+// queryNodes 为受管理员认证保护的结构化 QuerySpec 入口。
+func (b *backend) queryNodes(ctx *CmsCtx) {
+	typeName := ctx.PathValue("type")
+	if _, ok := b.eng.Types().Type(typeName); !ok {
+		ctx.Error(http.StatusBadRequest, "type not found")
+		return
+	}
+	where, sortFields, page, err := gquery.DecodeSpec(ctx.R.Body)
+	if err != nil {
+		b.bad(ctx, err)
+		return
+	}
+	if page.Number <= 0 {
+		page.Number = 1
+	}
+	if page.Size <= 0 {
+		page.Size = 20
+	}
+	page.Size = min(page.Size, 100)
+	list, total, err := b.eng.QueryPage(ctx.R.Context(), core.ListQuery{
+		Type: typeName, Where: where, Sort: sortFields, Page: page,
+	})
+	if err != nil {
+		b.bad(ctx, err)
+		return
+	}
+	_ = ctx.Json(http.StatusOK, map[string]any{
+		"items": list, "total": total, "page": page.Number, "size": page.Size,
+	})
+}
+
 // expandMany 列表批量展开全部出边 ref 字段 — "*" 引擎语义（core 解析）。
-func (b *backend) expandMany(nodes []core.Node) ([]core.Node, error) {
+func (b *backend) expandMany(ctx context.Context, nodes []core.Node) ([]core.Node, error) {
 	if len(nodes) == 0 {
 		return nodes, nil
 	}
@@ -549,7 +576,7 @@ func (b *backend) expandMany(nodes []core.Node) ([]core.Node, error) {
 	for _, n := range nodes {
 		ids = append(ids, n.ID)
 	}
-	expanded, err := b.eng.ExpandPathMany(ids, "*")
+	expanded, err := b.eng.ExpandMany(ctx, ids, b.eng.AutoExpand(nodes[0].Type)...)
 	if err != nil {
 		return nil, err
 	}
@@ -690,8 +717,9 @@ func (b *backend) tree(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, "type required")
 		return
 	}
-	list, err := b.eng.Query(core.ListQuery{Filter: `(= type {:t})`, Size: 10000},
-		map[string]any{"t": typ})
+	list, err := b.eng.Query(ctx.R.Context(), core.ListQuery{
+		Type: typ, Page: gquery.Page{Size: 10000},
+	})
 	if err != nil {
 		b.internal(ctx, err)
 		return
@@ -784,7 +812,7 @@ func (b *backend) inbound(ctx *CmsCtx) {
 	_ = ctx.Json(http.StatusOK, map[string]any{"items": items, "total": total})
 }
 
-// expand 引用展开预览（ExpandPath）: expr 为空 = 该类型全部 ref 字段一层全景。
+// expand 引用展开预览：文本只作为 typed ExpandPath 的管理端输入前端。
 func (b *backend) expand(ctx *CmsCtx) {
 	nodeID := ctx.QueryNum("node", 0)
 	expr := ctx.Query("expr")
@@ -792,20 +820,26 @@ func (b *backend) expand(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, "node required")
 		return
 	}
-	if expr == "" || expr == "*" {
-		// 自动 / "*": 该类型所有 ref 字段（出边, 逗号并行, 一层）
-		n, err := b.eng.GetNodeById(nodeID)
-		if err != nil {
-			b.internal(ctx, err)
-			return
-		}
-		if n == nil {
-			ctx.Error(http.StatusNotFound, "not found")
-			return
-		}
-		expr = "*" // 引擎语义: 该类型全部出边 ref 字段
+	node, err := b.eng.GetNodeById(nodeID)
+	if err != nil {
+		b.internal(ctx, err)
+		return
 	}
-	root, err := b.eng.ExpandPath(nodeID, expr)
+	if node == nil {
+		ctx.Error(http.StatusNotFound, "not found")
+		return
+	}
+	var paths []gquery.ExpandPath
+	if expr == "" || expr == "*" {
+		paths = b.eng.AutoExpand(node.Type)
+	} else {
+		paths, err = gquery.ParseExpand(expr)
+		if err != nil {
+			b.bad(ctx, err)
+			return
+		}
+	}
+	root, err := b.eng.Expand(ctx.R.Context(), nodeID, paths...)
 	if err != nil {
 		b.bad(ctx, err)
 		return
@@ -865,31 +899,53 @@ func (b *backend) rebuildSearch(ctx *CmsCtx) {
 // ── 实体搜索（引用编辑器用）──────────────────────
 
 // search 按 display 模糊搜索节点（type 可选过滤）。
+func isQueryError(err error) bool {
+	return errors.Is(err, core.ErrInvalidQuery) ||
+		errors.Is(err, core.ErrInvalidField) ||
+		errors.Is(err, core.ErrInvalidOperator) ||
+		errors.Is(err, core.ErrInvalidValue) ||
+		errors.Is(err, core.ErrQueryTooComplex)
+}
+
 func (b *backend) search(ctx *CmsCtx) {
 	q := strings.TrimSpace(ctx.Query("q"))
 	typ := ctx.Query("type")
 	page := int(ctx.QueryNum("page", 1))
 	size := int(ctx.QueryNum("size", 10))
-	// Lisp 合成: type 可选过滤 + title/slug 模糊
-	f := ""
-	params := map[string]any{}
-	if typ != "" {
-		f = `(= type {:typ})`
-		params["typ"] = typ
-	}
+	where := gquery.Expr(nil)
 	if q != "" {
-		like := `(like display {:q})`
-		if f != "" {
-			f = `(and ` + f + ` ` + like + `)`
-		} else {
-			f = like
-		}
-		params["q"] = "%" + q + "%"
+		where = gquery.Contains(gquery.System("display"), q)
 	}
-	list, total, err := b.eng.QueryPage(core.ListQuery{Filter: f, Page: page, Size: size}, params)
-	if err != nil {
-		b.internal(ctx, err)
+	if typ != "" {
+		list, total, err := b.eng.QueryPage(ctx.R.Context(), core.ListQuery{
+			Type: typ, Where: where,
+			Page: gquery.Page{Number: page, Size: size},
+		})
+		if err != nil {
+			b.internal(ctx, err)
+			return
+		}
+		_ = ctx.Json(http.StatusOK, map[string]any{"items": list, "total": total})
 		return
 	}
-	_ = ctx.Json(http.StatusOK, map[string]any{"items": list, "total": total})
+
+	items := make([]core.Node, 0)
+	var total int64
+	for _, typeName := range b.eng.Types().Names() {
+		list, count, err := b.eng.QueryPage(ctx.R.Context(), core.ListQuery{
+			Type: typeName, Where: where,
+			Page: gquery.Page{Number: page, Size: size},
+		})
+		if err != nil {
+			b.internal(ctx, err)
+			return
+		}
+		items = append(items, list...)
+		total += count
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
+	if len(items) > size {
+		items = items[:size]
+	}
+	_ = ctx.Json(http.StatusOK, map[string]any{"items": items, "total": total})
 }

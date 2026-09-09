@@ -22,3 +22,6 @@ func (numberKind) ValidateField(t *Types, typeName string, f FieldDef, defs map[
 	return rejectRefAttrs(typeName, f)
 }
 func (numberKind) Class() Class { return ClassField }
+func (numberKind) QueryOps() QueryOps {
+	return QueryOps{Equal: true, Ordered: true, Sortable: true}
+}

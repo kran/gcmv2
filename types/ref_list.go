@@ -26,7 +26,8 @@ func (refListKind) IsEmpty(v any) bool {
 	arr, ok := v.([]any)
 	return !ok || len(arr) == 0
 }
-func (refListKind) Class() Class { return ClassRefList }
+func (refListKind) Class() Class       { return ClassRefList }
+func (refListKind) QueryOps() QueryOps { return QueryOps{} }
 
 func (refListKind) ValidateField(t *Types, typeName string, f FieldDef, defs map[string]TypeDef) error {
 	return validateRefField(t, typeName, f, defs)

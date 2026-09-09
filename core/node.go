@@ -99,7 +99,7 @@ type Node struct {
 	// 类型字段（Scan/Value 自动 JSON 转换；ref/ref[] 存 edges）
 	Fields Fields `db:"fields" json:"fields"`
 
-	// Expand 引用展开容器（ExpandPath 填充 — 不落库）: map[字段名] → *Node / []*Node
+	// Expand 引用展开容器（typed Expand 填充 — 不落库）: map[路径 key] → *Node / []*Node
 	Expand map[string]any `db:"-" json:"expand,omitempty"`
 	// Extra 渲染期附加数据（HookNodeEnrich 填充 — 不落库）: url 注入、高亮等
 	Extra map[string]any `db:"-" json:"extra,omitempty"`

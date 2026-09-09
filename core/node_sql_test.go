@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kran/dba"
+	gquery "github.com/kran/gcmv2/query"
 	"github.com/kran/gcmv2/types"
 	_ "modernc.org/sqlite"
 )
@@ -401,15 +402,19 @@ func TestQueryPage(t *testing.T) {
 		s.CreateNode(&Node{Type: "article", Display: "t",
 			Fields: map[string]any{"title": "t" + string(rune('a'+i)), "views": i, "position": i}})
 	}
-	list, total, err := s.QueryPage(ListQuery{Page: 1, Size: 2})
+	list, total, err := s.QueryPage(t.Context(), ListQuery{
+		Type: "article", Page: gquery.Page{Number: 1, Size: 2},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if total != 5 || len(list) != 2 {
 		t.Fatalf("total=%d list=%d", total, len(list))
 	}
-	list, _, err = s.QueryPage(ListQuery{
-		Sort: []SortField{{Field: "$views", Desc: true}}, Page: 1, Size: 5,
+	list, _, err = s.QueryPage(t.Context(), ListQuery{
+		Type: "article",
+		Sort: []gquery.SortField{gquery.Desc(gquery.Field("views"))},
+		Page: gquery.Page{Number: 1, Size: 5},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -417,10 +422,15 @@ func TestQueryPage(t *testing.T) {
 	if list[0].Fields.Int("views") != 4 || list[4].Fields.Int("views") != 0 {
 		t.Fatalf("dynamic field sort order = %#v", list)
 	}
-	for _, field := range []string{"id DESC", "id; DELETE FROM nodes", "$missing"} {
-		_, _, err := s.QueryPage(ListQuery{Sort: []SortField{{Field: field}}, Page: 1, Size: 5})
+	for _, path := range []gquery.Path{
+		gquery.System("id DESC"), gquery.System("id; DELETE FROM nodes"), gquery.Field("missing"),
+	} {
+		_, _, err := s.QueryPage(t.Context(), ListQuery{
+			Type: "article", Sort: []gquery.SortField{gquery.Asc(path)},
+			Page: gquery.Page{Number: 1, Size: 5},
+		})
 		if err == nil {
-			t.Fatalf("unsafe sort field %q must fail", field)
+			t.Fatalf("unsafe sort field %q must fail", path.Field)
 		}
 	}
 }

@@ -29,6 +29,9 @@ func (slugKind) IsEmpty(value any) bool {
 }
 
 func (slugKind) Class() Class { return ClassField }
+func (slugKind) QueryOps() QueryOps {
+	return QueryOps{Equal: true, Text: true, Sortable: true}
+}
 
 func (slugKind) ValidateField(t *Types, typeName string, field FieldDef, defs map[string]TypeDef) error {
 	return rejectRefAttrs(typeName, field)
