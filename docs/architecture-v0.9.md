@@ -295,13 +295,24 @@ type EditableNode struct {
 Actor + Action + Type
 ```
 
-当前 Action：
+Action 是字符串标识，分两类：
 
 ```text
-list / view / search / export
+系统 action（框架拥有调用点）    list / view / search / export
+站点 action（站点拥有调用点）    site.my_content 等，必须含 "."
 ```
 
-未注册公开规则时：有 publication capability 的 Type 默认只读已发布记录；没有 publication capability 的 Type 默认拒绝全部记录。
+系统 action 在 `policyDefaults` 表里有唯一定义：未注册规则时的默认行为（`PolicyDefault`）。解析顺序是"已注册规则 → 否则系统 action 查表"，没有散落在函数体里的分支：
+
+```text
+PolicyDefaultPublishedOnly   有 publication capability 的 Type → 只读已发布记录
+                             没有该 capability 的 Type → 全拒
+PolicyDefaultDeny            全拒
+```
+
+站点 action 没有默认值，必须在对应 Type 上注册规则；未注册就解析会直接报错，不会静默回退到公开默认。名字要求带 `.` 是为了让今后新增的系统 action 不会和站点已经使用的名字撞在同一个 `(Type, Action)` 键上而静默改变行为。
+
+写 action（create / update / delete）与写路径一起入表，默认 `Deny`。
 
 ### 3.12 Auth Realm、Actor 与 Principal
 

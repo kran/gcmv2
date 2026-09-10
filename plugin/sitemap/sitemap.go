@@ -49,7 +49,7 @@ func Mount(s *web.Site, opts Options) {
 			list := make([]core.Node, 0)
 			for _, typeName := range s.Engine().Types().Names() {
 				_, publicationEnabled := s.Engine().Types().Publication(typeName)
-				if !publicationEnabled && !s.Policy().Has(typeName, web.PolicyExport) {
+				if !publicationEnabled && !s.Policy().Exposes(typeName, web.PolicyExport) {
 					continue
 				}
 				scope, err := s.Policy().Scope(ctx, web.PolicyExport, typeName)

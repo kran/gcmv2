@@ -256,10 +256,12 @@ ErrInvalidQuery · ErrInvalidField · ErrInvalidOperator · ErrInvalidValue · E
 
 | 概念 | 说明 |
 |---|---|
-| `PolicyRegistry` | 按 `(Type, Action)` 解析行范围 |
-| `PolicyAction` | list / view / search / export |
-| `PolicyRule` | `func(*CmsCtx, PolicyRequest) (gquery.Expr, error)` —— **当前无生产调用方** |
-| 内置默认 | 有 publication → published-only；无 publication → 全拒 |
+| `PolicyRegistry` | 按 `(Type, Action)` 解析行范围；`Exposes` 判断该类型是否被显式暴露 |
+| `PolicyAction` | 字符串 action。系统 action：list / view / search / export；站点自命名 action 必须含 `.` |
+| `policyDefaults` 表 | 每个**系统** action 的唯一出处：未注册规则时的默认行为（`PolicyDefault`） |
+| `PolicyDefault` | `PublishedOnly`（有 publication 的 Type 只读已发布）/ `Deny`（全拒） |
+| `PolicyRule` | `func(*CmsCtx, PolicyRequest) (gquery.Expr, error)` |
+| 解析顺序 | 已注册规则 → 否则系统 action 查表；站点 action 未注册该 Type 则报错（不静默回退） |
 
 ### 6.4 错误契约
 
@@ -323,7 +325,8 @@ highlight   代码高亮
 | `relation` capability | **无真实使用者**（只有测试） |
 | `equivalence` | **无真实使用者**（只有测试；association 用不上） |
 | `on_delete: cascade` | **无真实使用者**（association 全是默认） |
-| `PolicyRule` / `Register` | **无生产调用方**（只有 3 个测试） |
+| `PolicyRule` / `Register` | association 的 `site.my_content` 是唯一生产调用方（会员读自己的内容） |
+| `policyDefaults` 表 | 4 个系统 action 的默认行为由它解析；站点 action 没有默认，必须自带规则 |
 | `Set`（SubtreeOf） | association 用 `Tree` + ref 集合替代 |
 | Lisp 前端 | Admin 列表 filter、模板 filterList |
 | QuerySpec | Admin `/admin/query/{type}` |
@@ -347,7 +350,7 @@ highlight   代码高亮
 3. 关系代数(3) + tree + relation      → 四种关系形态, association 只用到 tree
 4. Hook(18)                          → 生命周期 + 渲染 + 认证四类扩展点
 5. Expr(7) × Path(4) × Set(1)        → 查询表达力
-6. Action(4) × Type(n)               → 读策略键空间
+6. Action(4 系统 + 站点自命名) × Type(n) → 读策略键空间
 7. Code(12) × Status                 → 错误契约
 ```
 

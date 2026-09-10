@@ -41,6 +41,8 @@
 - Unknown Node types now answer 404 (`not_found`) instead of 400, and rejected uploads answer 413/422 (`upload_invalid`) instead of 400.
 - `core.ErrInvalidFields` marks Schema validation failures so the Web edge can return 422 `invalid_value`.
 - `InEdges` now filters the requested field and, like `OutEdges`, returns logical two-way results for symmetric/equivalence relations.
+- `PolicyAction` is now a string identifier backed by one `policyDefaults` table holding each system action's default behaviour; unregistered system actions resolve through that table instead of hard-coded branches. Sites may introduce their own namespaced actions (a name containing `.`), which carry no default and must be registered for the Type they are resolved on.
+- `PolicyRegistry.Has` is renamed to `PolicyRegistry.Exposes`.
 
 ### Added
 
@@ -62,6 +64,8 @@
 - Realm-isolated password register/login/bind endpoints and cross-Realm bind rejection.
 - SHA-256 Session token storage and bulk Node session revocation.
 - Server-side PolicyRegistry keyed by Actor, action, and Type.
+- One `policyDefaults` table defines every system action's default behaviour; unknown actions, and site actions without a rule for the Type, are rejected instead of silently falling back.
+- Site-defined policy actions, namespaced with a dot, so a site can scope a read surface no system action describes.
 - Mandatory AST-level Policy merging for list, count, view, search, and sitemap export paths.
 - Type-specific Search targets, allowing one cross-Type FTS query without weakening per-Type Policy.
 - `on_delete: restrict|set_null|cascade` with safe defaults and transactional permanent deletion.

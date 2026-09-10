@@ -115,7 +115,7 @@ func (s *Site) apiNodes(ctx *CmsCtx) {
 		return
 	}
 	_, publicationEnabled := s.engine.Types().Publication(typ)
-	if !publicationEnabled && !s.policy.Has(typ, PolicyList) {
+	if !publicationEnabled && !s.policy.Exposes(typ, PolicyList) {
 		ctx.Fail(NotFound("type is not public"))
 		return
 	}
