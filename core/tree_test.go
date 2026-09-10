@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
@@ -141,5 +142,30 @@ types:
 	}
 	if tree.Len() != 2 || tree.Parent(child) == nil || tree.Parent(child).ID != root {
 		t.Fatalf("non-publication tree = %d nodes", tree.Len())
+	}
+}
+
+// TestLoadTreeOrderTieBreak 同序节点必须按 id 升序（graph 顺序不能随版本反转）。
+func TestLoadTreeOrderTieBreak(t *testing.T) {
+	s := newTestService(t)
+	ctx := context.Background()
+	for _, name := range []string{"甲", "乙", "丙"} {
+		n := &Node{Type: "category", Display: name, Fields: Fields{"name": name, "position": 0}}
+		if _, err := s.CreateNode(ctx, n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tree, err := s.LoadTree(ctx, "category", BypassPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	roots := tree.Roots()
+	if len(roots) != 3 {
+		t.Fatalf("roots = %d, want 3", len(roots))
+	}
+	for i, want := range []string{"甲", "乙", "丙"} {
+		if roots[i].Display != want {
+			t.Fatalf("roots[%d] = %q, want %q（同序应 id 升序）", i, roots[i].Display, want)
+		}
 	}
 }

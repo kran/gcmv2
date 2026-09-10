@@ -30,9 +30,11 @@ func (s *Service) LoadTree(ctx context.Context, typeName string, scope QueryScop
 	if !ok {
 		return nil, fmt.Errorf("core: type %q is not tree-enabled", typeName)
 	}
+	// id 升序兜底必须显式写: compileSort 在排序字段里没有 id 时会追加 id DESC,
+	// 那会让同序节点的先后在升级后反转（树/导航顺序变化）。
 	sort := []gquery.SortField{gquery.Asc(gquery.System("id"))}
 	if tree.Order != "" {
-		sort = []gquery.SortField{gquery.Asc(gquery.Field(tree.Order))}
+		sort = []gquery.SortField{gquery.Asc(gquery.Field(tree.Order)), gquery.Asc(gquery.System("id"))}
 	}
 	db, err := s.buildQuery(ctx, ListQuery{Type: typeName, Scope: scope, Sort: sort})
 	if err != nil {
