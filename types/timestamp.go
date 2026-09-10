@@ -11,7 +11,7 @@ type timestampKind struct{}
 const KindTimestamp = "timestamp"
 
 func (timestampKind) Name() string { return KindTimestamp }
-func (timestampKind) Validate(v any) error {
+func (timestampKind) Validate(_ FieldDef, v any) error {
 	if !isNumber(v) {
 		return fmt.Errorf("expects timestamp (number), got %T", v)
 	}

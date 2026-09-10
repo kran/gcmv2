@@ -10,7 +10,7 @@ type boolKind struct{}
 const KindBool = "bool"
 
 func (boolKind) Name() string { return KindBool }
-func (boolKind) Validate(v any) error {
+func (boolKind) Validate(_ FieldDef, v any) error {
 	if _, ok := v.(bool); !ok {
 		return fmt.Errorf("expects bool, got %T", v)
 	}

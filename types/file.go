@@ -12,7 +12,7 @@ type fileKind struct{}
 const KindFile = "upload-file"
 
 func (fileKind) Name() string { return KindFile }
-func (fileKind) Validate(v any) error {
+func (fileKind) Validate(_ FieldDef, v any) error {
 	if _, ok := v.(string); !ok {
 		return fmt.Errorf("expects string, got %T", v)
 	}

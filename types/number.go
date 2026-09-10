@@ -10,7 +10,7 @@ type numberKind struct{}
 const KindNumber = "number"
 
 func (numberKind) Name() string { return KindNumber }
-func (numberKind) Validate(v any) error {
+func (numberKind) Validate(_ FieldDef, v any) error {
 	if !isNumber(v) {
 		return fmt.Errorf("expects number, got %T", v)
 	}

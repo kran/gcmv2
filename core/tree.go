@@ -1,6 +1,11 @@
 package core
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+
+	gquery "github.com/kran/gcmv2/query"
+)
 
 // Tree 类型引用树的内存结构 — LoadTree 一次加载, 树操作（导航/子分类/
 // 面包屑/子树收集）全内存, 不再查 DB。
@@ -15,23 +20,25 @@ type Tree struct {
 	roots     []*Node           // 顶级（tree.order, id 序）
 }
 
-// LoadTree 按类型声明的 tree/publication capability 加载公开树。
-func (s *Service) LoadTree(typeName string) (*Tree, error) {
+// LoadTree 按类型声明的 tree capability 加载树。可见范围由调用方传入的
+// Scope 决定: 公开路由传 PolicyScope, 管理/内部路径传 BypassPolicy。
+// Core 不假定树必须可发布 — CRM 的组织/区域树没有公开语义。
+//
+// 只加载 Scope 内的节点; 父节点不在 Scope 内时该节点成为根。
+func (s *Service) LoadTree(ctx context.Context, typeName string, scope QueryScope) (*Tree, error) {
 	tree, ok := s.types.Tree(typeName)
 	if !ok {
 		return nil, fmt.Errorf("core: type %q is not tree-enabled", typeName)
 	}
-	publication, ok := s.types.Publication(typeName)
-	if !ok {
-		return nil, fmt.Errorf("core: tree type %q is not publication-enabled", typeName)
-	}
-	order := "id"
+	sort := []gquery.SortField{gquery.Asc(gquery.System("id"))}
 	if tree.Order != "" {
-		order = `json_extract(fields, '$.` + tree.Order + `'), id`
+		sort = []gquery.SortField{gquery.Asc(gquery.Field(tree.Order))}
 	}
-	nodes, err := s.db.Add(
-		`SELECT * FROM nodes WHERE type = #{1} AND archived_at IS NULL AND json_extract(fields, #{2}) = #{3} ORDER BY `+order,
-		typeName, "$."+publication.Field, publication.Published).FetchList[Node]()
+	db, err := s.buildQuery(ctx, ListQuery{Type: typeName, Scope: scope, Sort: sort})
+	if err != nil {
+		return nil, err
+	}
+	nodes, err := db.FetchList[Node]()
 	if err != nil {
 		return nil, err
 	}
@@ -48,8 +55,10 @@ func (s *Service) LoadTree(typeName string) (*Tree, error) {
 			t.byAddress[address] = n
 		}
 	}
-	// parent 边（全查 Go 过滤 — 树内节点才入; 指向树外（下架/他类型）节点的边跳过）
-	edges, err := s.db.Add(`SELECT from_node, to_node FROM edges WHERE field = #{1}`, tree.Parent).FetchList[Edge]()
+	// parent 边（只取本类型来源的边; 树内节点才入 — 指向树外节点的边跳过）
+	edges, err := s.db.WithCtx(ctx).Add(`SELECT e.from_node, e.to_node FROM edges e
+		JOIN nodes source ON source.id = e.from_node
+		WHERE e.field = #{1} AND source.type = #{2}`, tree.Parent, typeName).FetchList[Edge]()
 	if err != nil {
 		return nil, err
 	}

@@ -104,53 +104,47 @@ ADR-003 已完成：
 
 FTS 现在只负责检索，不决定可见性。
 
-### P2：Tree 原语与“公开树”耦合
+### 已解决：Tree 原语与“公开树”解耦
 
 位置：`core/tree.go`
 
-`LoadTree` 当前强制要求 publication capability，并只加载 published Node。CRM 的组织树、区域树可能完全没有公开发布语义。
+`LoadTree` 不再要求 publication capability，也不再自行拼接发布条件：
 
-同时 `web/admin.go` 的 inbound subtree 仍写死字段名 `parent`。
-
-建议：
-
-```text
-Core LoadTree(ctx, type, where)
-Public Web 追加 publication scope
-Admin 使用 nil/admin scope
+```go
+LoadTree(ctx, typeName, scope)
 ```
 
-Tree Parent/Order 始终从 tree capability 读取。
+- Core 只读 tree capability 的 parent/order。
+- 公开 Web 路由传入 Policy Scope；association 公开树和分类筛选都经 `web.PolicyList`。
+- 非公开树（CRM 组织/区域）用 `core.BypassPolicy()` 加载。
+- 零值 Scope 直接报错，与列表/搜索一致。
+- 树节点查询改走统一查询构建器，parent 边按来源 Type 过滤。
 
-### P2：通用 Web API 写死 author 业务模型
+`web/admin.go` 的 inbound subtree 改为读取 tree capability 的 parent 字段，不再写死 `parent`。
+
+### 已解决：mine endpoint 移出通用 Web
 
 位置：`web/api.go` 的 `/api/nodes/mine`
 
-当前通用 Web 层查找名为 `author` 的引用字段。这是内容投稿模型，不属于实体关系内核。CRM 可能使用 owner、assignee、created_by，或关系 Node。
+通用 Web 层不再查找名为 `author` 的引用字段。该端点已删除，由 association 的 `GET /api/me/content` 实现，只覆盖 `memberContentTypes`，因此“我的发布”不再依赖内核猜测业务字段。
 
-建议：从通用 web 删除 mine endpoint，由 association 等站点业务 API 实现，未来由 Actor/Policy 提供 owner scope。
-
-### P2：Kind 值校验仍有具体 Kind 分支
+### 已解决：Kind 值校验不再有具体 Kind 分支
 
 位置：`types/types.go`
 
-当前 `Types.ValidateValue` 对 select 使用：
+`Kind.Validate` 现在接收 FieldDef：
 
 ```go
-if field.Kind == KindSelect { ... }
+Validate(f FieldDef, v any) error
 ```
 
-array/object 的递归校验也由 Types 容器特殊处理。
+select 的 options 校验由 `selectKind` 自己完成，`ValidateValue` 不再按 Kind 名特判。
 
-select 是可以消除的泄漏：Kind 的值校验接口应接收 FieldDef，使 options 校验由 selectKind 自己完成。
+array/object 仍保留为结构语法（不进 kinds 注册表），但容器只负责形状递归；叶子 kind 的存在性、字段约束和引用限制都在 Load 期校验（复合结构内禁止 ref/ref[]）。
 
-array/object 是否注册成正式 Kind 需要单独决定。它们需要递归访问 Types，不能只为了消除两个 switch 就引入循环或复杂接口。
+### 已解决：Types 包不再包含模板命名规则
 
-### P2：Types 包保留未使用的模板命名规则
-
-位置：`types.TypeDef.TemplateCandidates`
-
-`node--{type}.html` 是 Web/CMS 展示约定，不属于 Schema。该方法当前没有生产调用方，应直接删除，模板候选由 web 包负责。
+`TypeDef.TemplateCandidates` 已删除。模板候选（含 address 级联）由 `web.nodeCandidates` 独占，Schema 不认识展示约定。
 
 ### P2：Context 只覆盖新 Query
 
@@ -179,6 +173,6 @@ array/object 是否注册成正式 Kind 需要单独决定。它们需要递归�
 1. [x] 实现 ADR-003 Auth Realm / Actor，删除 user/password/role 假设
 2. [x] 实现查询 Policy Scope，并解除 Searchable/Publication 索引耦合
 3. [x] 实现 ADR-004 核心基数、删除策略、关系代数、完整性检查和 Merge Preview
-4. [ ] 清理 mine endpoint、TemplateCandidates、select 特判等边界问题
+4. [x] 清理 mine endpoint、TemplateCandidates、select 特判、LoadTree/publication 耦合
 5. [ ] 继续 Context 贯穿
 ```

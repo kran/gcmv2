@@ -3,7 +3,14 @@ package core
 import (
 	"reflect"
 	"testing"
+
+	gquery "github.com/kran/gcmv2/query"
 )
+
+// publishedScope 公开树范围（供树测试复用; 生产由 Web PolicyRegistry 提供）。
+func publishedScope() QueryScope {
+	return PolicyScope(gquery.EQ(gquery.Field("publication_state"), "published"))
+}
 
 // 树形态: root → a → b; root → c（c 下架 status=0 不入树）
 func buildTreeForTree(t *testing.T, s *Service) (root, a, b int64) {
@@ -20,7 +27,7 @@ func TestTreeBasics(t *testing.T) {
 	s := newTraverseService(t)
 	root, a, b := buildTreeForTree(t, s)
 
-	tr, err := s.LoadTree("category")
+	tr, err := s.LoadTree(t.Context(), "category", publishedScope())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,11 +107,39 @@ func TestTreeRejectsCycle(t *testing.T) {
 		t.Fatal("tree cycle must be rejected")
 	}
 
-	tree, err := s.LoadTree("category")
+	tree, err := s.LoadTree(t.Context(), "category", publishedScope())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if tree.Parent(b) == nil || tree.Parent(b).ID != a {
 		t.Fatal("rejected cycle must leave original tree unchanged")
+	}
+}
+
+// Tree 不再耦合 publication: 非公开类型（CRM 组织/区域树）用 BypassPolicy 加载,
+// 公开路由由 Policy 决定可见范围。
+func TestLoadTreeRequiresExplicitScope(t *testing.T) {
+	s := New(testDB(t), newTypes(t, `
+types:
+  department:
+    capabilities:
+      tree: { parent: parent, order: position }
+    fields:
+      - { name: name, kind: textarea }
+      - { name: position, kind: number, default: 0 }
+      - { name: parent, kind: ref, to: department }
+`))
+	root, _ := s.CreateNode(&Node{Type: "department", Display: "总部", Fields: Fields{"name": "总部"}})
+	child, _ := s.CreateNode(&Node{Type: "department", Display: "研发", Fields: Fields{"name": "研发", "parent": root}})
+
+	if _, err := s.LoadTree(t.Context(), "department", QueryScope{}); err == nil {
+		t.Fatal("zero scope must be rejected")
+	}
+	tree, err := s.LoadTree(t.Context(), "department", BypassPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tree.Len() != 2 || tree.Parent(child) == nil || tree.Parent(child).ID != root {
+		t.Fatalf("non-publication tree = %d nodes", tree.Len())
 	}
 }

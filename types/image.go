@@ -12,7 +12,7 @@ type imageKind struct{}
 const KindImage = "upload-image"
 
 func (imageKind) Name() string { return KindImage }
-func (imageKind) Validate(v any) error {
+func (imageKind) Validate(_ FieldDef, v any) error {
 	if _, ok := v.(string); !ok {
 		return fmt.Errorf("expects string, got %T", v)
 	}

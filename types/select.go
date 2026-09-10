@@ -13,11 +13,18 @@ type selectKind struct{}
 const KindSelect = "select"
 
 func (selectKind) Name() string { return KindSelect }
-func (selectKind) Validate(v any) error {
-	if _, ok := v.(string); !ok {
+
+// Validate 值必须是字段 options 内的字符串。选项属于字段定义, 因此这里需要
+// FieldDef — 容器不再按 Kind 名特判。
+func (selectKind) Validate(f FieldDef, v any) error {
+	s, ok := v.(string)
+	if !ok {
 		return fmt.Errorf("expects string, got %T", v)
 	}
-	return nil // 选项校验在 ValidateField（需要字段定义）
+	if !slices.Contains(f.Options, s) {
+		return fmt.Errorf("%q not in options %v", s, f.Options)
+	}
+	return nil
 }
 func (selectKind) IsEmpty(v any) bool {
 	s, ok := v.(string)
@@ -44,9 +51,4 @@ func (selectKind) ValidateField(t *Types, typeName string, f FieldDef, defs map[
 		seen[o] = true
 	}
 	return nil
-}
-
-// optionValid select 值必须在字段声明的 options 内（写入校验）。
-func (k selectKind) optionValid(f FieldDef, v string) bool {
-	return slices.Contains(f.Options, v)
 }

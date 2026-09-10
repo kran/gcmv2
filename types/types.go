@@ -13,7 +13,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"slices"
 	"sort"
 
 	"gopkg.in/yaml.v3"
@@ -87,11 +86,6 @@ type AdminView struct {
 	View    string   `yaml:"view,omitempty" json:"view,omitempty"`
 	Icon    string   `yaml:"icon,omitempty" json:"icon,omitempty"`
 	Columns []string `yaml:"columns,omitempty" json:"columns,omitempty"`
-}
-
-// TemplateCandidates 模板级联候选名: node--{type}.html → node.html。
-func (t TypeDef) TemplateCandidates() []string {
-	return []string{"node--" + t.Name + ".html", "node.html"}
 }
 
 // FieldDef 字段定义。代数声明在字段顶层:
@@ -445,15 +439,8 @@ func (t *Types) ValidateValue(typeName string, f FieldDef, v any) error {
 	if !ok {
 		return fmt.Errorf("types: %q.%s: unknown kind %q", typeName, f.Name, f.Kind)
 	}
-	if err := k.Validate(v); err != nil {
+	if err := k.Validate(f, v); err != nil {
 		return fmt.Errorf("types: %q.%s: %w", typeName, f.Name, err)
-	}
-	// select: 值必须在 options 内
-	if f.Kind == KindSelect {
-		s, _ := v.(string)
-		if !slices.Contains(f.Options, s) {
-			return fmt.Errorf("types: %q.%s: %q not in options %v", typeName, f.Name, s, f.Options)
-		}
 	}
 	return nil
 }

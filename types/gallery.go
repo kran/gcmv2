@@ -13,7 +13,7 @@ const KindGallery = "gallery"
 
 func (galleryKind) Name() string { return KindGallery }
 
-func (galleryKind) Validate(v any) error {
+func (galleryKind) Validate(_ FieldDef, v any) error {
 	arr, ok := v.([]any)
 	if !ok {
 		return fmt.Errorf("expects array of image paths, got %T", v)

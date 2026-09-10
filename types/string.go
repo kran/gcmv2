@@ -13,7 +13,7 @@ type stringKind struct{}
 const KindString = "text"
 
 func (stringKind) Name() string { return KindString }
-func (stringKind) Validate(v any) error {
+func (stringKind) Validate(_ FieldDef, v any) error {
 	if _, ok := v.(string); !ok {
 		return fmt.Errorf("expects string, got %T", v)
 	}

@@ -9,7 +9,9 @@ package types
 type Kind interface {
 	Name() string
 	// Validate 值校验。字段路径（typeName.fieldName）由调用方包装。
-	Validate(v any) error
+	// 需要字段定义才能判定的约束（如 select 的 options）由 kind 自己处理 —
+	// 容器不按 kind 名特判。
+	Validate(f FieldDef, v any) error
 	// IsEmpty required 检查: 值是否为空（空串/空数组/非法 id）。
 	IsEmpty(v any) bool
 	// Class 分类: 值存哪、是什么形态 — kind 自己的声明, 引擎零推断。

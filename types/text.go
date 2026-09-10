@@ -12,7 +12,7 @@ type textKind struct{}
 const KindText = "textarea"
 
 func (textKind) Name() string { return KindText }
-func (textKind) Validate(v any) error {
+func (textKind) Validate(_ FieldDef, v any) error {
 	if _, ok := v.(string); !ok {
 		return fmt.Errorf("expects string, got %T", v)
 	}

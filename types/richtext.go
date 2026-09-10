@@ -12,7 +12,7 @@ type richtextKind struct{}
 const KindRichtext = "richtext"
 
 func (richtextKind) Name() string { return KindRichtext }
-func (richtextKind) Validate(v any) error {
+func (richtextKind) Validate(_ FieldDef, v any) error {
 	if _, ok := v.(string); !ok {
 		return fmt.Errorf("expects string, got %T", v)
 	}

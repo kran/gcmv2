@@ -37,7 +37,7 @@ type Engine interface {
 	PreviewMerge(ctx context.Context, sourceID, targetID int64) (*MergePreview, error)
 
 	// ── 图原语 ──
-	LoadTree(typeName string) (*Tree, error)
+	LoadTree(ctx context.Context, typeName string, scope QueryScope) (*Tree, error)
 	Subtree(typeName string, start int64, field string, maxHops int) ([]int64, error)
 	Ancestors(typeName string, start int64, field string, maxHops int) ([]*Node, error)
 	Traverse(typeName string, start int64, field string, maxHops int) ([]int64, error)

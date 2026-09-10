@@ -30,6 +30,10 @@
 - Public Node DELETE now archives; administrator DELETE remains the explicit permanent-delete path.
 - `InEdges` now filters the requested field and returns logical two-way results for symmetric/equivalence relations.
 - Composite fields reject any nested ref/ref[] Kind: previously such a declaration loaded successfully and stored raw IDs in `fields` JSON, bypassing edges, cardinality and delete policies.
+- `Kind.Validate` now receives the `FieldDef`, so per-field value constraints such as select options are enforced by the Kind instead of a container switch.
+- `LoadTree(typeName)` becomes `LoadTree(ctx, typeName, scope)`; Core no longer requires publication or filters published Nodes itself.
+- `TypeDef.TemplateCandidates` is removed; template candidates belong to the web layer.
+- The generic `/api/nodes/mine` endpoint is removed. Owner-scoped content listing is site business API (association: `GET /api/me/content`).
 - `InEdges` now filters the requested field and, like `OutEdges`, returns logical two-way results for symmetric/equivalence relations.
 
 ### Added

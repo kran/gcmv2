@@ -3,7 +3,6 @@ package web
 import (
 	"errors"
 	"net/http"
-	"sort"
 
 	"github.com/kran/cho"
 	"github.com/kran/gcmv2/core"
@@ -221,62 +220,20 @@ func (s *Site) apiUpload(ctx *CmsCtx) {
 	saveUpload(s.uploadsDir, ctx)
 }
 
-// apiMine GET /api/nodes/mine?type=&page=&size= — 当前主体发布的节点
-// （author = Principal.ID; 含草稿 — 作者可见自己的）。
-func (s *Site) apiMine(ctx *CmsCtx) {
-	principal, err := ctx.Principal()
-	if err != nil {
-		ctx.Error(http.StatusUnauthorized, "login required")
-		return
-	}
-	typ := ctx.Query("type")
-	page := int(ctx.QueryNum("page", 1))
-	size := int(ctx.QueryNum("size", 20))
-	if typ != "" {
-		list, total, err := s.engine.QueryPage(ctx.R.Context(), core.ListQuery{
-			Type:  typ,
-			Where: gquery.OneOf(gquery.Ref("author"), principal.ID),
-			Scope: core.BypassPolicy(),
-			Page:  gquery.Page{Number: page, Size: size},
-		})
-		if err != nil {
-			ctx.Error(http.StatusInternalServerError, err.Error())
-			return
-		}
-		_ = ctx.Json(http.StatusOK, map[string]any{"items": list, "total": total, "page": page, "size": size})
-		return
-	}
-
-	list := make([]core.Node, 0)
-	for _, typeName := range s.engine.Types().Names() {
-		field, ok := s.engine.Types().Field(typeName, "author")
-		if !ok || field.To != principal.Type || !s.engine.Types().IsRefKind(field.Kind) {
-			continue
-		}
-		items, err := s.engine.Query(ctx.R.Context(), core.ListQuery{
-			Type:  typeName,
-			Where: gquery.OneOf(gquery.Ref("author"), principal.ID),
-			Scope: core.BypassPolicy(),
-			Page:  gquery.Page{Size: size},
-		})
-		if err != nil {
-			ctx.Error(http.StatusInternalServerError, err.Error())
-			return
-		}
-		list = append(list, items...)
-	}
-	sort.Slice(list, func(i, j int) bool { return list[i].UpdatedAt.After(list[j].UpdatedAt) })
-	if len(list) > size {
-		list = list[:size]
-	}
-	_ = ctx.Json(http.StatusOK, map[string]any{"items": list, "total": len(list), "page": 1, "size": len(list)})
-}
-
 // apiTree GET /api/tree/{type} — tree 类型数据（行业/地区/分类/组织机构）:
-// 返回嵌套树；父字段、排序和公开状态均来自类型 capability。
+// 返回嵌套树；父字段和排序来自 tree capability，可见范围来自查询 Policy。
 func (s *Site) apiTree(ctx *CmsCtx) {
 	typ := ctx.PathValue("type")
-	tree, err := s.engine.LoadTree(typ)
+	if _, ok := s.engine.Types().Type(typ); !ok {
+		ctx.Error(http.StatusBadRequest, "type not found")
+		return
+	}
+	scope, err := s.policy.Scope(ctx, PolicyList, typ)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "policy resolution failed")
+		return
+	}
+	tree, err := s.engine.LoadTree(ctx.R.Context(), typ, scope)
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, err.Error())
 		return
@@ -293,8 +250,7 @@ func (s *Site) mountNodeApi(g *cho.Cho[*CmsCtx]) {
 	g.Post("/nodes/{type}", s.apiCreateNode)
 	g.Put("/nodes/{type}/{id}", s.apiUpdateNode)
 	g.Delete("/nodes/{type}/{id}", s.apiDeleteNode)
-	// 通用: 上传 / 我的发布 / 树数据
+	// 通用: 上传 / 树数据（"我的内容"属于站点业务语义, 由站点 API 实现）
 	g.Post("/upload", s.apiUpload)
-	g.Get("/nodes/mine", s.apiMine)
 	g.Get("/tree/{type}", s.apiTree)
 }

@@ -12,7 +12,7 @@ type slugKind struct{}
 
 func (slugKind) Name() string { return KindSlug }
 
-func (slugKind) Validate(value any) error {
+func (slugKind) Validate(_ FieldDef, value any) error {
 	slug, ok := value.(string)
 	if !ok {
 		return fmt.Errorf("expects slug string, got %T", value)

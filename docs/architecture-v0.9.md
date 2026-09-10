@@ -638,12 +638,15 @@ Core 与 Admin API 已支持 archive/restore，但当前通用后台列表默认
 - 稳定的结构化 API Error Code 契约。
 - `Site.Close()`、返回 error 的 Open、healthz/readyz。
 
-### 7.2 已知边界泄漏
+### 7.2 已清理的边界泄漏
 
-- 通用 `/api/nodes/mine` 仍写死 `author` 字段，应移到 association。
-- `Types.ValidateValue` 仍直接处理 select options。
-- `TypeDef.TemplateCandidates` 仍包含 Web 模板命名规则。
-- `LoadTree` 仍同时承担 publication 过滤，不适合非公开 CRM 树。
+以下项目曾是内核泄漏，现已处理：
+
+- 通用 `/api/nodes/mine` 已删除，改由 association 的 `GET /api/me/content` 实现。
+- select options 校验下沉到 `selectKind.Validate(f, v)`，容器不再按 Kind 名特判。
+- `TypeDef.TemplateCandidates` 已删除，模板候选由 `web` 独占。
+- `LoadTree(ctx, type, scope)`：Core 只读 tree capability，发布可见范围由调用方 Scope 决定。
+- 复合字段（array/object）内部禁止 ref/ref[]，嵌套 Kind 与字段约束改为 Load 期校验。
 
 ### 7.3 明确不在 Core 内实现
 

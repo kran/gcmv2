@@ -54,9 +54,6 @@ func TestLoadValid(t *testing.T) {
 	if td.Capabilities.Searchable == nil {
 		t.Fatalf("article searchable capability: %+v", td)
 	}
-	if got := td.TemplateCandidates(); len(got) != 2 || got[0] != "node--article.html" {
-		t.Fatalf("candidates: %v", got)
-	}
 	// 引用字段代数
 	f, ok := ts.Field("article", "related")
 	if !ok || !f.Symmetric {
@@ -238,7 +235,7 @@ func TestValidateFields(t *testing.T) {
 type dateKind struct{}
 
 func (dateKind) Name() string { return "date" }
-func (dateKind) Validate(v any) error {
+func (dateKind) Validate(_ FieldDef, v any) error {
 	s, ok := v.(string)
 	if !ok {
 		return fmt.Errorf("expects RFC3339 string, got %T", v)

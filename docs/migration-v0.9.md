@@ -11,7 +11,7 @@ Node.Status                -> Node.Fields[publication.field]
 Node.Sort                  -> Node.Fields[tree.order] or another business field
 NodePatch.Slug/Status/Sort -> NodePatch.Fields
 GetNodeBySlug              -> GetNodeByAddress
-LoadTree(type, field)      -> LoadTree(type)
+LoadTree(type, field)      -> LoadTree(ctx, type, scope)
 TypeDef.Search             -> Capabilities.Searchable
 TypeDef.Auth               -> Capabilities.Authentication
 TypeDef.View/Icon          -> Admin.View/Admin.Icon
@@ -96,7 +96,12 @@ core.VerifyPassword                     -> credential plugin verification
 ListQuery{...}                           -> ListQuery{Scope: core.PolicyScope(...), ...}
 trusted admin/background query           -> Scope: core.BypassPolicy()
 Search(q, type, page, size)              -> Search(ctx, core.SearchQuery{Targets: ...})
+GET /api/nodes/mine?type=                -> site-owned owner listing (association: GET /api/me/content)
+Kind.Validate(v)                         -> Kind.Validate(fieldDef, v)
+TypeDef.TemplateCandidates()             -> web template candidates (web.nodeCandidates)
 ```
+
+`LoadTree` accepts an explicit `core.QueryScope`; pass the Policy scope on public routes and `core.BypassPolicy()` for internal or administrative trees. Trees no longer require a publication capability.
 
 Core migration `00010_auth_realms.sql` replaces plaintext Session tokens with SHA-256 hashes and adds the Realm column. Existing frontend Sessions are intentionally invalidated, so users must sign in again after upgrading. `auth_methods.type` remains the authenticated NodeType; Realm-to-NodeType mapping is server configuration and is not duplicated there.
 

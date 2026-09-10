@@ -8,7 +8,7 @@ type refKind struct{}
 const KindRef = "ref"
 
 func (refKind) Name() string { return KindRef }
-func (refKind) Validate(v any) error {
+func (refKind) Validate(_ FieldDef, v any) error {
 	if _, err := ToID(v); err != nil {
 		return err
 	}

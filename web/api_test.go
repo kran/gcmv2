@@ -212,3 +212,46 @@ func TestApiNodesMissingType(t *testing.T) {
 		t.Fatalf("missing type = %d", w.Code)
 	}
 }
+
+// TestApiTree 公开树: 只返回 Policy 范围内节点, 未知类型直接拒绝。
+func TestApiTree(t *testing.T) {
+	s := testSiteWithTemplates(t)
+	root, err := s.Engine().CreateNode(&core.Node{Type: "category", Display: "行业",
+		Fields: core.Fields{"name": "行业", "publication_state": "published"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := s.Engine().CreateNode(&core.Node{Type: "category", Display: "制造",
+		Fields: core.Fields{"name": "制造", "publication_state": "published", "parent": root}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Engine().CreateNode(&core.Node{Type: "category", Display: "草稿",
+		Fields: core.Fields{"name": "草稿", "publication_state": "draft", "parent": child}}); err != nil {
+		t.Fatal(err)
+	}
+
+	w := do(s, "GET", "/api/tree/category", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("tree = %d: %s", w.Code, w.Body.String())
+	}
+	var out struct {
+		Items []core.TreeNode `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Items) != 1 || out.Items[0].ID != root {
+		t.Fatalf("roots = %+v", out.Items)
+	}
+	if len(out.Items[0].Children) != 1 || out.Items[0].Children[0].ID != child {
+		t.Fatalf("children = %+v", out.Items[0].Children)
+	}
+	if len(out.Items[0].Children[0].Children) != 0 {
+		t.Fatalf("draft node leaked into tree: %+v", out.Items[0].Children[0].Children)
+	}
+
+	if w := do(s, "GET", "/api/tree/ghost", nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("unknown tree type = %d, want 400", w.Code)
+	}
+}

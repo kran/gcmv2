@@ -10,7 +10,7 @@ type refListKind struct{}
 const KindRefList = "ref[]"
 
 func (refListKind) Name() string { return KindRefList }
-func (refListKind) Validate(v any) error {
+func (refListKind) Validate(_ FieldDef, v any) error {
 	arr, ok := v.([]any)
 	if !ok {
 		return fmt.Errorf("expects array of node ids, got %T", v)
