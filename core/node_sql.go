@@ -177,7 +177,7 @@ func (s *Service) PatchNode(ctx context.Context, id int64, patch *NodePatch) err
 		return nil
 	}
 	if patch.Revision == nil || *patch.Revision <= 0 {
-		return errors.New("core: patch: revision required")
+		return fmt.Errorf("%w: revision required", ErrInvalidFields)
 	}
 	td, ok := s.types.Type(existing.Type)
 	if !ok {
