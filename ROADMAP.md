@@ -438,7 +438,7 @@ CRM 不能只验证功能，还要验证 JSON + Edge 模型在真实数据量下
 - [ ] FTS 与普通条件组合。
 - [ ] 批量 Expand。
 - [ ] 聚合查询原型。
-- [ ] SQLite WAL 并发读写测试。
+- [x] SQLite WAL 并发读写测试（`TestSQLiteConcurrentReadWrite`；默认档位写错 48/48 读错 69/80 → WAL 后 0/0）。
 
 ## 5.2 索引方案 ADR
 
@@ -546,6 +546,7 @@ CRM 的金额不能默认使用 float64。
 - [x] Schema-aware 校验。
 - [x] 结构化 Sort（已在 v0.8.4 提前完成）。
 - [x] Policy AST 合并，ListQuery/SearchQuery 缺少显式 Scope 时拒绝执行。
+- [x] 渲染层（HTML 模板 helper）与 API 共用读规则；未注册规则 = publication 默认。
 - [x] 当前 Lisp/expand 复杂度限制（已在 v0.8.4 提前完成）。
 - [ ] request context 取消和数据库查询超时。
 - [x] JSON QuerySpec 原型。

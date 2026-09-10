@@ -34,7 +34,7 @@ func (c *CmsCtx) Render(candidates []string, data map[string]any) {
 	}
 	// buffer 先行: 渲染成功才写（失败不留半截页面 + 状态码正确）
 	var buf bytes.Buffer
-	if err := c.site.render.Render(c.R.Context(), &buf, candidates, data); err != nil {
+	if err := c.site.render.Render(c, &buf, candidates, data); err != nil {
 		c.site.renderError(c, candidates, data, err)
 		return
 	}

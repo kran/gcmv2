@@ -3,18 +3,21 @@ package web
 import (
 	"fmt"
 	"html"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
 )
 
-// renderError 渲染失败出口（v1 语义）:
+// renderError 渲染失败出口:
 //   - Debug:  500 错误详情页（method/path/错误/候选/数据 keys — 开发者定位）
-//   - 生产:   HTML 注释（fail-loud — 访客不可见, 查源码可见病灶）
+//   - 生产:   500 + HTML 注释（细节只进页面源码；状态码必须说真话 ——
+//     否则模板缺失或模板内查询失败会以 200 空白页出现，监控和爬虫都发现不了）
 func (s *Site) renderError(ctx *CmsCtx, candidates []string, data map[string]any, err error) {
+	slog.Error("render failed", "path", ctx.R.URL.Path, "candidates", strings.Join(candidates, ","), "err", err)
 	ctx.SetHeader("Content-Type", "text/html; charset=utf-8")
 	if !s.debug {
-		// HTML 注释 — 错误细节进页面源码, 不渲染给访客
+		ctx.W.WriteHeader(http.StatusInternalServerError)
 		_, _ = ctx.W.Write([]byte("<!-- render error: " + htmlCommentSafe(err.Error()) + " -->"))
 		return
 	}

@@ -155,13 +155,18 @@ func (s *Site) defineEvent(name string, proto any) {
 // ReadScope 解析一次读取的行范围：注册了规则就用规则；否则系统读动作走 publication
 // 默认，站点读动作未注册则报错（拼错动作名不会静默回退到公开默认）。
 func (s *Site) ReadScope(ctx *CmsCtx, action ReadAction, typeName string) (core.QueryScope, error) {
-	if _, ok := s.engine.Types().Type(typeName); !ok {
+	return readScope(s.engine, ctx, action, typeName)
+}
+
+// readScope 与 Site.ReadScope 同一份解析逻辑（渲染层只有 engine，也要按同一规则取范围）。
+func readScope(eng core.Engine, ctx *CmsCtx, action ReadAction, typeName string) (core.QueryScope, error) {
+	if _, ok := eng.Types().Type(typeName); !ok {
 		return core.QueryScope{}, fmt.Errorf("web: policy type %q not defined", typeName)
 	}
 	event := ReadEvent(action, typeName)
-	if s.engine.Hooks().Has(event) {
+	if eng.Hooks().Has(event) {
 		var expr gquery.Expr
-		if err := s.engine.Hooks().Fire(event, ctx, typeName, &expr); err != nil {
+		if err := eng.Hooks().Fire(event, ctx, typeName, &expr); err != nil {
 			return core.QueryScope{}, err
 		}
 		if expr == nil {
@@ -172,7 +177,7 @@ func (s *Site) ReadScope(ctx *CmsCtx, action ReadAction, typeName string) (core.
 	if _, ok := systemReadActions[action]; !ok {
 		return core.QueryScope{}, fmt.Errorf("web: no read rule registered for action %q on type %q", action, typeName)
 	}
-	return s.defaultScope(typeName), nil
+	return defaultScope(eng, typeName), nil
 }
 
 // Exposes 该类型的这个读动作是否被站点显式注册了规则。公开路由与 sitemap 用它
@@ -183,8 +188,8 @@ func (s *Site) Exposes(typeName string, action ReadAction) bool {
 
 // defaultScope 系统读动作未注册规则时的行为：有 publication capability 的只读已发布
 // 记录；没有该 capability 的类型没有可发布记录，全拒。
-func (s *Site) defaultScope(typeName string) core.QueryScope {
-	publication, ok := s.engine.Types().Publication(typeName)
+func defaultScope(eng core.Engine, typeName string) core.QueryScope {
+	publication, ok := eng.Types().Publication(typeName)
 	if !ok {
 		return core.PolicyScope(gquery.False())
 	}

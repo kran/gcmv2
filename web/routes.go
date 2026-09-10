@@ -78,7 +78,7 @@ func (s *Site) render404(ctx *CmsCtx) {
 	var buf bytes.Buffer
 	data := map[string]any{"Path": ctx.R.URL.Path}
 	_ = s.engine.Hooks().Fire(HookRender, ctx, data) // 404 上下文失败不阻断 404 页
-	err := s.render.Render(ctx.R.Context(), &buf, []string{"404.html"}, data)
+	err := s.render.Render(ctx, &buf, []string{"404.html"}, data)
 	if err == nil {
 		ctx.SetHeader("Content-Type", "text/html; charset=utf-8")
 		ctx.W.WriteHeader(http.StatusNotFound)

@@ -55,13 +55,13 @@ func (e *Render) Func(name string, fn any) {
 }
 
 // Render 按候选序取第一个存在的模板执行（级联: node--{type}.html → node.html）。
-func (e *Render) Render(ctx context.Context, w io.Writer, candidates []string, data any) error {
+func (e *Render) Render(c *CmsCtx, w io.Writer, candidates []string, data any) error {
 	for _, name := range candidates {
 		full := filepath.Join(e.root, name)
 		if _, err := os.Stat(full); err != nil {
 			continue
 		}
-		if err := e.execute(ctx, w, name, full, data); err != nil {
+		if err := e.execute(c, w, name, full, data); err != nil {
 			return err
 		}
 		return nil
@@ -79,27 +79,46 @@ func fail(err error) {
 // queryFuncs 查询原语（Go 层实现）+ 展示工具。
 // 返回 1 值 — 模板一行调用; 错误走 panic。模板执行时经 funcMap()
 // （tpl.go）合并 sprig + 内置函数后整体注入。
-func (e *Render) queryFuncs(ctx context.Context) template.FuncMap {
+func (e *Render) queryFuncs(c *CmsCtx) template.FuncMap {
 	eng := e.eng
+	// 同一请求内按 (action, type) 缓存读范围：模板里 get/list 会被调用多次。
+	scopes := make(map[string]core.QueryScope)
+	scopeFor := func(action ReadAction, typeName string) core.QueryScope {
+		key := string(action) + "\x00" + typeName
+		if scope, ok := scopes[key]; ok {
+			return scope
+		}
+		scope, err := readScope(eng, c, action, typeName)
+		fail(err)
+		scopes[key] = scope
+		return scope
+	}
 	return template.FuncMap{
 		// ── 查询原语 ─────────────────────────
-		// get: 单节点（id 兼容 JSON float64 / int64）
+		// get: 单节点（id 兼容 JSON float64 / int64）。
+		// 可见性按 ReadView 读规则解析：不可见 → nil（与 API 的 view 路径同语义）。
 		"get": func(id any) *core.Node {
 			nid, err := types.ToID(id)
 			fail(err)
-			n, err := eng.GetNodeById(ctx, nid)
+			n, err := eng.GetNodeById(c.R.Context(), nid)
 			fail(err)
-			return n
-		},
-		// list: 按 publication capability 返回公开类型列表。
-		"list": func(typ string, page, size int) []core.Node {
-			publication, ok := eng.Types().Publication(typ)
-			if !ok {
-				panic(fmt.Errorf("render: type %q is not publication-enabled", typ))
+			if n == nil {
+				return nil
 			}
-			where := gquery.EQ(gquery.Field(publication.Field), publication.Published)
-			list, err := eng.Query(ctx, core.ListQuery{
-				Type: typ, Scope: core.PolicyScope(where),
+			visible, err := eng.Query(c.R.Context(), core.ListQuery{
+				Type: n.Type, Where: gquery.EQ(gquery.System("id"), nid),
+				Scope: scopeFor(ReadView, n.Type), Page: gquery.Page{Size: 1},
+			})
+			fail(err)
+			if len(visible) == 0 {
+				return nil
+			}
+			return &visible[0]
+		},
+		// list: 公开类型列表 —— 行范围与 API 共用同一条读规则（ReadList）。
+		"list": func(typ string, page, size int) []core.Node {
+			list, err := eng.Query(c.R.Context(), core.ListQuery{
+				Type: typ, Scope: scopeFor(ReadList, typ),
 				Page: gquery.Page{Number: page, Size: size},
 			})
 			fail(err)
@@ -108,17 +127,17 @@ func (e *Render) queryFuncs(ctx context.Context) template.FuncMap {
 		// setting: 站点配置值（按 key 取; 缺失 → nil; 值按 JSON 形态,
 		// richtext 模板自行 safeHTML）
 		"setting": func(key string) any {
-			st, err := eng.GetSetting(ctx, key)
+			st, err := eng.GetSetting(c.R.Context(), key)
 			fail(err)
 			if st == nil {
 				return nil
 			}
 			return st.Value
 		},
-		// search: 全文检索（匿名模板使用 publication Policy scope）。
+		// search: 全文检索（每个目标类型各自解析 ReadSearch 读规则）。
 		"search": func(q, typ string, page, size int) []core.Node {
-			targets := publicSearchTargets(eng, typ)
-			list, _, err := eng.Search(ctx, core.SearchQuery{
+			targets := searchTargets(c, eng, typ)
+			list, _, err := eng.Search(c.R.Context(), core.SearchQuery{
 				Text: q, Targets: targets, Page: gquery.Page{Number: page, Size: size},
 			})
 			fail(err)
@@ -126,44 +145,39 @@ func (e *Render) queryFuncs(ctx context.Context) template.FuncMap {
 		},
 		// outRefs: 出边目标节点列表（symmetric 双向）
 		"outRefs": func(from int64, field string, page, size int) []core.Node {
-			return e.targets(ctx, true, func() ([]core.Edge, int64, error) {
-				n, err := eng.GetNodeById(ctx, from)
+			return e.targets(c, true, func() ([]core.Edge, int64, error) {
+				n, err := eng.GetNodeById(c.R.Context(), from)
 				if err != nil || n == nil {
 					return nil, 0, fmt.Errorf("outRefs: node %d not found", from)
 				}
-				return eng.OutEdges(ctx, n.Type, from, field, page, size)
+				return eng.OutEdges(c.R.Context(), n.Type, from, field, page, size)
 			})
 		},
 		// inRefs: 入边来源节点列表（inverse 反向 — 取 from_node 端）
 		"inRefs": func(to int64, field string, page, size int) []core.Node {
-			return e.targets(ctx, false, func() ([]core.Edge, int64, error) {
-				return eng.InEdges(ctx, to, field, page, size)
+			return e.targets(c, false, func() ([]core.Edge, int64, error) {
+				return eng.InEdges(c.R.Context(), to, field, page, size)
 			})
 		},
 		// traverse: 出边递归（祖先链）
 		"traverse": func(start int64, field string, maxHops int) []int64 {
-			return e.graph(ctx, start, field, maxHops, eng.Traverse)
+			return e.graph(c, start, field, maxHops, eng.Traverse)
 		},
 		// subtree: 入边递归（子树）
 		"subtree": func(start int64, field string, maxHops int) []int64 {
-			return e.graph(ctx, start, field, maxHops, eng.Subtree)
+			return e.graph(c, start, field, maxHops, eng.Subtree)
 		},
 		// equivalence: 等价类
 		"equivalence": func(start int64, field string, maxHops int) []int64 {
-			return e.graph(ctx, start, field, maxHops, eng.EquivalenceClass)
+			return e.graph(c, start, field, maxHops, eng.EquivalenceClass)
 		},
 		// filterList: Lisp filter 筛选列表（表达式 + 分页）。
 		// 用法: {{ filterList "article" "(in ->categories (subtree {:address}))" (dict "address" "news") 1 10 }}
 		"filterList": func(typ, expr string, params map[string]any, page, size int) []core.Node {
 			where, err := gquery.ParseLisp(expr, params)
 			fail(err)
-			publication, ok := eng.Types().Publication(typ)
-			if !ok {
-				panic(fmt.Errorf("render: type %q is not publication-enabled", typ))
-			}
-			policyWhere := gquery.EQ(gquery.Field(publication.Field), publication.Published)
-			list, err := e.eng.Query(ctx, core.ListQuery{
-				Type: typ, Where: where, Scope: core.PolicyScope(policyWhere),
+			list, err := e.eng.Query(c.R.Context(), core.ListQuery{
+				Type: typ, Where: where, Scope: scopeFor(ReadList, typ),
 				Page: gquery.Page{Number: page, Size: size},
 			})
 			fail(err)
@@ -177,15 +191,15 @@ func (e *Render) queryFuncs(ctx context.Context) template.FuncMap {
 		"expand": func(expr string, v any) any {
 			switch value := v.(type) {
 			case *core.Node:
-				return expandTemplateNodes(ctx, eng, expr, []int64{value.ID}, false)
+				return expandTemplateNodes(c, eng, expr, []int64{value.ID}, false)
 			case core.Node:
-				return expandTemplateNodes(ctx, eng, expr, []int64{value.ID}, false)
+				return expandTemplateNodes(c, eng, expr, []int64{value.ID}, false)
 			case int64, int, float64:
 				id, err := types.ToID(v)
 				fail(err)
-				return expandTemplateNodes(ctx, eng, expr, []int64{id}, false)
+				return expandTemplateNodes(c, eng, expr, []int64{id}, false)
 			case []core.Node:
-				return expandTemplateNodes(ctx, eng, expr, nodeIDs(value), true)
+				return expandTemplateNodes(c, eng, expr, nodeIDs(value), true)
 			case []*core.Node:
 				ids := make([]int64, 0, len(value))
 				for _, node := range value {
@@ -193,15 +207,15 @@ func (e *Render) queryFuncs(ctx context.Context) template.FuncMap {
 						ids = append(ids, node.ID)
 					}
 				}
-				return expandTemplateNodes(ctx, eng, expr, ids, true)
+				return expandTemplateNodes(c, eng, expr, ids, true)
 			case []int64:
-				return expandTemplateNodes(ctx, eng, expr, value, true)
+				return expandTemplateNodes(c, eng, expr, value, true)
 			case []int:
 				ids := make([]int64, len(value))
 				for i, id := range value {
 					ids[i] = int64(id)
 				}
-				return expandTemplateNodes(ctx, eng, expr, ids, true)
+				return expandTemplateNodes(c, eng, expr, ids, true)
 			case []any:
 				ids := make([]int64, 0, len(value))
 				for _, item := range value {
@@ -209,7 +223,7 @@ func (e *Render) queryFuncs(ctx context.Context) template.FuncMap {
 					fail(err)
 					ids = append(ids, id)
 				}
-				return expandTemplateNodes(ctx, eng, expr, ids, true)
+				return expandTemplateNodes(c, eng, expr, ids, true)
 			default:
 				fail(fmt.Errorf("expand: unsupported input %T (want core.Node / id / list of them)", v))
 				return nil
@@ -224,7 +238,8 @@ func (e *Render) queryFuncs(ctx context.Context) template.FuncMap {
 	}
 }
 
-func publicSearchTargets(eng core.Engine, typeName string) []core.SearchTarget {
+// searchTargets 每个可搜索类型的搜索范围都解析 ReadSearch 读规则（与站点搜索 API 一致）。
+func searchTargets(c *CmsCtx, eng core.Engine, typeName string) []core.SearchTarget {
 	names := eng.Types().Names()
 	if typeName != "" {
 		names = []string{typeName}
@@ -234,17 +249,14 @@ func publicSearchTargets(eng core.Engine, typeName string) []core.SearchTarget {
 		if _, ok := eng.Types().Searchable(name); !ok {
 			continue
 		}
-		publication, ok := eng.Types().Publication(name)
-		if !ok {
-			continue
-		}
-		where := gquery.EQ(gquery.Field(publication.Field), publication.Published)
-		targets = append(targets, core.SearchTarget{Type: name, Scope: core.PolicyScope(where)})
+		scope, err := readScope(eng, c, ReadSearch, name)
+		fail(err)
+		targets = append(targets, core.SearchTarget{Type: name, Scope: scope})
 	}
 	return targets
 }
 
-func expandTemplateNodes(ctx context.Context, eng core.Engine, expression string, ids []int64, many bool) any {
+func expandTemplateNodes(c *CmsCtx, eng core.Engine, expression string, ids []int64, many bool) any {
 	if len(ids) == 0 {
 		if many {
 			return []*core.Node{}
@@ -254,7 +266,7 @@ func expandTemplateNodes(ctx context.Context, eng core.Engine, expression string
 	var paths []gquery.ExpandPath
 	var err error
 	if strings.TrimSpace(expression) == "" || strings.TrimSpace(expression) == "*" {
-		node, getErr := eng.GetNodeById(ctx, ids[0])
+		node, getErr := eng.GetNodeById(c.R.Context(), ids[0])
 		fail(getErr)
 		if node == nil {
 			fail(core.ErrNotFound)
@@ -264,7 +276,7 @@ func expandTemplateNodes(ctx context.Context, eng core.Engine, expression string
 		paths, err = gquery.ParseExpand(expression)
 		fail(err)
 	}
-	expanded, err := eng.ExpandMany(ctx, ids, paths...)
+	expanded, err := eng.ExpandMany(c.R.Context(), ids, paths...)
 	fail(err)
 	if many {
 		return expanded
@@ -287,18 +299,18 @@ func nodeIDs(nodes []core.Node) []int64 {
 // targets 边 → 端点节点列表（保持边序; N+1 顶着, 页面量小毫秒级）。
 // wantTo: 取 to_node（出边目标）; false 取 from_node（入边来源）。
 // graph 模板函数桥: 查节点类型（模板场景只有 id）后转发图原语。
-func (e *Render) graph(ctx context.Context, start int64, field string, maxHops int, fn func(context.Context, string, int64, string, int) ([]int64, error)) []int64 {
-	n, err := e.eng.GetNodeById(ctx, start)
+func (e *Render) graph(c *CmsCtx, start int64, field string, maxHops int, fn func(context.Context, string, int64, string, int) ([]int64, error)) []int64 {
+	n, err := e.eng.GetNodeById(c.R.Context(), start)
 	if err != nil || n == nil {
 		fail(fmt.Errorf("graph: node %d not found", start))
 		return nil
 	}
-	ids, err := fn(ctx, n.Type, start, field, maxHops)
+	ids, err := fn(c.R.Context(), n.Type, start, field, maxHops)
 	fail(err)
 	return ids
 }
 
-func (e *Render) targets(ctx context.Context, wantTo bool, q func() ([]core.Edge, int64, error)) []core.Node {
+func (e *Render) targets(c *CmsCtx, wantTo bool, q func() ([]core.Edge, int64, error)) []core.Node {
 	edges, _, err := q()
 	fail(err)
 	nodes := make([]core.Node, 0, len(edges))
@@ -307,7 +319,7 @@ func (e *Render) targets(ctx context.Context, wantTo bool, q func() ([]core.Edge
 		if wantTo {
 			id = ed.ToNode
 		}
-		n, err := e.eng.GetNodeById(ctx, id)
+		n, err := e.eng.GetNodeById(c.R.Context(), id)
 		fail(err)
 		if n != nil {
 			nodes = append(nodes, *n)
@@ -318,8 +330,8 @@ func (e *Render) targets(ctx context.Context, wantTo bool, q func() ([]core.Edge
 
 // execute 单个模板文件独立解析执行 (无隐式布局 — 页面结构由模板自行
 // 经 partial 引入)。
-func (e *Render) execute(ctx context.Context, w io.Writer, name, full string, data any) error {
-	tpl, err := template.New(filepath.Base(full)).Funcs(e.funcMap(ctx)).ParseFiles(full)
+func (e *Render) execute(c *CmsCtx, w io.Writer, name, full string, data any) error {
+	tpl, err := template.New(filepath.Base(full)).Funcs(e.funcMap(c)).ParseFiles(full)
 	if err != nil {
 		return fmt.Errorf("render: parse %s: %w", name, err)
 	}
@@ -329,11 +341,11 @@ func (e *Render) execute(ctx context.Context, w io.Writer, name, full string, da
 // Partial 渲染片段模板 (独立解析执行; 不参与布局)。
 // 无缓存, 每次渲染读当前文件 — 片段也热重载。
 // 模板内请用 partial/partialOr 函数（自动带上当前请求 Context）。
-func (e *Render) Partial(name string, data any) (template.HTML, error) {
-	return e.partial(context.Background(), name, data)
+func (e *Render) Partial(c *CmsCtx, name string, data any) (template.HTML, error) {
+	return e.partial(c, name, data)
 }
 
-func (e *Render) partial(ctx context.Context, name string, data any) (template.HTML, error) {
+func (e *Render) partial(c *CmsCtx, name string, data any) (template.HTML, error) {
 	clean := filepath.Clean(name)
 	if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
 		return "", fmt.Errorf("render: partial %q escapes templates root", name)
@@ -342,7 +354,7 @@ func (e *Render) partial(ctx context.Context, name string, data any) (template.H
 	if _, err := os.Stat(full); err != nil {
 		return "", errPartialNotFound
 	}
-	tpl, err := template.New(filepath.Base(full)).Funcs(e.funcMap(ctx)).ParseFiles(full)
+	tpl, err := template.New(filepath.Base(full)).Funcs(e.funcMap(c)).ParseFiles(full)
 	if err != nil {
 		return "", fmt.Errorf("render: parse partial %s: %w", name, err)
 	}
@@ -360,7 +372,7 @@ var errPartialNotFound = errors.New("render: partial not found")
 // sprig: HermeticHtmlFuncMap — 无 env/expandenv 等环境访问的安全子集
 // (dict/default/trunc 等常用模板工具函数)。
 // safeHTML: 受信富文本原样输出 (匿名提交内容禁用, XSS)。
-func (e *Render) funcMap(ctx context.Context) template.FuncMap {
+func (e *Render) funcMap(c *CmsCtx) template.FuncMap {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	m := template.FuncMap{}
@@ -404,13 +416,13 @@ func (e *Render) funcMap(ctx context.Context) template.FuncMap {
 			return b.String()
 		},
 		"partial": func(name string, data any) (template.HTML, error) {
-			return e.partial(ctx, name, data)
+			return e.partial(c, name, data)
 		},
 		"partialOr": func(name, fallback string, data any) (template.HTML, error) {
-			out, err := e.partial(ctx, name, data)
+			out, err := e.partial(c, name, data)
 			if err != nil {
 				if errors.Is(err, errPartialNotFound) {
-					return e.partial(ctx, fallback, data)
+					return e.partial(c, fallback, data)
 				}
 				return "", err // 解析/执行错误响亮上抛, 不吞进兜底
 			}
@@ -430,7 +442,7 @@ func (e *Render) funcMap(ctx context.Context) template.FuncMap {
 	}
 	// 内置覆盖 sprig 同名 (如有)
 	maps.Copy(m, builtins)
-	maps.Copy(m, e.queryFuncs(ctx)) // 查询原语按请求 Context 构造
+	maps.Copy(m, e.queryFuncs(c)) // 查询原语按请求 Context 构造
 	maps.Copy(m, e.funcs)
 	return m
 }

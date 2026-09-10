@@ -358,6 +358,13 @@ Schema / DB    写进去的行必须合法（取值、唯一、引用基数）�
 组合语义（无单例限制，多个 handler 叠加）：读按 AND 收窄；写按并集放宽 —— 后者是显式选择，
 代价归注册者（多加一条 `allow.Append` 就等于多放开一个字段）。
 
+渲染层（HTML 模板 helper）与 JSON API 共用同一套读规则：`list` / `filterList` 用 `ReadList`，
+`search` 对每个目标类型用 `ReadSearch`，`get` 用 `ReadView`（不可见即返回 nil）。
+所以模板里没有"框架私有的一份 publication 规则"，站点注册的读规则在 HTML 与 API 上结果一致；
+非 publication 类型也不再让模板 helper 直接 panic（未注册规则 = 全拒 = 空列表）。
+模板里的 `outRefs` / `inRefs` / `expand` 仍直接使用 Core 原语、不做可见性过滤（边目标逐条解析
+规则的收益不划算）：要按规则过滤就用上面三个 helper，或在站点 Go 里查。
+
 `core.CreateNode/PatchNode/DeleteNode` 是内核原语，不做写授权：后台管理路径与站点自建端点
 都是受信调用方，自己负责校验（例如 association 的 `/api/me/profile` 手建 patch）。
 
@@ -788,6 +795,8 @@ Core 与 Admin API 已支持 archive/restore，但当前通用后台列表默认
 14. JSON 解码额外收紧到 `maxJSONBytes` 1MB，并由 `BindStrictJSON` 统一映射成 413/400。
 15. SQLite 连接档位必须满足 `journal_mode=wal`、`busy_timeout>0`、`foreign_keys=1`；
     不满足时 `core.Open` 拒绝启动（`verifySQLiteProfile`）。
+16. HTML 渲染与 JSON API 必须共用同一套读授权（模板 helper 不得自带一份可见性规则）。
+17. 渲染失败必须返回 500 并写日志；不得以 200 + 注释的形式藏起来。
 
 ---
 

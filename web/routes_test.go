@@ -152,11 +152,12 @@ func TestDebugErrorPage(t *testing.T) {
 	if !strings.Contains(body, "Render Error") || !strings.Contains(body, "node.html") {
 		t.Fatalf("debug page missing detail: %s", body[:min(len(body), 200)])
 	}
-	// 生产模式（默认）→ HTML 注释（fail-loud — 200 + 源码可见病灶）
+	// 生产模式（默认）→ 500 + HTML 注释（细节只进源码；状态码必须说真话，
+	// 否则模板故障会以 200 空白页出现）
 	s.debug = false
 	w = do(s, "GET", "/node/"+itoa(id), nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("prod error = %d", w.Code)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("prod error = %d, want 500", w.Code)
 	}
 	if !strings.Contains(w.Body.String(), "render error") {
 		t.Fatalf("prod body = %q", w.Body.String())
