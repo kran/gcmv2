@@ -388,6 +388,8 @@ func (s *Site) mountAdmin() {
 			authed.Get("/nodes/{id}", b.getNode)
 			authed.Put("/nodes/{id}", b.updateNode)
 			authed.Delete("/nodes/{id}", b.deleteNode)
+			authed.Post("/nodes/{id}/archive", b.archiveNode)
+			authed.Post("/nodes/{id}/restore", b.restoreNode)
 			authed.Get("/search", b.search)
 			authed.Get("/tree", b.tree)
 			authed.Get("/inbound", b.inbound)
@@ -397,6 +399,8 @@ func (s *Site) mountAdmin() {
 			authed.Post("/settings", b.setSetting)
 			authed.Delete("/settings/{key}", b.deleteSetting)
 			authed.Post("/search/rebuild", b.rebuildSearch)
+			authed.Get("/integrity/relations", b.relationIntegrity)
+			authed.Get("/merge/preview", b.mergePreview)
 			// fire AdminMount（传 authed 组 — 插件挂受保护端点; 组件已建）
 			if err := s.engine.Hooks().Fire(HookAdminMount, authed); err != nil {
 				panic("web: fire admin mount: " + err.Error())
@@ -622,23 +626,18 @@ func (b *backend) getNode(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, "invalid id")
 		return
 	}
-	n, err := b.eng.GetNodeById(id)
-	if err != nil {
-		b.internal(ctx, err)
-		return
-	}
-	if n == nil {
+	editable, err := b.eng.FullNode(ctx.R.Context(), id)
+	if errors.Is(err, core.ErrNotFound) {
 		ctx.Error(http.StatusNotFound, "not found")
 		return
 	}
-	// 管理视图: fields + ref 字段值（编辑回显）
-	fields, err := b.eng.FullFields(id)
 	if err != nil {
 		b.internal(ctx, err)
 		return
 	}
-	n.Fields = fields
-	_ = ctx.Json(http.StatusOK, n)
+	node := editable.Node
+	node.Fields = editable.Values
+	_ = ctx.Json(http.StatusOK, &node)
 }
 
 func (b *backend) updateNode(ctx *CmsCtx) {
@@ -676,13 +675,56 @@ func (b *backend) updateNode(ctx *CmsCtx) {
 	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
 }
 
+func (b *backend) archiveNode(ctx *CmsCtx) {
+	b.setNodeArchived(ctx, true)
+}
+
+func (b *backend) restoreNode(ctx *CmsCtx) {
+	b.setNodeArchived(ctx, false)
+}
+
+func (b *backend) setNodeArchived(ctx *CmsCtx, archived bool) {
+	id := ctx.PathNum("id", 0)
+	if id <= 0 {
+		ctx.Error(http.StatusBadRequest, "invalid id")
+		return
+	}
+	var input struct {
+		Revision int64 `json:"revision"`
+	}
+	err := decodeStrictJSON(ctx.R.Body, &input)
+	if err != nil {
+		b.bad(ctx, err)
+		return
+	}
+	if archived {
+		err = b.eng.ArchiveNode(ctx.R.Context(), id, input.Revision)
+	} else {
+		err = b.eng.RestoreNode(ctx.R.Context(), id, input.Revision)
+	}
+	if errors.Is(err, core.ErrRevisionConflict) {
+		ctx.Error(http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
+		b.bad(ctx, err)
+		return
+	}
+	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
+}
+
 func (b *backend) deleteNode(ctx *CmsCtx) {
 	id := ctx.PathNum("id", 0)
 	if id == 0 {
 		ctx.Error(http.StatusBadRequest, "invalid id")
 		return
 	}
-	if err := b.eng.DeleteNode(id); err != nil {
+	err := b.eng.DeleteNode(id)
+	if errors.Is(err, core.ErrDeleteRestricted) {
+		ctx.Error(http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
 		ctx.Error(http.StatusNotFound, err.Error())
 		return
 	}
@@ -726,15 +768,19 @@ func (b *backend) tree(ctx *CmsCtx) {
 		return
 	}
 	items := make([]map[string]any, 0, len(list))
-	for _, n := range list {
-		fields, err := b.eng.FullFields(n.ID)
-		if err != nil {
-			b.internal(ctx, err)
-			return
-		}
+	ids := make([]int64, len(list))
+	for i := range list {
+		ids[i] = list[i].ID
+	}
+	full, err := b.eng.FullNodes(ctx.R.Context(), ids)
+	if err != nil {
+		b.internal(ctx, err)
+		return
+	}
+	for _, n := range full {
 		items = append(items, map[string]any{
 			"id": n.ID, "type": n.Type, "display": n.Display,
-			"revision": n.Revision, "fields": fields,
+			"revision": n.Revision, "fields": n.Values,
 		})
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{"items": items})
@@ -768,10 +814,17 @@ func (b *backend) inbound(ctx *CmsCtx) {
 			ctx.Error(http.StatusBadRequest, "node not found")
 			return
 		}
-		tree, err := b.eng.Subtree(n.Type, nodeID, "parent", 20)
-		if err == nil {
-			ids = append(ids, tree...)
+		treeCapability, ok := b.eng.Types().Tree(n.Type)
+		if !ok {
+			ctx.Error(http.StatusBadRequest, "node type is not a tree")
+			return
 		}
+		tree, err := b.eng.Subtree(n.Type, nodeID, treeCapability.Parent, 20)
+		if err != nil {
+			b.internal(ctx, err)
+			return
+		}
+		ids = append(ids, tree...)
 	}
 	// in 方向全部节点（无论类型）+ 溯源字段; 分页
 	totalPtr, err := b.db.Add(
@@ -889,6 +942,30 @@ func (b *backend) deleteSetting(ctx *CmsCtx) {
 }
 
 // rebuildSearch 全量重建搜索索引（FTS 表被迁移重建/导入后手动触发）。
+func (b *backend) mergePreview(ctx *CmsCtx) {
+	sourceID := ctx.QueryNum("source", 0)
+	targetID := ctx.QueryNum("target", 0)
+	if sourceID <= 0 || targetID <= 0 {
+		ctx.Error(http.StatusBadRequest, "source and target required")
+		return
+	}
+	preview, err := b.eng.PreviewMerge(ctx.R.Context(), sourceID, targetID)
+	if err != nil {
+		b.bad(ctx, err)
+		return
+	}
+	_ = ctx.Json(http.StatusOK, preview)
+}
+
+func (b *backend) relationIntegrity(ctx *CmsCtx) {
+	report, err := b.eng.CheckRelations(ctx.R.Context())
+	if err != nil {
+		b.internal(ctx, err)
+		return
+	}
+	_ = ctx.Json(http.StatusOK, report)
+}
+
 func (b *backend) rebuildSearch(ctx *CmsCtx) {
 	if err := b.eng.RebuildSearch(); err != nil {
 		b.internal(ctx, err)

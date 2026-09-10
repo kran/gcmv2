@@ -118,6 +118,9 @@ func TestEquivalenceClass(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("class y: %v, want %v", got, want)
 	}
+	if edges, total, err := s.OutEdges("category", z, "synonym", 1, 10); err != nil || total != 1 || len(edges) != 1 {
+		t.Fatalf("equivalence OutEdges reverse = %d, %#v, %v", total, edges, err)
+	}
 	// 孤立节点: 只有自己
 	got, _ = s.EquivalenceClass("category", alone, "synonym", 10)
 	if !reflect.DeepEqual(got, []int64{alone}) {
@@ -125,29 +128,25 @@ func TestEquivalenceClass(t *testing.T) {
 	}
 }
 
-// 环防: 循环引用不无限递归, maxHops 截断。
-func TestTraverseCycle(t *testing.T) {
+func TestTransitiveRelationRejectsCycle(t *testing.T) {
 	s := newTraverseService(t)
 	a, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "a"}})
 	b, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "b"}})
-	s.AddEdge(a, b, "parent", 0)
-	s.AddEdge(b, a, "parent", 0) // 环
-
+	if _, err := s.AddEdge(a, b, "parent", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddEdge(b, a, "parent", 0); err == nil {
+		t.Fatal("cycle must be rejected")
+	}
 	got, err := s.Traverse("category", a, "parent", 5)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 5 跳内: b, a(第二跳), b(第三跳)... DISTINCT → [a, b]
-	if len(got) != 2 {
-		t.Fatalf("cycle traverse: %v", got)
+	if !reflect.DeepEqual(got, []int64{b}) {
+		t.Fatalf("traverse after rejected cycle: %v", got)
 	}
-	// 等价类（双向遍历）在环上也安全: 用 parent 字段双向展开
-	got, err = s.EquivalenceClass("category", a, "parent", 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("cycle class: %v", got)
+	if _, err := s.EquivalenceClass("category", a, "parent", 10); err == nil {
+		t.Fatal("non-equivalence field must be rejected")
 	}
 }
 
@@ -161,11 +160,11 @@ func TestTraverseValidation(t *testing.T) {
 	if _, err := s.Traverse("category", root, "name", 10); err == nil {
 		t.Fatal("non-ref field must fail")
 	}
-	// 节点不存在: 宽松后静默空（CTE 返回空 — 不查节点校验）;
-	// 字段拼错仍 fail-loud（全局字段校验保留）
-	ids, err := s.Subtree("category", 999, "parent", 10)
-	if err != nil || len(ids) != 0 {
-		t.Fatalf("missing start: ids=%v err=%v (宽松: 静默空)", ids, err)
+	if _, err := s.Subtree("category", 999, "parent", 10); err == nil {
+		t.Fatal("missing start must fail")
+	}
+	if _, err := s.Traverse("category", root, "children", 10); err == nil {
+		t.Fatal("non-transitive ref must fail")
 	}
 }
 

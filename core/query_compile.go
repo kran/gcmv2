@@ -300,10 +300,26 @@ func (c *queryCompiler) compileIn(expr gquery.In, typeName, nodeRef string) (dba
 		if err := validateIDs(values); err != nil {
 			return dba.Node{}, err
 		}
-		return dba.Expr(`EXISTS(SELECT 1 FROM edges e WHERE e.from_node = `+nodeRef+`.id AND e.field = #{1} AND e.to_node IN (#{2|expand}))`, path.fieldName, values), nil
+		if path.field.Symmetric || path.field.Equivalence {
+			return dba.Expr(`EXISTS(SELECT 1 FROM edges e JOIN nodes target
+				ON target.id = CASE WHEN e.from_node = `+nodeRef+`.id THEN e.to_node ELSE e.from_node END
+				WHERE e.field = #{1} AND e.symmetric = 1 AND target.archived_at IS NULL AND
+				((e.from_node = `+nodeRef+`.id AND e.to_node IN (#{2|expand})) OR
+				 (e.to_node = `+nodeRef+`.id AND e.from_node IN (#{2|expand}))))`, path.fieldName, values), nil
+		}
+		return dba.Expr(`EXISTS(SELECT 1 FROM edges e JOIN nodes target ON target.id = e.to_node
+			WHERE e.from_node = `+nodeRef+`.id AND e.field = #{1} AND target.archived_at IS NULL
+			AND e.to_node IN (#{2|expand}))`, path.fieldName, values), nil
 	case gquery.PathInRef:
 		if err := validateIDs(values); err != nil {
 			return dba.Node{}, err
+		}
+		if path.field.Symmetric || path.field.Equivalence {
+			return dba.Expr(`EXISTS(SELECT 1 FROM edges e JOIN nodes source
+				ON source.id = CASE WHEN e.from_node = `+nodeRef+`.id THEN e.to_node ELSE e.from_node END
+				WHERE e.field = #{1} AND e.symmetric = 1 AND source.type = #{2} AND source.archived_at IS NULL AND
+				((e.from_node = `+nodeRef+`.id AND e.to_node IN (#{3|expand})) OR
+				 (e.to_node = `+nodeRef+`.id AND e.from_node IN (#{3|expand}))))`, path.fieldName, expr.Path.SourceType, values), nil
 		}
 		return dba.Expr(`EXISTS(SELECT 1 FROM edges e JOIN nodes src ON src.id = e.from_node WHERE e.to_node = `+nodeRef+`.id AND e.field = #{1} AND src.type = #{2} AND src.archived_at IS NULL AND e.from_node IN (#{3|expand}))`, path.fieldName, expr.Path.SourceType, values), nil
 	default:
@@ -323,9 +339,25 @@ func (c *queryCompiler) compileExists(expr gquery.Exists, typeName, nodeRef stri
 	case gquery.PathField:
 		node = dba.Expr(`json_type(`+nodeRef+`.fields, #{1}) IS NOT NULL`, "$."+path.fieldName)
 	case gquery.PathOutRef:
-		node = dba.Expr(`EXISTS(SELECT 1 FROM edges e JOIN nodes target ON target.id = e.to_node WHERE e.from_node = `+nodeRef+`.id AND e.field = #{1} AND target.archived_at IS NULL)`, path.fieldName)
+		if path.field.Symmetric || path.field.Equivalence {
+			node = dba.Expr(`EXISTS(SELECT 1 FROM edges e JOIN nodes target
+				ON target.id = CASE WHEN e.from_node = `+nodeRef+`.id THEN e.to_node ELSE e.from_node END
+				WHERE e.field = #{1} AND e.symmetric = 1
+				AND (e.from_node = `+nodeRef+`.id OR e.to_node = `+nodeRef+`.id)
+				AND target.archived_at IS NULL)`, path.fieldName)
+		} else {
+			node = dba.Expr(`EXISTS(SELECT 1 FROM edges e JOIN nodes target ON target.id = e.to_node WHERE e.from_node = `+nodeRef+`.id AND e.field = #{1} AND target.archived_at IS NULL)`, path.fieldName)
+		}
 	case gquery.PathInRef:
-		node = dba.Expr(`EXISTS(SELECT 1 FROM edges e JOIN nodes src ON src.id = e.from_node WHERE e.to_node = `+nodeRef+`.id AND e.field = #{1} AND src.type = #{2} AND src.archived_at IS NULL)`, path.fieldName, expr.Path.SourceType)
+		if path.field.Symmetric || path.field.Equivalence {
+			node = dba.Expr(`EXISTS(SELECT 1 FROM edges e JOIN nodes target
+				ON target.id = CASE WHEN e.from_node = `+nodeRef+`.id THEN e.to_node ELSE e.from_node END
+				WHERE e.field = #{1} AND e.symmetric = 1
+				AND (e.from_node = `+nodeRef+`.id OR e.to_node = `+nodeRef+`.id)
+				AND target.type = #{2} AND target.archived_at IS NULL)`, path.fieldName, expr.Path.SourceType)
+		} else {
+			node = dba.Expr(`EXISTS(SELECT 1 FROM edges e JOIN nodes src ON src.id = e.from_node WHERE e.to_node = `+nodeRef+`.id AND e.field = #{1} AND src.type = #{2} AND src.archived_at IS NULL)`, path.fieldName, expr.Path.SourceType)
+		}
 	}
 	if expr.Missing {
 		return dba.Expr("NOT (#{1})", node), nil
@@ -352,6 +384,13 @@ func (c *queryCompiler) compileRelated(expr gquery.Related, typeName, nodeRef st
 	child, err := c.compile(expr.Where, path.target, alias, depth+1)
 	if err != nil {
 		return dba.Node{}, err
+	}
+	if path.field.Symmetric || path.field.Equivalence {
+		return dba.Expr(`EXISTS(SELECT 1 FROM edges e JOIN nodes `+alias+`
+			ON `+alias+`.id = CASE WHEN e.from_node = `+nodeRef+`.id THEN e.to_node ELSE e.from_node END
+			WHERE e.field = #{1} AND e.symmetric = 1
+			AND (e.from_node = `+nodeRef+`.id OR e.to_node = `+nodeRef+`.id)
+			AND `+alias+`.archived_at IS NULL AND #{2})`, path.fieldName, child), nil
 	}
 	if expr.Path.Kind == gquery.PathOutRef {
 		return dba.Expr(`EXISTS(SELECT 1 FROM edges e JOIN nodes `+alias+` ON `+alias+`.id = e.to_node WHERE e.from_node = `+nodeRef+`.id AND e.field = #{1} AND `+alias+`.archived_at IS NULL AND #{2})`, path.fieldName, child), nil

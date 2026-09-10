@@ -91,6 +91,10 @@ func TestAdminNodes(t *testing.T) {
 		{"GET", "/admin/expand?node=1"},
 		{"POST", "/admin/settings"},
 		{"GET", "/admin/search?q=x"},
+		{"GET", "/admin/integrity/relations"},
+		{"GET", "/admin/merge/preview?source=1&target=2"},
+		{"POST", "/admin/nodes/1/archive"},
+		{"POST", "/admin/nodes/1/restore"},
 	} {
 		w := do(s, req.method, req.path, map[string]any{})
 		if w.Code != http.StatusUnauthorized {
@@ -134,6 +138,10 @@ func TestAdminPasswordFlow(t *testing.T) {
 	if me.Actor.Kind != ActorAdmin {
 		t.Fatalf("admin actor = %#v", me.Actor)
 	}
+	w = do(s, "GET", "/admin/integrity/relations", nil, ck)
+	if w.Code != http.StatusOK {
+		t.Fatalf("relation integrity = %d: %s", w.Code, w.Body.String())
+	}
 	// 建节点（article）
 	w = do(s, "POST", "/admin/nodes?type=article", map[string]any{
 		"display": "后台文章",
@@ -175,7 +183,23 @@ func TestAdminPasswordFlow(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("update = %d: %s", w.Code, w.Body.String())
 	}
-	// 删除
+	current, err := s.Engine().GetNodeById(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w = do(s, "POST", "/admin/nodes/"+itoa(created.ID)+"/archive", map[string]any{"revision": current.Revision}, ck)
+	if w.Code != http.StatusOK {
+		t.Fatalf("archive = %d: %s", w.Code, w.Body.String())
+	}
+	current, err = s.Engine().GetNodeById(created.ID)
+	if err != nil || current.ArchivedAt == nil {
+		t.Fatalf("archived node = %#v, %v", current, err)
+	}
+	w = do(s, "POST", "/admin/nodes/"+itoa(created.ID)+"/restore", map[string]any{"revision": current.Revision}, ck)
+	if w.Code != http.StatusOK {
+		t.Fatalf("restore = %d: %s", w.Code, w.Body.String())
+	}
+	// 永久删除
 	w = do(s, "DELETE", "/admin/nodes/"+itoa(created.ID), nil, ck)
 	if w.Code != http.StatusOK {
 		t.Fatalf("delete = %d", w.Code)

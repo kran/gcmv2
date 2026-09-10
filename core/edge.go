@@ -3,6 +3,7 @@ package core
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kran/dba"
@@ -30,49 +31,114 @@ func splitRefs(td types.TypeDef, ts *types.Types, fields map[string]any) (map[st
 	return scalar, refs, nil
 }
 
-// addEdges 校验 ref 目标（存在 + 类型匹配）并插入边。
+// addEdges validates and inserts all references from one Node.
 func addEdges(tx *dba.SQL, ts *types.Types, td types.TypeDef, from int64, refs map[string]any) error {
-	for fieldName, v := range refs {
-		// nil = 清空引用（PATCH 语义: 删边已做, 不加新边）
-		if v == nil {
+	for fieldName, value := range refs {
+		if value == nil {
 			continue
 		}
-		f, ok := types.FieldByName(td, fieldName)
+		field, ok := types.FieldByName(td, fieldName)
 		if !ok {
 			return fmt.Errorf("core: field %q not on type %q", fieldName, td.Name)
 		}
-		ids, err := refIDs(ts, f, v)
+		ids, err := refIDs(ts, field, value)
 		if err != nil {
 			return err
 		}
-		for _, to := range ids {
-			if err := checkTarget(tx, to, f.To); err != nil {
-				return fmt.Errorf("core: %q.%s -> %d: %w", td.Name, fieldName, to, err)
+		seen := make(map[int64]bool, len(ids))
+		for position, targetID := range ids {
+			if seen[targetID] {
+				return fmt.Errorf("%w: %q.%s contains duplicate target %d", ErrRelationCardinality, td.Name, fieldName, targetID)
 			}
-			if _, err := tx.Insert("edges", map[string]any{
-				"from_node": from, "field": fieldName, "to_node": to, "sort": 0,
-				"created_at": time.Now(),
-			}).Exec(); err != nil {
-				return err
+			seen[targetID] = true
+			_, err = insertEdge(tx, ts, td, field, from, targetID, position)
+			if err != nil {
+				return fmt.Errorf("core: %q.%s -> %d: %w", td.Name, fieldName, targetID, err)
 			}
 		}
 	}
 	return nil
 }
 
-// checkTarget 目标存在且类型匹配。
+// checkTarget rejects missing, archived, and wrong-Type targets.
 func checkTarget(tx *dba.SQL, id int64, wantType string) error {
-	typPtr, err := tx.Add(`SELECT type FROM nodes WHERE id = #{1}`, id).FetchOne[string]()
+	target, err := tx.Add(`SELECT type, archived_at FROM nodes WHERE id = #{1}`, id).FetchOne[struct {
+		Type       string     `db:"type"`
+		ArchivedAt *time.Time `db:"archived_at"`
+	}]()
 	if err != nil {
 		return err
 	}
-	if typPtr == nil {
-		return fmt.Errorf("target %d not found", id)
+	if target == nil {
+		return fmt.Errorf("%w: target %d", ErrNotFound, id)
 	}
-	if *typPtr != wantType {
-		return fmt.Errorf("target %d is type %q, want %q", id, *typPtr, wantType)
+	if target.ArchivedAt != nil {
+		return fmt.Errorf("%w: target %d", ErrNodeArchived, id)
+	}
+	if target.Type != wantType {
+		return fmt.Errorf("target %d is type %q, want %q", id, target.Type, wantType)
 	}
 	return nil
+}
+
+func insertEdge(tx *dba.SQL, ts *types.Types, td types.TypeDef, field types.FieldDef, from, to int64, sort int) (int64, error) {
+	if err := checkTarget(tx, to, field.To); err != nil {
+		return 0, err
+	}
+	kind, _ := ts.Kind(field.Kind)
+	single := kind.Class() == types.ClassRef
+	undirected := field.Symmetric || field.Equivalence
+	if (undirected || field.Transitive || isTreeParent(td, field.Name)) && from == to {
+		return 0, errors.New("self reference is not allowed for algebraic relations")
+	}
+	if field.Transitive || isTreeParent(td, field.Name) {
+		cycle, err := wouldCreateCycle(tx, td.Name, field.Name, from, to)
+		if err != nil {
+			return 0, err
+		}
+		if cycle {
+			return 0, errors.New("reference would create a cycle")
+		}
+	}
+	if undirected && from > to {
+		from, to = to, from
+	}
+	result, err := tx.Insert("edges", map[string]any{
+		"from_node":  from,
+		"field":      field.Name,
+		"to_node":    to,
+		"sort":       sort,
+		"single_ref": boolInt(single),
+		"symmetric":  boolInt(undirected),
+		"created_at": time.Now(),
+	}).Exec()
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed: edges") ||
+			strings.Contains(err.Error(), "symmetric single ref cardinality violation") {
+			return 0, fmt.Errorf("%w: %s.%s", ErrRelationCardinality, td.Name, field.Name)
+		}
+		return 0, err
+	}
+	return result.LastInsertId()
+}
+
+func isTreeParent(td types.TypeDef, field string) bool {
+	return td.Capabilities.Tree != nil && td.Capabilities.Tree.Parent == field
+}
+
+func wouldCreateCycle(tx *dba.SQL, typeName, field string, from, to int64) (bool, error) {
+	found, err := tx.Add(`WITH RECURSIVE reach(id) AS (
+		SELECT #{1}
+		UNION
+		SELECT e.to_node FROM edges e JOIN reach r ON e.from_node = r.id
+		JOIN nodes n ON n.id = e.from_node
+		WHERE e.field = #{2} AND n.type = #{3}
+	)
+	SELECT 1 FROM reach WHERE id = #{4} LIMIT 1`, to, field, typeName, from).FetchOne[int]()
+	if err != nil {
+		return false, err
+	}
+	return found != nil, nil
 }
 
 // refIDs 引用字段值 → id 列表（ref 单个包一层, ref[] 原样）。
@@ -107,8 +173,16 @@ func refIDs(ts *types.Types, f types.FieldDef, v any) ([]int64, error) {
 	}
 }
 
-// ErrEdgeNotFound 目标引用不存在。
-var ErrEdgeNotFound = errors.New("core: edge not found")
+var (
+	// ErrEdgeNotFound means the requested Edge does not exist.
+	ErrEdgeNotFound = errors.New("core: edge not found")
+	// ErrRequiredReference means an operation would leave a required ref empty.
+	ErrRequiredReference = errors.New("core: required reference")
+	// ErrRelationCardinality means a ref/ref[] database invariant would be violated.
+	ErrRelationCardinality = errors.New("core: relation cardinality violation")
+	// ErrDeleteRestricted means incoming references prohibit permanent deletion.
+	ErrDeleteRestricted = errors.New("core: delete restricted")
+)
 
 // fieldOnType 字段归属校验: 字段在类型上声明, 返回 (FieldDef, symmetric, err)。
 func (s *Service) fieldOnType(typeName, field string) (types.FieldDef, bool, error) {
@@ -123,111 +197,96 @@ func (s *Service) fieldOnType(typeName, field string) (types.FieldDef, bool, err
 	if !s.types.IsRefKind(f.Kind) {
 		return types.FieldDef{}, false, fmt.Errorf("core: field %q is not a ref kind", f.Name)
 	}
-	return f, f.Symmetric, nil
+	return f, f.Symmetric || f.Equivalence, nil
 }
 
-// AddEdge 手动加边: from 存在 + 字段归属 + to 类型匹配。
-func (s *Service) AddEdge(from, to int64, field string, sort int) (int64, error) {
+// AddEdge manually inserts one schema-validated reference.
+func (s *Service) AddEdge(from, to int64, fieldName string, sort int) (int64, error) {
 	fromNode, err := s.GetNodeById(from)
 	if err != nil {
 		return 0, err
 	}
 	if fromNode == nil {
-		return 0, fmt.Errorf("core: addref: from node %d not found", from)
+		return 0, fmt.Errorf("core: addref: %w: source %d", ErrNotFound, from)
 	}
-	f, _, err := s.fieldOnType(fromNode.Type, field)
+	if fromNode.ArchivedAt != nil {
+		return 0, fmt.Errorf("core: addref: %w: source %d", ErrNodeArchived, from)
+	}
+	field, _, err := s.fieldOnType(fromNode.Type, fieldName)
 	if err != nil {
 		return 0, err
 	}
-	if err := checkTarget(s.db, to, f.To); err != nil {
-		return 0, fmt.Errorf("core: addref: %w", err)
-	}
+	td, _ := s.types.Type(fromNode.Type)
 	var id int64
 	err = s.db.Transaction(func(tx *dba.SQL) error {
-		res, err := tx.Insert("edges", map[string]any{
-			"from_node": from, "field": field, "to_node": to, "sort": sort,
-			"created_at": time.Now(),
-		}).Exec()
-		if err != nil {
-			return err
-		}
-		id, err = res.LastInsertId()
+		id, err = insertEdge(tx, s.types, td, field, from, to, sort)
 		return err
 	})
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("core: addref: %w", err)
 	}
 	return id, nil
 }
 
-// RemoveEdge 删一条引用（按 id）。
-func (s *Service) RemoveEdge(id int64) error {
-	res, err := s.db.Delete("edges", `id = #{1}`, id).Exec()
-	if err != nil {
-		return err
+func deleteFieldEdges(tx *dba.SQL, nodeID int64, field types.FieldDef) error {
+	where := `from_node = #{1} AND field = #{2}`
+	if field.Symmetric || field.Equivalence {
+		where = `(from_node = #{1} OR to_node = #{1}) AND field = #{2}`
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return ErrEdgeNotFound
-	}
-	return nil
+	_, err := tx.Delete("edges", where, nodeID, field.Name).Exec()
+	return err
 }
 
-// Merge 合并节点: from 的出/入边改指向 to（冲突去重）+ 删 from。
-func (s *Service) Merge(from, to int64) error {
-	if from == to {
-		return errors.New("core: merge: from == to")
-	}
-	fromNode, err := s.GetNodeById(from)
-	if err != nil {
-		return err
-	}
-	if fromNode == nil {
-		return ErrNotFound
-	}
-	toNode, err := s.GetNodeById(to)
-	if err != nil {
-		return err
-	}
-	if toNode == nil {
-		return ErrNotFound
-	}
+// RemoveEdge removes one reference without violating required cardinality.
+func (s *Service) RemoveEdge(id int64) error {
 	return s.db.Transaction(func(tx *dba.SQL) error {
-		if _, err := tx.Add(
-			`DELETE FROM edges WHERE from_node = #{1} AND EXISTS (
-				SELECT 1 FROM edges e2 WHERE e2.from_node = #{2}
-				  AND e2.field = edges.field AND e2.to_node = edges.to_node)`,
-			from, to).Exec(); err != nil {
-			return err
-		}
-		if _, err := tx.Add(
-			`UPDATE edges SET from_node = #{1} WHERE from_node = #{2}`, to, from).Exec(); err != nil {
-			return err
-		}
-		if _, err := tx.Add(
-			`DELETE FROM edges WHERE to_node = #{1} AND EXISTS (
-				SELECT 1 FROM edges e2 WHERE e2.to_node = #{2}
-				  AND e2.field = edges.field AND e2.from_node = edges.from_node)`,
-			from, to).Exec(); err != nil {
-			return err
-		}
-		if _, err := tx.Add(
-			`UPDATE edges SET to_node = #{1} WHERE to_node = #{2}`, to, from).Exec(); err != nil {
-			return err
-		}
-		if _, err := tx.Add(
-			`DELETE FROM edges WHERE from_node = #{1} OR to_node = #{1}`, from).Exec(); err != nil {
-			return err
-		}
-		res, err := tx.Delete("nodes", `id = #{1}`, from).Exec()
+		edge, err := tx.Select("edges", `id = #{1}`, id).FetchOne[Edge]()
 		if err != nil {
 			return err
 		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			return ErrNotFound
+		if edge == nil {
+			return ErrEdgeNotFound
+		}
+		source, err := tx.Select("nodes", `id = #{1}`, edge.FromNode).FetchOne[Node]()
+		if err != nil {
+			return err
+		}
+		if source == nil {
+			return ErrEdgeNotFound
+		}
+		field, _, err := s.fieldOnType(source.Type, edge.Field)
+		if err != nil {
+			return err
+		}
+		if field.Required {
+			endpoints := []int64{edge.FromNode}
+			if field.Symmetric || field.Equivalence {
+				endpoints = append(endpoints, edge.ToNode)
+			}
+			for _, endpoint := range endpoints {
+				where := `from_node = #{1} AND field = #{2}`
+				if field.Symmetric || field.Equivalence {
+					where = `(from_node = #{1} OR to_node = #{1}) AND field = #{2}`
+				}
+				count, err := tx.Add(`SELECT COUNT(1) FROM edges WHERE `+where, endpoint, edge.Field).FetchOne[int64]()
+				if err != nil {
+					return err
+				}
+				if count == nil || *count <= 1 {
+					return fmt.Errorf("%w: %s.%s", ErrRequiredReference, source.Type, edge.Field)
+				}
+			}
+		}
+		result, err := tx.Delete("edges", `id = #{1}`, id).Exec()
+		if err != nil {
+			return err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows == 0 {
+			return ErrEdgeNotFound
 		}
 		return nil
 	})

@@ -318,6 +318,12 @@ func (s *Service) initSearch() {
 	if err := s.hooks.AddHook(HookNodeAfterDelete, s.searchDelete); err != nil {
 		panic("core: register search delete hook: " + err.Error())
 	}
+	if err := s.hooks.AddHook(HookNodeAfterArchive, s.searchSync); err != nil {
+		panic("core: register search archive hook: " + err.Error())
+	}
+	if err := s.hooks.AddHook(HookNodeAfterRestore, s.searchSync); err != nil {
+		panic("core: register search restore hook: " + err.Error())
+	}
 }
 
 // searchSync 搜索索引同步（AfterCreate/AfterUpdate; 事务内）。

@@ -4,10 +4,8 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"time"
 
-	"github.com/kran/gcmv2/types"
 	"github.com/spf13/cast"
 )
 
@@ -111,42 +109,4 @@ func (n *Node) Field(name string) any {
 		return nil
 	}
 	return n.Fields[name]
-}
-
-// FullFields 管理视图: 节点 fields + ref 字段值（id 列表）— 编辑表单回显用。
-func (s *Service) FullFields(id int64) (map[string]any, error) {
-	n, err := s.GetNodeById(id)
-	if err != nil {
-		return nil, err
-	}
-	if n == nil {
-		return nil, ErrNotFound
-	}
-	out := map[string]any{}
-	maps.Copy(out, n.Fields)
-	td, ok := s.types.Type(n.Type)
-	if !ok {
-		return nil, fmt.Errorf("core: type %q not defined", n.Type)
-	}
-	for _, f := range td.Fields {
-		if !s.types.IsRefKind(f.Kind) {
-			continue
-		}
-		ids, err := s.db.Add(`SELECT to_node FROM edges WHERE from_node = #{1} AND field = #{2} ORDER BY sort, id`, id, f.Name).FetchList[int64]()
-		if err != nil {
-			return nil, err
-		}
-		if k, ok := s.types.Kind(f.Kind); ok && k.Class() == types.ClassRef {
-			if len(ids) > 0 {
-				out[f.Name] = ids[0]
-			}
-		} else {
-			anyIDs := make([]any, 0, len(ids))
-			for _, tid := range ids {
-				anyIDs = append(anyIDs, tid)
-			}
-			out[f.Name] = anyIDs
-		}
-	}
-	return out, nil
 }

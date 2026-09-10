@@ -99,6 +99,7 @@ type expandRelation struct {
 	targetType string
 	single     bool
 	incoming   bool
+	undirected bool
 	sourceType string
 }
 
@@ -112,6 +113,7 @@ func (s *Service) resolveExpandRelation(typeName string, path gquery.Path) (expa
 		kind, _ := s.types.Kind(field.Kind)
 		return expandRelation{
 			field: field, targetType: field.To, single: kind.Class() == types.ClassRef,
+			undirected: field.Symmetric || field.Equivalence,
 		}, nil
 	case gquery.PathInRef:
 		if path.SourceType == "" {
@@ -123,7 +125,8 @@ func (s *Service) resolveExpandRelation(typeName string, path gquery.Path) (expa
 				"core: expand: incoming %s.%s does not target %s", path.SourceType, path.Field, typeName)
 		}
 		return expandRelation{
-			field: field, targetType: path.SourceType, incoming: true, sourceType: path.SourceType,
+			field: field, targetType: path.SourceType, incoming: true,
+			undirected: field.Symmetric || field.Equivalence, sourceType: path.SourceType,
 		}, nil
 	default:
 		return expandRelation{}, fmt.Errorf("core: expand: path %q is not a relation", path.Field)
@@ -158,12 +161,9 @@ func (s *Service) expandTyped(
 
 	targetIDs := make([]int64, 0)
 	seen := map[int64]bool{}
-	for _, edges := range edgesByNode {
+	for nodeID, edges := range edgesByNode {
 		for _, edge := range edges {
-			targetID := edge.ToNode
-			if relation.incoming {
-				targetID = edge.FromNode
-			}
+			targetID := relationTargetID(edge, nodeID, relation)
 			if !seen[targetID] {
 				seen[targetID] = true
 				targetIDs = append(targetIDs, targetID)
@@ -192,10 +192,7 @@ func (s *Service) expandTyped(
 		edges := edgesByNode[node.ID]
 		values := make([]*Node, 0, len(edges))
 		for _, edge := range edges {
-			targetID := edge.ToNode
-			if relation.incoming {
-				targetID = edge.FromNode
-			}
+			targetID := relationTargetID(edge, node.ID, relation)
 			if target := byID[targetID]; target != nil {
 				values = append(values, target)
 			}
@@ -233,7 +230,16 @@ func (s *Service) typedEdges(
 	}
 	var query string
 	var args []any
-	if relation.incoming {
+	if relation.undirected {
+		query = `SELECT e.* FROM edges e
+			JOIN nodes target ON target.id = CASE
+				WHEN e.from_node IN (#{2|expand}) THEN e.to_node ELSE e.from_node END
+			WHERE e.field = #{1} AND e.symmetric = 1
+			  AND (e.from_node IN (#{2|expand}) OR e.to_node IN (#{2|expand}))
+			  AND target.archived_at IS NULL
+			ORDER BY e.sort, e.id LIMIT #{3}`
+		args = []any{relation.field.Name, ids, limit + 1}
+	} else if relation.incoming {
 		query = `SELECT e.* FROM edges e JOIN nodes src ON src.id = e.from_node
 			WHERE e.field = #{1} AND e.to_node IN (#{2|expand})
 			  AND src.type = #{3} AND src.archived_at IS NULL
@@ -255,6 +261,14 @@ func (s *Service) typedEdges(
 	}
 	out := make(map[int64][]Edge)
 	for _, edge := range rows {
+		if relation.undirected {
+			for _, nodeID := range ids {
+				if edge.FromNode == nodeID || edge.ToNode == nodeID {
+					out[nodeID] = append(out[nodeID], edge)
+				}
+			}
+			continue
+		}
 		key := edge.FromNode
 		if relation.incoming {
 			key = edge.ToNode
@@ -262,6 +276,19 @@ func (s *Service) typedEdges(
 		out[key] = append(out[key], edge)
 	}
 	return out, nil
+}
+
+func relationTargetID(edge Edge, nodeID int64, relation expandRelation) int64 {
+	if relation.undirected {
+		if edge.FromNode == nodeID {
+			return edge.ToNode
+		}
+		return edge.FromNode
+	}
+	if relation.incoming {
+		return edge.FromNode
+	}
+	return edge.ToNode
 }
 
 func groupNodesByType(nodes []*Node) map[string][]*Node {

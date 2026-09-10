@@ -31,6 +31,8 @@ gcm 目前证明了以下想法可行：
 
 # 0. 设计文档
 
+架构总览：[v0.9 设计理念、核心概念、架构与实现状态](docs/architecture-v0.9.md)
+
 ADR 状态与实现进度：
 
 - [x] [ADR-001：Node、Schema 与 Capability 的边界](docs/adr/001-node-schema-capabilities.md) — Accepted / Implemented
@@ -133,19 +135,19 @@ id / type / display / slug / status / sort / fields / timestamps
 
 当前 DeleteNode 会删除所有入边和出边，然后物理删除 Node。CRM 中这可能让联系人、商机或合同悄悄失去必填关系。
 
-- [ ] FieldDef 支持 `on_delete: restrict|set_null|cascade`。
-- [ ] required ref 默认使用 restrict。
-- [ ] 删除前返回明确的入边阻塞信息。
-- [ ] 普通业务默认软删除/归档，不直接物理删除。
-- [ ] 永久删除只允许明确的管理操作。
+- [x] FieldDef 支持 `on_delete: restrict|set_null|cascade`。
+- [x] required ref 默认使用 restrict。
+- [x] 删除前返回结构化的入边阻塞信息。
+- [x] 公共 DELETE 使用软删除/归档，不直接物理删除。
+- [x] 当前 Web 只有 Admin DELETE 执行永久删除。
 - [ ] 删除、归档和恢复全部进入审计。
 
 ## 2.4 关系不变量
 
-- [ ] Edge 只表示没有业务属性的轻量关系。
-- [ ] Edge 必须遵守字段归属、目标类型、基数和删除策略。
-- [ ] 带角色、状态、时间、金额、备注的关系使用关系 Node。
-- [ ] 不给 Edge 增加任意 JSON，避免产生第二套 EAV。
+- [x] Edge 只表示没有业务属性的轻量关系。
+- [x] Edge 必须遵守字段归属、目标类型、基数和删除策略。
+- [x] relation capability 将带属性的关系声明为普通关系 Node。
+- [x] Edge 不增加任意业务 JSON；新增列仅为约束元数据。
 
 示例：
 
@@ -164,11 +166,11 @@ employment(contact, account, role, start_at, end_at)  关系 Node
 
 ## 2.6 Query 不变量
 
-- [ ] 所有查询最终进入同一种 AST。
-- [ ] 所有字段、关系、操作符和排序必须经过 Schema 校验。
+- [x] 列表、详情、搜索和导出筛选最终进入同一种 AST。
+- [x] 所有字段、关系、操作符和排序必须经过 Schema 校验。
 - [x] Policy 条件与用户条件在 AST 层合并，用户不能覆盖 Policy。
 - [ ] 公网 Query 必须有复杂度、分页和执行时间限制。
-- [ ] 文本 Lisp 只是 AST 的一种输入格式，不是核心数据结构。
+- [x] 文本 Lisp 只是 AST 的一种输入格式，不是核心数据结构。
 
 ---
 
@@ -527,24 +529,24 @@ CRM 的金额不能默认使用 float64。
 
 ### Schema
 
-- [ ] 完成 Node 通用列语义 ADR。
-- [ ] 分离 Schema、Capability 和 View 元数据。
-- [ ] Create/Patch/Import 使用统一 Validator。
-- [ ] 唯一约束和索引声明。
-- [ ] 默认值、immutable、条件必填和跨字段校验。
-- [ ] 删除策略 restrict/set_null/cascade。
+- [x] 完成 Node 通用列语义 ADR。
+- [x] 分离 Schema、Capability 和 View 元数据。
+- [ ] Create/Patch 已使用统一 Validator；Import 尚未实现。
+- [x] 唯一约束和索引声明。
+- [ ] 默认值、immutable 已实现；条件必填和跨字段校验待实现。
+- [x] 删除策略 restrict/set_null/cascade。
 
 ### Query Engine 2.0
 
-- [ ] 建立公开 Filter AST。
-- [ ] Lisp Parser 改为 AST 输入适配器。
-- [ ] 增加 Go Query Builder。
-- [ ] Schema-aware 校验。
+- [x] 建立公开 Filter AST。
+- [x] Lisp Parser 改为 AST 输入适配器。
+- [x] 增加 Go Query Builder。
+- [x] Schema-aware 校验。
 - [x] 结构化 Sort（已在 v0.8.4 提前完成）。
 - [x] Policy AST 合并，ListQuery/SearchQuery 缺少显式 Scope 时拒绝执行。
 - [x] 当前 Lisp/expand 复杂度限制（已在 v0.8.4 提前完成）。
 - [ ] request context 取消和数据库查询超时。
-- [ ] JSON QuerySpec 原型。
+- [x] JSON QuerySpec 原型。
 
 ### Auth Realm 与 Actor
 
@@ -581,11 +583,11 @@ password.Mount(site, password.Options{Realm: "member"})
 
 ### Ref API
 
-- [ ] `RefID(nodeID, field)`。
-- [ ] `RefIDs(nodeID, field)`。
-- [ ] `HasRef(nodeID, field, targetID)`。
-- [ ] `FullNode(nodeID)`。
-- [ ] 批量版本，避免权限判断 N+1。
+- [x] `RefID(ctx, nodeID, field)`。
+- [x] `RefIDs(ctx, nodeID, field)`。
+- [x] `HasRef(ctx, nodeID, field, targetID)`。
+- [x] `FullNode(ctx, nodeID)` 返回 `EditableNode`。
+- [x] `FullNodes(ctx, ids)` 批量加载，避免权限判断 N+1。
 
 ### 生命周期
 
@@ -605,10 +607,10 @@ password.Mount(site, password.Options{Realm: "member"})
 
 ### 软删除和并发
 
-- [ ] archive/restore/permanent-delete。
-- [ ] 默认查询排除归档。
-- [ ] revision/expected_revision 乐观锁。
-- [ ] 冲突返回 409。
+- [x] Core archive/restore/permanent-delete；公共 DELETE 默认归档，Admin DELETE 永久删除。
+- [x] 默认查询排除归档。
+- [x] revision 乐观锁。
+- [x] Web 更新和归档冲突返回 409。
 
 ### 审计
 
@@ -637,8 +639,8 @@ password.Mount(site, password.Options{Realm: "member"})
 
 ### 关系 Node
 
-- [ ] 文档明确简单 Edge 与关系 Node 的边界。
-- [ ] relation/through 类型元数据。
+- [x] 文档明确简单 Edge 与关系 Node 的边界。
+- [x] relation capability 声明 from/to endpoint 字段。
 - [ ] 关系节点组合唯一约束。
 - [ ] 后台内联查看和编辑关系节点。
 
@@ -661,7 +663,7 @@ password.Mount(site, password.Options{Realm: "member"})
 - [ ] Kanban 声明和 Workflow 拖拽转换。
 - [ ] Calendar 开始/结束字段声明。
 - [ ] CSV/XLSX 导入预检、错误报告和导出。
-- [ ] 重复检测、Merge 预览和安全合并。
+- [x] 已提供只读 Merge Preview 并删除旧的不安全 Merge；执行合并仍待冲突决策和审计。
 - [ ] 批量操作和幂等键。
 
 ### v0.11.0 验收
@@ -796,7 +798,7 @@ task          待办任务
 - [ ] 定位清楚：核心不依赖 CMS 或 CRM 固定模型。
 - [ ] 默认安全：公开接口、上传、认证和 Cookie 采用安全默认值。
 - [ ] 数据正确：所有写入口使用同一 Schema 和约束。
-- [ ] 关系可靠：基数、类型、删除策略和关系 Node 边界明确。
+- [x] 关系可靠：基数、类型、删除策略和关系 Node 边界明确。
 - [ ] 查询可靠：AST、Schema 校验、Policy 合并、成本限制和稳定分页完成。
 - [ ] 认证解耦：没有 user 假设，Realm 和 Actor 边界清楚。
 - [ ] 权限完整：List/View/Create/Update/Delete/Transition/Upload 均可授权。

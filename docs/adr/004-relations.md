@@ -1,6 +1,6 @@
 # ADR-004：Edge、关系 Node 与引用完整性
 
-- 状态：Proposed
+- 状态：Accepted / Core Implemented
 - 目标版本：v0.9.0～v0.10.0
 - 日期：2026-09-09
 
@@ -50,11 +50,13 @@ type Edge struct {
     Field     string
     ToNode    int64
     Sort      int
+    SingleRef bool // storage constraint metadata
+    Symmetric bool // storage constraint metadata
     CreatedAt time.Time
 }
 ```
 
-不增加通用 `fields JSON`。
+不增加通用 `fields JSON`。`single_ref` 和 `symmetric` 只用于数据库约束，不承载业务属性。
 
 ### 2. 有属性的关系使用关系 Node
 
@@ -103,12 +105,12 @@ ref[]  0..N，required 时 1..N
 
 必须保证：
 
-- [ ] ref 在数据库中最多一条 Edge。
-- [ ] ref[] 不允许重复 target。
-- [ ] Edge target 必须存在。
-- [ ] target.Type 必须等于 FieldDef.To。
-- [ ] required ref 在 Create 和 Patch 后不能为空。
-- [ ] 并发写入仍由数据库唯一约束兜底。
+- [x] ref 在数据库中最多一条 Edge。
+- [x] ref[] 不允许重复 target。
+- [x] Edge target 必须存在且未归档。
+- [x] target.Type 必须等于 FieldDef.To。
+- [x] required ref 在 Create 和 Patch 后不能为空。
+- [x] 并发写入由数据库 partial unique index 和 symmetric trigger 兜底。
 
 当前 `UNIQUE(from_node, field, to_node)` 只能防止 ref[] 重复，不能保证 ref 最多一条。需要为 ref 写路径增加约束检查，必要时增加物化基数标识或事务保证。
 
@@ -159,13 +161,14 @@ required ref 默认 restrict。
 
 软删除不立即删除 Edge。
 
-默认行为：
+已实现行为：
 
 - 普通查询和展开不返回已归档目标
-- 管理员可以查看“引用了已归档实体”的记录
-- required ref 指向归档目标时记录进入数据完整性告警
+- `EditableNode` 和 Ref API 保留已归档目标 ID，供管理和修复
+- required ref 指向归档目标时进入数据完整性报告
 - 恢复目标后引用自动恢复可见
-- 永久删除时才执行 on_delete
+- 公共 DELETE 执行归档；Admin 永久删除时才执行 on_delete
+- 认证 Node 归档时撤销其全部 Session
 
 是否允许新引用指向已归档 Node：不允许。
 
@@ -185,23 +188,25 @@ equivalence
 
 存一条边，查询时双向解释。
 
-- [ ] 写入时规范化端点顺序，避免 A→B 和 B→A 重复。
-- [ ] 唯一性按无向关系保证。
+- [x] 写入时规范化端点顺序，避免 A→B 和 B→A 重复。
+- [x] 唯一性按无向关系保证。
+- [x] 单值 symmetric ref 在两个端点上都执行数据库级基数约束。
+- [x] `OutEdges`、`InEdges`、Typed Expand、Query 和 Ref API 都恢复双向语义；`InEdges` 必须按字段过滤。
 
 ### transitive
 
 允许 Traverse/Subtree，不代表数据库自动写传递闭包。
 
-- [ ] 必须有最大深度。
-- [ ] 必须检测环。
-- [ ] Tree capability 默认禁止环。
+- [x] 必须有最大深度。
+- [x] 写入时检测环，读取时也使用路径去重防御损坏数据。
+- [x] Tree capability 的 parent 字段默认禁止环。
 
 ### equivalence
 
 用于同义/同组关系。
 
-- [ ] 明确是否隐含 symmetric + transitive。
-- [ ] 写入时阻止自环和重复边。
+- [x] equivalence 采用无向规范化存储，并在读取时双向传递遍历。
+- [x] 写入时阻止自环和重复边。
 
 ## 关系读取 API
 
@@ -211,22 +216,16 @@ equivalence
 RefID(ctx, nodeID, field) (int64, bool, error)
 RefIDs(ctx, nodeID, field) ([]int64, error)
 HasRef(ctx, nodeID, field, targetID) (bool, error)
-FullNode(ctx, nodeID) (*Node, error)
-FullNodes(ctx, ids) ([]*Node, error)
-```
+FullNode(ctx, nodeID) (*EditableNode, error)
+FullNodes(ctx, ids) ([]*EditableNode, error)
 
-`FullNode` 的 Fields 可以包含 ref ID，用于编辑和鉴权，但必须通过不同类型或文档明确它不是原始持久化 Node。
-
-更清楚的替代命名：
-
-```go
 type EditableNode struct {
     Node
     Values map[string]any // scalar + ref IDs
 }
 ```
 
-实现前二选一，不同时提供两个近义 API。
+原始 `Node.Fields` 始终只包含持久化标量，`EditableNode.Values` 才包含标量和 ref ID。旧 `FullFields` 已删除，不保留近义 API。
 
 ## 关系查询
 
@@ -266,7 +265,7 @@ query.Incoming("activity", "contact")
 
 现有 Merge 会改写入边和出边并删除来源 Node。CRM 使用前需要补：
 
-- [ ] Merge Preview：字段冲突、入边、出边、认证方式。
+- [x] Merge Preview：字段冲突、入边、出边、认证方式。
 - [ ] 选择每个字段保留来源还是目标。
 - [ ] 关系 Node 唯一冲突处理。
 - [ ] auth_methods 合并规则。
@@ -275,7 +274,7 @@ query.Incoming("activity", "contact")
 - [ ] 审计记录 source/target 和决策。
 - [ ] 整体事务回滚测试。
 
-Merge 不应继续只有一个无预览的底层操作供普通 API 调用。
+原有直接执行且无预览的 `Merge` 已删除。当前提供只读 `PreviewMerge`，报告字段冲突、入边、出边和认证方式；真正执行合并要等字段选择、唯一冲突处理和审计契约完成后再开放。
 
 ## 性能和索引
 
@@ -327,18 +326,20 @@ edges 至少需要：
 
 ## 直接迁移
 
-- 增加 on_delete 后，现有字段由工具生成建议值，项目确认后写回 Schema。
+- 未显式声明 `on_delete` 时，required ref 规范化为 `restrict`，可选 ref/ref[] 规范化为 `set_null`。
+- Core migration `00011_edge_integrity.sql` 增加 `single_ref`、`symmetric` 存储元数据和并发约束。
+- `SyncRelationSchema` 在启动时根据当前 Schema 重建 Edge 元数据；原始 SQL 导入 Edge 后必须再次调用。
 - 新写路径立即执行新规则，不保留旧删除函数。
 - 现有带属性的 Edge 如果存在，由项目迁移成关系 Node。
-- 数据迁移完成后删除旧行为，不增加长期兼容分支。
+- 旧的直接执行 `Merge` 已删除，不增加兼容入口。
 
 ## 验收条件
 
-- [ ] ref/ref[] 基数由测试保证。
-- [ ] 删除策略有 restrict/set_null/cascade 测试。
-- [ ] 软删除和永久删除的关系行为明确。
-- [ ] 关系 Node 可以通过通用 API 和后台管理。
-- [ ] 关系查询经过 Schema 校验。
-- [ ] FullNode/Ref API 不再让业务代码误读 Node.Fields。
-- [ ] 数据完整性检查可发现所有已知关系损坏类型。
-- [ ] CRM 示例中的 employment 和 opportunity_contact 可以完整建模。
+- [x] ref/ref[] 基数由应用校验和数据库约束保证。
+- [x] 删除策略有 restrict/set_null/cascade 测试。
+- [x] 软删除保留 Edge，永久删除执行 on_delete；新引用不能指向归档 Node。
+- [x] relation capability 的关系 Node 仍通过通用 Node API 管理。
+- [x] 关系查询和 Expand 经过逐跳 Schema 校验，并支持 symmetric 语义。
+- [x] EditableNode/RefID/RefIDs/HasRef 不再让业务代码误读 Node.Fields。
+- [x] 数据完整性检查可发现悬空、未知字段、目标类型、基数、required、归档引用、元数据和环问题。
+- [ ] CRM 示例中的 employment 和 opportunity_contact 可以完整建模并完成 UI 验证。

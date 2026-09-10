@@ -17,8 +17,8 @@ func isNumber(v any) bool {
 
 // rejectRefAttrs 标量 kind 的字段约束: 不得声明引用相关属性。
 func rejectRefAttrs(typeName string, f FieldDef) error {
-	if f.To != "" || f.Symmetric || f.Transitive || f.Equivalence {
-		return fmt.Errorf("types: %q.%s: kind %s must not declare to/algebra", typeName, f.Name, f.Kind)
+	if f.To != "" || f.Symmetric || f.Transitive || f.Equivalence || f.OnDelete != "" {
+		return fmt.Errorf("types: %q.%s: kind %s must not declare to/algebra/on_delete", typeName, f.Name, f.Kind)
 	}
 	return nil
 }
@@ -41,6 +41,24 @@ func validateRefField(t *Types, typeName string, f FieldDef, defs map[string]Typ
 	}
 	if n > 1 {
 		return fmt.Errorf("types: %q.%s: symmetric/transitive/equivalence are mutually exclusive", typeName, f.Name)
+	}
+	if n > 0 && f.To != typeName {
+		return fmt.Errorf("types: %q.%s: relation algebra requires a self reference", typeName, f.Name)
+	}
+	switch f.OnDelete {
+	case OnDeleteRestrict:
+	case OnDeleteSetNull:
+		if f.Required {
+			return fmt.Errorf("types: %q.%s: required ref cannot use set_null", typeName, f.Name)
+		}
+	case OnDeleteCascade:
+		td := defs[typeName]
+		relation := td.Capabilities.Relation
+		if relation == nil || (relation.From != f.Name && relation.To != f.Name) {
+			return fmt.Errorf("types: %q.%s: cascade requires a relation endpoint", typeName, f.Name)
+		}
+	default:
+		return fmt.Errorf("types: %q.%s: invalid on_delete %q", typeName, f.Name, f.OnDelete)
 	}
 	return nil
 }

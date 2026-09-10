@@ -25,12 +25,16 @@ func New(db *dba.SQL, ts *types.Types) *Service {
 
 	//define hooks
 	err := s.hooks.Define(map[string]any{
-		HookNodeBeforeCreate: func(*dba.SQL, *Node) error { return nil },
-		HookNodeAfterCreate:  func(*dba.SQL, *Node) error { return nil },
-		HookNodeBeforeUpdate: func(*dba.SQL, *NodePatch) error { return nil },
-		HookNodeAfterUpdate:  func(*dba.SQL, *Node) error { return nil },
-		HookNodeBeforeDelete: func(*dba.SQL, int64) error { return nil },
-		HookNodeAfterDelete:  func(*dba.SQL, int64) error { return nil },
+		HookNodeBeforeCreate:  func(*dba.SQL, *Node) error { return nil },
+		HookNodeAfterCreate:   func(*dba.SQL, *Node) error { return nil },
+		HookNodeBeforeUpdate:  func(*dba.SQL, *NodePatch) error { return nil },
+		HookNodeAfterUpdate:   func(*dba.SQL, *Node) error { return nil },
+		HookNodeBeforeDelete:  func(*dba.SQL, int64) error { return nil },
+		HookNodeAfterDelete:   func(*dba.SQL, int64) error { return nil },
+		HookNodeBeforeArchive: func(*dba.SQL, int64) error { return nil },
+		HookNodeAfterArchive:  func(*dba.SQL, *Node) error { return nil },
+		HookNodeBeforeRestore: func(*dba.SQL, int64) error { return nil },
+		HookNodeAfterRestore:  func(*dba.SQL, *Node) error { return nil },
 	})
 	if err != nil {
 		panic("core: define standard hooks: " + err.Error())
@@ -38,6 +42,9 @@ func New(db *dba.SQL, ts *types.Types) *Service {
 
 	if _, err = s.MigrateUp(); err != nil {
 		panic("core: migrate error: " + err.Error())
+	}
+	if err = s.syncEdgeMetadata(); err != nil {
+		panic("core: edge metadata: " + err.Error())
 	}
 	if err = s.syncSchemaIndexes(); err != nil {
 		panic("core: schema indexes: " + err.Error())

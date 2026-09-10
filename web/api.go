@@ -201,7 +201,12 @@ func (s *Site) apiDeleteNode(ctx *CmsCtx) {
 		ctx.Error(http.StatusForbidden, err.Error())
 		return
 	}
-	if err := s.engine.DeleteNode(id); err != nil {
+	err = s.engine.ArchiveNode(ctx.R.Context(), id, existing.Revision)
+	if errors.Is(err, core.ErrRevisionConflict) {
+		ctx.Error(http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
 		ctx.Error(http.StatusNotFound, err.Error())
 		return
 	}

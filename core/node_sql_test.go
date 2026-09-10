@@ -100,6 +100,15 @@ func TestNodeSchemaMigration(t *testing.T) {
 	if err != nil || table == nil {
 		t.Fatalf("legacy migration table missing: table=%v err=%v", table, err)
 	}
+	edgeColumns, err := db.Add(`SELECT name FROM pragma_table_info('edges') ORDER BY cid`).FetchList[string]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, column := range []string{"single_ref", "symmetric"} {
+		if !slices.Contains(edgeColumns, column) {
+			t.Fatalf("edges columns %v missing %q", edgeColumns, column)
+		}
+	}
 }
 
 // ── Create ─────────────────────────────────────

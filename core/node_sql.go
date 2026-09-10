@@ -20,6 +20,8 @@ var (
 	ErrNotFound = errors.New("core: node not found")
 	// ErrRevisionConflict 节点在客户端读取后已被其他写入修改。
 	ErrRevisionConflict = errors.New("core: node revision conflict")
+	// ErrNodeArchived means an operation requires an active Node.
+	ErrNodeArchived = errors.New("core: node is archived")
 )
 
 // ── 读 ────────────────────────────────────────
@@ -159,6 +161,9 @@ func (s *Service) PatchNode(id int64, patch *NodePatch) error {
 	if existing == nil {
 		return ErrNotFound
 	}
+	if existing.ArchivedAt != nil {
+		return ErrNodeArchived
+	}
 	if patch.Display == nil && len(patch.Fields) == 0 {
 		return nil
 	}
@@ -226,7 +231,8 @@ func (s *Service) PatchNode(id int64, patch *NodePatch) error {
 		}
 
 		for name := range refPatch {
-			_, err := tx.Add(`DELETE FROM edges WHERE from_node = #{1} AND field = #{2}`, id, name).Exec()
+			field, _ := types.FieldByName(td, name)
+			err := deleteFieldEdges(tx, id, field)
 			if err != nil {
 				return err
 			}
@@ -251,22 +257,10 @@ func (s *Service) PatchNode(id int64, patch *NodePatch) error {
 
 // ── 写: Delete ────────────────────────────────
 
-// DeleteNode 删节点: 显式清全部出/入引用 + 删节点（事务）。
+// DeleteNode permanently deletes a Node after applying every incoming
+// reference's on_delete policy in one transaction.
 func (s *Service) DeleteNode(id int64) error {
 	return s.db.Transaction(func(tx *dba.SQL) error {
-		if err := s.hooks.Fire(HookNodeBeforeDelete, tx, id); err != nil {
-			return err
-		}
-		if _, err := tx.Delete("edges", `from_node = #{1} OR to_node = #{1}`, id).Exec(); err != nil {
-			return err
-		}
-		res, err := tx.Delete("nodes", `id = #{1}`, id).Exec()
-		if err != nil {
-			return err
-		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			return ErrNotFound
-		}
-		return s.hooks.Fire(HookNodeAfterDelete, tx, id)
+		return s.deleteNodeTx(tx, id, make(map[int64]bool))
 	})
 }

@@ -1,48 +1,64 @@
 package core
 
-// ── 图遍历原语（edges 递归 CTE） ────────────────
+import (
+	"fmt"
 
-// Traverse 沿出边（from → to）递归（含起点）。
+	"github.com/kran/gcmv2/types"
+)
+
+// Traverse follows a transitive outgoing reference.
 func (s *Service) Traverse(typeName string, start int64, field string, maxHops int) ([]int64, error) {
-	if _, _, err := s.fieldOnType(typeName, field); err != nil {
+	err := s.validateTraversal(typeName, start, field, maxHops, false)
+	if err != nil {
 		return nil, err
 	}
 	return s.walk(`
-		WITH RECURSIVE walk(id, depth) AS (
-			SELECT to_node, 1 FROM edges WHERE field = #{1} AND from_node = #{2}
+		WITH RECURSIVE walk(id, depth, path) AS (
+			SELECT to_node, 1, printf(',%d,%d,', from_node, to_node)
+			FROM edges WHERE field = #{1} AND from_node = #{2}
 			UNION ALL
-			SELECT e.to_node, w.depth + 1 FROM edges e JOIN walk w ON e.from_node = w.id
+			SELECT e.to_node, w.depth + 1, w.path || printf('%d,', e.to_node)
+			FROM edges e JOIN walk w ON e.from_node = w.id
 			WHERE e.field = #{1} AND w.depth < #{3}
+			  AND instr(w.path, printf(',%d,', e.to_node)) = 0
 		)
 		SELECT DISTINCT id FROM walk ORDER BY id`, field, start, maxHops)
 }
 
-// Subtree 沿入边（to → from）递归（子树, 含起点）。
+// Subtree follows a transitive reference in the incoming direction.
 func (s *Service) Subtree(typeName string, start int64, field string, maxHops int) ([]int64, error) {
-	if _, _, err := s.fieldOnType(typeName, field); err != nil {
+	err := s.validateTraversal(typeName, start, field, maxHops, false)
+	if err != nil {
 		return nil, err
 	}
 	return s.walk(`
-		WITH RECURSIVE walk(id, depth) AS (
-			SELECT from_node, 1 FROM edges WHERE field = #{1} AND to_node = #{2}
+		WITH RECURSIVE walk(id, depth, path) AS (
+			SELECT from_node, 1, printf(',%d,%d,', to_node, from_node)
+			FROM edges WHERE field = #{1} AND to_node = #{2}
 			UNION ALL
-			SELECT e.from_node, w.depth + 1 FROM edges e JOIN walk w ON e.to_node = w.id
+			SELECT e.from_node, w.depth + 1, w.path || printf('%d,', e.from_node)
+			FROM edges e JOIN walk w ON e.to_node = w.id
 			WHERE e.field = #{1} AND w.depth < #{3}
+			  AND instr(w.path, printf(',%d,', e.from_node)) = 0
 		)
 		SELECT DISTINCT id FROM walk ORDER BY id`, field, start, maxHops)
 }
 
-// Ancestors 祖先链 根→叶（沿入边从 start 向上, 含自身）。
+// Ancestors returns a transitive parent chain in root-to-leaf order.
 func (s *Service) Ancestors(typeName string, start int64, field string, maxHops int) ([]*Node, error) {
-	if _, _, err := s.fieldOnType(typeName, field); err != nil {
+	err := s.validateTraversal(typeName, start, field, maxHops, false)
+	if err != nil {
 		return nil, err
 	}
 	ids, err := s.walk(`
-		WITH RECURSIVE anc(id, depth) AS (
-			SELECT to_node, 1 FROM edges WHERE field = #{1} AND from_node = #{2}
+		WITH RECURSIVE anc(id, depth, path) AS (
+			SELECT to_node, 1, printf(',%d,%d,', from_node, to_node)
+			FROM edges WHERE field = #{1} AND from_node = #{2}
 			UNION ALL
-			SELECT e.to_node, a.depth + 1 FROM edges e JOIN anc a ON e.from_node = a.id
+			SELECT e.to_node, a.depth + 1, a.path || printf('%d,', e.to_node)
+			FROM edges e JOIN anc a ON e.from_node = a.id
 			WHERE e.field = #{1} AND a.depth < #{3}
+			  AND instr(a.path, printf(',%d,', e.to_node)) = 0
 		)
 		SELECT id FROM anc ORDER BY depth DESC`, field, start, maxHops)
 	if err != nil {
@@ -50,33 +66,68 @@ func (s *Service) Ancestors(typeName string, start int64, field string, maxHops 
 	}
 	nodes := make([]*Node, 0, len(ids))
 	for _, id := range ids {
-		n, err := s.GetNodeById(id)
+		node, err := s.GetNodeById(id)
 		if err != nil {
 			return nil, err
 		}
-		if n != nil {
-			nodes = append(nodes, n)
+		if node != nil {
+			nodes = append(nodes, node)
 		}
 	}
 	return nodes, nil
 }
 
-// walk 递归 CTE 执行（返回 id 列表）。
 func (s *Service) walk(cte string, args ...any) ([]int64, error) {
 	return s.db.Add(cte, args...).FetchList[int64]()
 }
 
-// EquivalenceClass 等价类展开: 沿 field 出边+入边双向递归（含起点）。
+// EquivalenceClass follows an equivalence relation in both directions and
+// includes the start Node.
 func (s *Service) EquivalenceClass(typeName string, start int64, field string, maxHops int) ([]int64, error) {
+	err := s.validateTraversal(typeName, start, field, maxHops, true)
+	if err != nil {
+		return nil, err
+	}
 	return s.walk(`
-		WITH RECURSIVE walk(id, depth) AS (
-			SELECT #{2}, 0
-			UNION
-			SELECT e.to_node, w.depth + 1 FROM edges e JOIN walk w ON e.from_node = w.id
-			WHERE e.field = #{1} AND w.depth < #{3}
-			UNION
-			SELECT e.from_node, w.depth + 1 FROM edges e JOIN walk w ON e.to_node = w.id
-			WHERE e.field = #{1} AND w.depth < #{3}
+		WITH RECURSIVE walk(id, depth, path) AS (
+			SELECT #{2}, 0, printf(',%d,', #{2})
+			UNION ALL
+			SELECT CASE WHEN e.from_node = w.id THEN e.to_node ELSE e.from_node END,
+				w.depth + 1,
+				w.path || printf('%d,', CASE WHEN e.from_node = w.id THEN e.to_node ELSE e.from_node END)
+			FROM edges e JOIN walk w ON e.from_node = w.id OR e.to_node = w.id
+			WHERE e.field = #{1} AND e.symmetric = 1 AND w.depth < #{3}
+			  AND instr(w.path, printf(',%d,', CASE WHEN e.from_node = w.id THEN e.to_node ELSE e.from_node END)) = 0
 		)
 		SELECT DISTINCT id FROM walk ORDER BY id`, field, start, maxHops)
+}
+
+func (s *Service) validateTraversal(typeName string, start int64, fieldName string, maxHops int, equivalence bool) error {
+	if maxHops <= 0 || maxHops > 100 {
+		return fmt.Errorf("core: traversal maxHops must be between 1 and 100")
+	}
+	field, _, err := s.fieldOnType(typeName, fieldName)
+	if err != nil {
+		return err
+	}
+	if equivalence {
+		if !field.Equivalence {
+			return fmt.Errorf("core: field %s.%s is not an equivalence relation", typeName, fieldName)
+		}
+	} else if !field.Transitive && !isTreeField(s.types, typeName, fieldName) {
+		return fmt.Errorf("core: field %s.%s is not transitive", typeName, fieldName)
+	}
+	node, err := s.GetNodeById(start)
+	if err != nil {
+		return err
+	}
+	if node == nil || node.ArchivedAt != nil || node.Type != typeName {
+		return fmt.Errorf("core: traversal start %d is not an active %s", start, typeName)
+	}
+	return nil
+}
+
+func isTreeField(typeSet *types.Types, typeName, fieldName string) bool {
+	tree, ok := typeSet.Tree(typeName)
+	return ok && tree.Parent == fieldName
 }

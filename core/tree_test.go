@@ -92,22 +92,19 @@ func TestTreeBasics(t *testing.T) {
 	}
 }
 
-func TestTreeCycleSafe(t *testing.T) {
+func TestTreeRejectsCycle(t *testing.T) {
 	s := newTraverseService(t)
-	// 造环: a.parent = b, b.parent = a
 	a, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "a", "slug": "a", "publication_state": "published"}})
 	b, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "b", "slug": "b", "publication_state": "published", "parent": a}})
-	if err := patchCurrent(t, s, a, &NodePatch{Fields: Fields{"parent": b}}); err != nil {
-		t.Fatal(err)
+	if err := patchCurrent(t, s, a, &NodePatch{Fields: Fields{"parent": b}}); err == nil {
+		t.Fatal("tree cycle must be rejected")
 	}
 
-	tr, err := s.LoadTree("category")
+	tree, err := s.LoadTree("category")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 环上 Ancestors 不死循环（链长截断）
-	anc := tr.Ancestors(a)
-	if len(anc) > tr.Len()+1 {
-		t.Fatalf("ancestors loop: %d nodes", len(anc))
+	if tree.Parent(b) == nil || tree.Parent(b).ID != a {
+		t.Fatal("rejected cycle must leave original tree unchanged")
 	}
 }

@@ -99,3 +99,26 @@ Search(q, type, page, size)              -> Search(ctx, core.SearchQuery{Targets
 ```
 
 Core migration `00010_auth_realms.sql` replaces plaintext Session tokens with SHA-256 hashes and adds the Realm column. Existing frontend Sessions are intentionally invalidated, so users must sign in again after upgrading. `auth_methods.type` remains the authenticated NodeType; Realm-to-NodeType mapping is server configuration and is not duplicated there.
+
+## Relation migration
+
+Core migration `00011_edge_integrity.sql` adds storage-only `single_ref` and `symmetric` metadata plus baseline symmetric-single triggers. At startup Core derives these flags from the current Schema, validates existing data, and creates the partial unique indexes and final triggers. Startup fails loudly if existing data violates single-ref or undirected uniqueness.
+
+Reference fields support:
+
+```yaml
+- { name: account, kind: ref, to: account, required: true, on_delete: restrict }
+- { name: owner, kind: ref, to: member, on_delete: set_null }
+```
+
+Defaults are `restrict` for required references and `set_null` for optional references. `cascade` is accepted only on endpoint fields of a Type declaring a relation capability.
+
+Applications that insert edges through raw SQL migrations must run:
+
+```go
+err := site.Engine().SyncRelationSchema()
+```
+
+after those site migrations. The old `FullFields` API is replaced by `FullNode`/`FullNodes`, whose `EditableNode.Values` explicitly contains scalar values plus ref IDs. Existing direct `Merge` calls must be removed; `PreviewMerge` is read-only until conflict resolution and audit-backed merge execution are implemented.
+
+Public `DELETE /api/nodes/{type}/{id}` now archives instead of permanently deleting. Authenticated administrators can call `POST /admin/nodes/{id}/archive` or `/restore` with `{"revision": n}`, while `DELETE /admin/nodes/{id}` remains the explicit permanent-delete operation and can return HTTP 409 for restricted references.

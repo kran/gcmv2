@@ -157,6 +157,9 @@ func (s *Service) CreateSession(realm string, nodeID int64) (string, error) {
 	if node == nil {
 		return "", ErrNotFound
 	}
+	if node.ArchivedAt != nil {
+		return "", ErrNodeArchived
+	}
 	td, ok := s.types.Type(node.Type)
 	if !ok || !td.Capabilities.Authentication {
 		return "", fmt.Errorf("core: auth: node type %q is not auth-enabled", node.Type)

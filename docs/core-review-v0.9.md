@@ -56,19 +56,19 @@ addressable 仍要求 `slug` Kind，这是刻意的安全约束：公开路径�
 - Expand/ExpandMany 接收 Context。
 - 旧字符串 Engine API 已删除；字符串只保留为 Admin/模板 Parser 前端。
 
-### P1：关系代数声明没有在所有入口执行
+### 已解决：关系代数与引用完整性进入统一写路径
 
 位置：`core/traverse.go`、`core/edge.go`
 
-当前：
+ADR-004 核心约束已实现：
 
-- Traverse/Subtree 只验证“是 ref”，不要求 `transitive`。
-- EquivalenceClass 没有验证字段归属和 `equivalence`。
-- AddEdge 没有完整执行 ref/ref[] 基数和 symmetric 规范化。
-- checkTarget 允许新 Edge 指向已归档 Node。
-- Merge 没有预览、类型约束、Hook、Search/Auth/Audit 一致性。
-
-目标：ADR-004。
+- Traverse/Subtree 只接受 transitive 或 tree.parent 字段，并限制深度、拒绝新环。
+- EquivalenceClass 验证字段归属和 equivalence 声明。
+- AddEdge/Create/Patch 统一执行 ref/ref[] 基数、目标类型、归档目标和 symmetric 规范化。
+- `on_delete` 支持 restrict/set_null/cascade；cascade 只允许关系 Node endpoint。
+- 公共删除改为归档，永久删除执行引用策略。
+- 新增 EditableNode/Ref API 和只读关系完整性报告。
+- 旧的直接执行 Merge 已删除，新增 Merge Preview；执行合并留待字段决策和审计完成。
 
 ### 已解决：认证核心中的 password/user 假设
 
@@ -178,7 +178,7 @@ array/object 是否注册成正式 Kind 需要单独决定。它们需要递归�
 ```text
 1. [x] 实现 ADR-003 Auth Realm / Actor，删除 user/password/role 假设
 2. [x] 实现查询 Policy Scope，并解除 Searchable/Publication 索引耦合
-3. [ ] 实现 ADR-004 的基数、删除策略、关系代数和 Merge
+3. [x] 实现 ADR-004 核心基数、删除策略、关系代数、完整性检查和 Merge Preview
 4. [ ] 清理 mine endpoint、TemplateCandidates、select 特判等边界问题
 5. [ ] 继续 Context 贯穿
 ```

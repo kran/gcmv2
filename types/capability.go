@@ -1,8 +1,9 @@
 package types
 
-import "strings"
-
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 const (
 	AddressUniqueGlobal = "global"
@@ -86,6 +87,15 @@ func (t *Types) Tree(typeName string) (TreeCapability, bool) {
 	return *td.Capabilities.Tree, true
 }
 
+// Relation 返回 attributed relation Node 配置。
+func (t *Types) Relation(typeName string) (RelationCapability, bool) {
+	td, ok := t.defs[typeName]
+	if !ok || td.Capabilities.Relation == nil {
+		return RelationCapability{}, false
+	}
+	return *td.Capabilities.Relation, true
+}
+
 func (t *Types) validateTypeConfig(typeName string, td TypeDef) error {
 	field := func(name string) (FieldDef, error) {
 		f, ok := FieldByName(td, name)
@@ -161,6 +171,22 @@ func (t *Types) validateTypeConfig(typeName string, td TypeDef) error {
 			}
 			if !t.FieldQueryOps(order).Sortable {
 				return fmt.Errorf("types: type %q: tree.order %q must be sortable", typeName, tree.Order)
+			}
+		}
+	}
+
+	if relation := td.Capabilities.Relation; relation != nil {
+		if relation.From == "" || relation.To == "" || relation.From == relation.To {
+			return fmt.Errorf("types: type %q: relation requires different from/to fields", typeName)
+		}
+		for _, endpoint := range []string{relation.From, relation.To} {
+			ref, err := field(endpoint)
+			if err != nil {
+				return err
+			}
+			kind, ok := t.Kind(ref.Kind)
+			if !ok || kind.Class() != ClassRef || !ref.Required {
+				return fmt.Errorf("types: type %q: relation endpoint %q must be a required single ref", typeName, endpoint)
 			}
 		}
 	}

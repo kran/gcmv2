@@ -18,6 +18,8 @@ type Engine interface {
 	// ── 写（hook 挂扩展点 — BeforeCreate/AfterCreate/...） ──
 	CreateNode(n *Node) (int64, error)
 	PatchNode(id int64, patch *NodePatch) error
+	ArchiveNode(ctx context.Context, id, revision int64) error
+	RestoreNode(ctx context.Context, id, revision int64) error
 	DeleteNode(id int64) error
 
 	// ── 读 ──
@@ -25,7 +27,14 @@ type Engine interface {
 	Query(ctx context.Context, q ListQuery) ([]Node, error)
 	GetNodeById(id int64) (*Node, error)
 	GetNodeByAddress(address string) (*Node, error)
-	FullFields(id int64) (map[string]any, error)
+	RefID(ctx context.Context, nodeID int64, field string) (int64, bool, error)
+	RefIDs(ctx context.Context, nodeID int64, field string) ([]int64, error)
+	HasRef(ctx context.Context, nodeID int64, field string, targetID int64) (bool, error)
+	FullNode(ctx context.Context, id int64) (*EditableNode, error)
+	FullNodes(ctx context.Context, ids []int64) ([]*EditableNode, error)
+	CheckRelations(ctx context.Context) (RelationReport, error)
+	SyncRelationSchema() error
+	PreviewMerge(ctx context.Context, sourceID, targetID int64) (*MergePreview, error)
 
 	// ── 图原语 ──
 	LoadTree(typeName string) (*Tree, error)
@@ -67,12 +76,16 @@ type Engine interface {
 
 // ── hook 事件名（对称命名 — 写路径扩展点） ──
 const (
-	HookNodeBeforeCreate = "node.before_create" // 新建前（事务内, 失败回滚 — 审计/默认值）
-	HookNodeAfterCreate  = "node.after_create"  // 新建后（事务内 — 搜索同步/通知）
-	HookNodeBeforeUpdate = "node.before_update" // 更新前（事务内 — 审计/级联检查）
-	HookNodeAfterUpdate  = "node.after_update"  // 更新后（事务内 — 搜索同步/通知）
-	HookNodeBeforeDelete = "node.before_delete" // 删除前（事务内 — 级联检查/拒绝删除）
-	HookNodeAfterDelete  = "node.after_delete"  // 删除后（事务内 — 搜索删除/审计）
+	HookNodeBeforeCreate  = "node.before_create"  // 新建前（事务内, 失败回滚 — 审计/默认值）
+	HookNodeAfterCreate   = "node.after_create"   // 新建后（事务内 — 搜索同步/通知）
+	HookNodeBeforeUpdate  = "node.before_update"  // 更新前（事务内 — 审计/级联检查）
+	HookNodeAfterUpdate   = "node.after_update"   // 更新后（事务内 — 搜索同步/通知）
+	HookNodeBeforeDelete  = "node.before_delete"  // 永久删除前（事务内 — 级联检查/拒绝删除）
+	HookNodeAfterDelete   = "node.after_delete"   // 永久删除后（事务内 — 搜索删除/审计）
+	HookNodeBeforeArchive = "node.before_archive" // 归档前
+	HookNodeAfterArchive  = "node.after_archive"  // 归档后
+	HookNodeBeforeRestore = "node.before_restore" // 恢复前
+	HookNodeAfterRestore  = "node.after_restore"  // 恢复后
 )
 
 // Engine 编译期断言: Service 实现完整契约（接口方法增减 → 此处编译报错）。

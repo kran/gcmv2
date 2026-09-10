@@ -25,6 +25,11 @@
 - `core.VerifyPassword` is removed; credential verification belongs to the password plugin.
 - `ListQuery` requires an explicit `QueryScope`; trusted administrative callers must use `core.BypassPolicy()`.
 - `Search` now accepts context-aware `SearchQuery` with Type-specific targets and scopes.
+- `FullFields` is replaced by context-aware `FullNode`, `FullNodes`, `RefID`, `RefIDs`, and `HasRef` APIs.
+- The unsafe mutation-only `Merge` operation is removed; use `PreviewMerge` until audited merge execution is available.
+- Public Node DELETE now archives; administrator DELETE remains the explicit permanent-delete path.
+- `InEdges` now filters the requested field and returns logical two-way results for symmetric/equivalence relations.
+- `InEdges` now filters the requested field and, like `OutEdges`, returns logical two-way results for symmetric/equivalence relations.
 
 ### Added
 
@@ -48,6 +53,13 @@
 - Server-side PolicyRegistry keyed by Actor, action, and Type.
 - Mandatory AST-level Policy merging for list, count, view, search, and sitemap export paths.
 - Type-specific Search targets, allowing one cross-Type FTS query without weakening per-Type Policy.
+- `on_delete: restrict|set_null|cascade` with safe defaults and transactional permanent deletion.
+- Database-backed single-ref and symmetric-single cardinality constraints.
+- Canonical symmetric/equivalence storage, cycle rejection, and stricter traversal validation.
+- `relation` capability for attributed relation Nodes.
+- Context-aware `RefID`, `RefIDs`, `HasRef`, `FullNode`, and `FullNodes` APIs.
+- Read-only relation integrity report, protected admin inspection, and non-mutating merge previews.
+- Archive/restore operations that preserve Edges and revoke sessions for archived authentication Nodes.
 
 ### Migration
 
@@ -58,6 +70,8 @@
 - Register Auth Realms before mounting credential plugins and update clients to `/api/auth/{realm}/...`.
 - Core migration `00010_auth_realms.sql` replaces plaintext Session tokens with hashes and invalidates existing frontend Sessions.
 - Rebuild the FTS index after upgrading: drafts and other non-public searchable Nodes now remain indexed, while visibility is enforced by Policy at query time.
+- Core migration `00011_edge_integrity.sql` adds Edge cardinality/algebra metadata; startup Schema synchronization validates existing data and creates the final database constraints.
+- Run `SyncRelationSchema` after any raw-SQL site migration that inserts Edge rows.
 
 ## v0.8.4
 

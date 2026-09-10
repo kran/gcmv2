@@ -18,7 +18,7 @@ types:
       - { name: cover, kind: upload-image }
       - { name: authors, kind: "ref[]", to: person }
       - { name: related, kind: "ref[]", to: article, symmetric: true }
-      - { name: categories, kind: "ref[]", to: category, transitive: true }
+      - { name: categories, kind: "ref[]", to: category }
   category:
     fields:
       - { name: name, kind: text, required: true }
@@ -34,6 +34,8 @@ types:
     fields:
       - { name: name, kind: text, required: true }
   employment:
+    capabilities:
+      relation: { from: person, to: org }
     fields:
       - { name: person, kind: ref, to: person, required: true }
       - { name: org, kind: ref, to: org, required: true }
@@ -60,8 +62,14 @@ func TestLoadValid(t *testing.T) {
 	if !ok || !f.Symmetric {
 		t.Fatal("related symmetric missing")
 	}
-	if f, ok := ts.Field("category", "parent"); !ok || !f.Transitive {
-		t.Fatal("parent transitive missing")
+	if f, ok := ts.Field("category", "parent"); !ok || !f.Transitive || f.OnDelete != OnDeleteSetNull {
+		t.Fatalf("parent relation metadata = %#v", f)
+	}
+	if f, ok := ts.Field("employment", "person"); !ok || f.OnDelete != OnDeleteRestrict {
+		t.Fatalf("required ref default on_delete = %#v", f)
+	}
+	if relation, ok := ts.Relation("employment"); !ok || relation.From != "person" || relation.To != "org" {
+		t.Fatalf("relation capability = %#v", relation)
 	}
 	if len(ts.Names()) != 5 {
 		t.Fatalf("names: %v", ts.Names())
@@ -86,6 +94,9 @@ func TestLoadInvalid(t *testing.T) {
 		{"ref to undefined", base + "      - { name: authors, kind: ref, to: ghost }", "not defined"},
 		{"algebra mutual", base + "      - { name: r, kind: \"ref[]\", to: article, symmetric: true, transitive: true }",
 			"mutually exclusive"},
+		{"algebra cross type", base + "      - { name: r, kind: ref, to: other, transitive: true }\n  other:\n    fields: []", "self reference"},
+		{"required set null", base + "      - { name: r, kind: ref, to: article, required: true, on_delete: set_null }", "required ref cannot use set_null"},
+		{"cascade without relation", base + "      - { name: r, kind: ref, to: article, required: true, on_delete: cascade }", "requires a relation endpoint"},
 	}
 	// 未知配置必须 fail-loud，不能静默忽略拼写错误或已移除字段。
 	ts := New()
@@ -108,6 +119,47 @@ func TestLoadInvalid(t *testing.T) {
 }
 
 // 值校验: 合法值通过, 非法值拒绝。
+func TestRelationCapabilityValidation(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{
+			name: "missing endpoint",
+			yaml: `types:
+  person: { fields: [] }
+  employment:
+    capabilities: { relation: { from: person, to: account } }
+    fields:
+      - { name: person, kind: ref, to: person, required: true }
+`,
+			want: `field "account" is not defined`,
+		},
+		{
+			name: "endpoint must be required single ref",
+			yaml: `types:
+  person: { fields: [] }
+  employment:
+    capabilities: { relation: { from: people, to: owner } }
+    fields:
+      - { name: people, kind: "ref[]", to: person, required: true }
+      - { name: owner, kind: ref, to: person, required: true }
+`,
+			want: "required single ref",
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			typeSet := New()
+			err := typeSet.Load([]byte(test.yaml))
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestValidateValue(t *testing.T) {
 	ts := New()
 	if err := ts.Load([]byte(validYAML)); err != nil {
