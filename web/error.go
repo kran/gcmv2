@@ -207,8 +207,7 @@ func (c *CmsCtx) Fail(err error) {
 	if err == nil {
 		panic("web: Fail(nil)")
 	}
-	var structured *Error
-	if errors.As(err, &structured) {
+	if structured, ok := errors.AsType[*Error](err); ok {
 		_ = structured.write(c)
 		return
 	}
@@ -229,8 +228,7 @@ func (c *CmsCtx) Reject(err error) {
 	if err == nil {
 		panic("web: Reject(nil)")
 	}
-	var structured *Error
-	if errors.As(err, &structured) {
+	if structured, ok := errors.AsType[*Error](err); ok {
 		_ = structured.write(c)
 		return
 	}
