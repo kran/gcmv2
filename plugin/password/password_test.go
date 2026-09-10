@@ -116,7 +116,7 @@ func TestPasswordRegisterLoginBind(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("bind = %d: %s", response.Code, response.Body.String())
 	}
-	method, err := site.Engine().FindAuth("member", "phone", "13800138000")
+	method, err := site.Engine().FindAuth(t.Context(), "member", "phone", "13800138000")
 	if err != nil || method == nil || method.NodeID != output.User.ID {
 		t.Fatalf("bound method = %#v, %v", method, err)
 	}

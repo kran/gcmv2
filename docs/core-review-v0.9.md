@@ -146,16 +146,24 @@ array/object 仍保留为结构语法（不进 kinds 注册表），但容器只
 
 `TypeDef.TemplateCandidates` 已删除。模板候选（含 address 级联）由 `web.nodeCandidates` 独占，Schema 不认识展示约定。
 
-### P2：Context 只覆盖新 Query
+### 已解决：Context 贯穿全部 I/O 入口
 
-当前 Query/QueryPage 已接收 Context，但以下路径仍不可由请求取消：
+除 `Render.Partial`（站点程序式调用，内部 Background）外，所有数据库与外部 I/O 入口
+都接收 Context，且没有保留旧的无 Context 重载：
 
-- Search/RebuildSearch
-- Traverse/Subtree/Ancestors
-- Auth/Session 数据库操作
-- Settings
+- 写入：CreateNode / PatchNode / Archive / Restore / DeleteNode / AddEdge / RemoveEdge
+- 读取与图：Query / GetNodeById / GetNodeByAddress / LoadTree / Traverse / Subtree / Ancestors /
+  EquivalenceClass / OutEdges / InEdges
+- 认证与配置：RegisterAuth / FindAuth / AddAuthMethod / RemoveAuthMethod / Session 全套 / Settings 全套
+- 迁移与检索：Migrator.Up / UpDir / SearchIndex.Rebuild
+- 渲染：Render 与模板查询函数（模板内 partial 自动继承请求 Context）
 
-建议逐步给可能执行数据库或外部 IO 的入口增加 Context；不要同时保留有/无 Context 两套长期 API。
+`TestWriteAndGraphHonorCanceledContext` 覆盖写路径、图原语、树加载、搜索重建和单节点读取的取消行为。
+
+### 已解决：生命周期入口
+
+`web.Open` / `core.Open` 返回初始化错误（`New` 保留 panic 便捷入口），`Site.Close()`
+幂等释放连接池，`/healthz` 与 `/readyz` 提供存活与就绪探针。
 
 ## 属于合理边界、不是泄漏
 

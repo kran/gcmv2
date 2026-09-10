@@ -39,9 +39,9 @@ func TestFTSSyncIsIndependentFromPublication(t *testing.T) {
 	if _, ok := service.types.Searchable("article"); !ok {
 		t.Fatal("test types must declare article searchable capability")
 	}
-	publishedID, _ := service.CreateNode(&Node{Type: "article", Display: "t",
+	publishedID, _ := service.CreateNode(t.Context(), &Node{Type: "article", Display: "t",
 		Fields: Fields{"title": "人工智能与制造业", "body": "深度融合路径研究", "publication_state": "published"}})
-	draftID, _ := service.CreateNode(&Node{Type: "article", Display: "t",
+	draftID, _ := service.CreateNode(t.Context(), &Node{Type: "article", Display: "t",
 		Fields: Fields{"title": "秘密草稿", "body": "不可搜", "publication_state": "draft"}})
 
 	rows, total, err := searchOneType(t, service, "人工智能", "article", BypassPolicy())
@@ -81,7 +81,7 @@ func TestFTSSyncIsIndependentFromPublication(t *testing.T) {
 		t.Fatalf("policy must hide unpublished node: total=%d err=%v", total, err)
 	}
 
-	err = service.DeleteNode(draftID)
+	err = service.DeleteNode(t.Context(), draftID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,11 +93,11 @@ func TestFTSSyncIsIndependentFromPublication(t *testing.T) {
 
 func TestFTSQueryWithTypedTargets(t *testing.T) {
 	service := newFilterSvc(t)
-	service.CreateNode(&Node{Type: "article", Display: "t",
+	service.CreateNode(t.Context(), &Node{Type: "article", Display: "t",
 		Fields: Fields{"title": "人工智能与制造业", "body": "产业路径研究", "publication_state": "published"}})
-	service.CreateNode(&Node{Type: "article", Display: "t",
+	service.CreateNode(t.Context(), &Node{Type: "article", Display: "t",
 		Fields: Fields{"title": "区域规划", "body": "2026 年规划报告", "publication_state": "published"}})
-	service.CreateNode(&Node{Type: "person", Display: "t",
+	service.CreateNode(t.Context(), &Node{Type: "person", Display: "t",
 		Fields: Fields{"name": "人工智能专家", "publication_state": "published"}})
 
 	_, total, err := searchOneType(t, service, "人工智能", "article", BypassPolicy())
@@ -143,9 +143,9 @@ func TestSearchRequiresPolicyScope(t *testing.T) {
 
 func TestFTSRebuild(t *testing.T) {
 	service := newFilterSvc(t)
-	service.CreateNode(&Node{Type: "article", Display: "t",
+	service.CreateNode(t.Context(), &Node{Type: "article", Display: "t",
 		Fields: Fields{"title": "重建测试", "body": "x", "publication_state": "published"}})
-	service.CreateNode(&Node{Type: "article", Display: "t",
+	service.CreateNode(t.Context(), &Node{Type: "article", Display: "t",
 		Fields: Fields{"title": "重建草稿", "body": "x", "publication_state": "draft"}})
 	_, err := service.db.Add("DELETE FROM nodes_fts").Exec()
 	if err != nil {
@@ -155,7 +155,7 @@ func TestFTSRebuild(t *testing.T) {
 	if total != 0 {
 		t.Fatal("precondition: index empty")
 	}
-	if err := service.search.Rebuild(); err != nil {
+	if err := service.search.Rebuild(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	_, total, _ = searchOneType(t, service, "重建", "article", BypassPolicy())

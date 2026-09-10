@@ -34,6 +34,9 @@
 - `LoadTree(typeName)` becomes `LoadTree(ctx, typeName, scope)`; Core no longer requires publication or filters published Nodes itself.
 - `TypeDef.TemplateCandidates` is removed; template candidates belong to the web layer.
 - The generic `/api/nodes/mine` endpoint is removed. Owner-scoped content listing is site business API (association: `GET /api/me/content`).
+- Every database or external I/O entry point now takes a `context.Context`: `CreateNode`, `PatchNode`, `DeleteNode`, `AddEdge`, `RemoveEdge`, `GetNodeById`, `GetNodeByAddress`, `Traverse`, `Subtree`, `Ancestors`, `EquivalenceClass`, `OutEdges`, `InEdges`, `RegisterAuth`, `FindAuth`, `AddAuthMethod`, `RemoveAuthMethod`, `CreateSession`, `ValidSession`, `DeleteSession`, `DeleteNodeSessions`, `GetSetting`, `SetSetting`, `ListSettings`, `DeleteSetting`, `RebuildSearch`, `Migrator.Up/UpDir` and `Render.Render`.
+- `SearchIndex.Rebuild` takes a `context.Context`.
+- `web.New`/`core.New` keep the panic convenience path; `web.Open`/`core.Open` return the initialization error instead.
 - `InEdges` now filters the requested field and, like `OutEdges`, returns logical two-way results for symmetric/equivalence relations.
 
 ### Added
@@ -66,6 +69,8 @@
 - Context-aware `RefID`, `RefIDs`, `HasRef`, `FullNode`, and `FullNodes` APIs.
 - Read-only relation integrity report, protected admin inspection, and non-mutating merge previews.
 - Archive/restore operations that preserve Edges and revoke sessions for archived authentication Nodes.
+- `Site.Close() error` releases the database pool idempotently, and `GET /healthz` / `GET /readyz` provide liveness and readiness probes.
+- Context cancellation is honored on write, graph, session, settings and search-rebuild paths, covered by a cancellation test.
 
 ### Migration
 

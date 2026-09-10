@@ -22,9 +22,9 @@ func queryAll(t *testing.T, service *Service, typeName string, where gquery.Expr
 
 func TestQueryBuilderScalarAndLogic(t *testing.T) {
 	s := newTestService(t)
-	s.CreateNode(&Node{Type: "article", Display: "甲", Fields: Fields{"title": "甲", "views": 100, "publication_state": "published"}})
-	s.CreateNode(&Node{Type: "article", Display: "乙", Fields: Fields{"title": "乙", "views": 5, "publication_state": "published"}})
-	s.CreateNode(&Node{Type: "article", Display: "丙", Fields: Fields{"title": "丙", "views": 100, "publication_state": "draft"}})
+	s.CreateNode(t.Context(), &Node{Type: "article", Display: "甲", Fields: Fields{"title": "甲", "views": 100, "publication_state": "published"}})
+	s.CreateNode(t.Context(), &Node{Type: "article", Display: "乙", Fields: Fields{"title": "乙", "views": 5, "publication_state": "published"}})
+	s.CreateNode(t.Context(), &Node{Type: "article", Display: "丙", Fields: Fields{"title": "丙", "views": 100, "publication_state": "draft"}})
 
 	where := gquery.And(
 		gquery.EQ(gquery.Field("publication_state"), "published"),
@@ -51,11 +51,11 @@ func TestQueryBuilderScalarAndLogic(t *testing.T) {
 
 func TestQueryBuilderRelations(t *testing.T) {
 	s := newTestService(t)
-	categoryID, _ := s.CreateNode(&Node{
+	categoryID, _ := s.CreateNode(t.Context(), &Node{
 		Type: "category", Display: "分类",
 		Fields: Fields{"name": "分类", "publication_state": "published"},
 	})
-	articleID, _ := s.CreateNode(&Node{
+	articleID, _ := s.CreateNode(t.Context(), &Node{
 		Type: "article", Display: "文章",
 		Fields: Fields{"title": "文章", "categories": []any{categoryID}},
 	})
@@ -79,15 +79,15 @@ func TestQueryBuilderRelations(t *testing.T) {
 
 func TestQuerySubtreeSet(t *testing.T) {
 	s := newTestService(t)
-	root, _ := s.CreateNode(&Node{
+	root, _ := s.CreateNode(t.Context(), &Node{
 		Type: "category", Display: "根",
 		Fields: Fields{"name": "根", "slug": "root", "publication_state": "published"},
 	})
-	child, _ := s.CreateNode(&Node{
+	child, _ := s.CreateNode(t.Context(), &Node{
 		Type: "category", Display: "子",
 		Fields: Fields{"name": "子", "publication_state": "published", "parent": root},
 	})
-	articleID, _ := s.CreateNode(&Node{
+	articleID, _ := s.CreateNode(t.Context(), &Node{
 		Type: "article", Display: "文章",
 		Fields: Fields{"title": "文章", "categories": []any{child}},
 	})
@@ -100,7 +100,7 @@ func TestQuerySubtreeSet(t *testing.T) {
 
 func TestLispProducesTypedQuery(t *testing.T) {
 	s := newTestService(t)
-	s.CreateNode(&Node{Type: "article", Display: "甲", Fields: Fields{"title": "甲", "views": 100}})
+	s.CreateNode(t.Context(), &Node{Type: "article", Display: "甲", Fields: Fields{"title": "甲", "views": 100}})
 	where, err := gquery.ParseLisp(`(and (= $title {:title}) (> $views 50))`, map[string]any{"title": "甲"})
 	if err != nil {
 		t.Fatal(err)
@@ -154,5 +154,39 @@ func TestQueryHonorsCanceledContext(t *testing.T) {
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+}
+
+// 写路径和图原语同样必须响应请求取消: 不能出现“部分 API 带 Context”的双轨。
+func TestWriteAndGraphHonorCanceledContext(t *testing.T) {
+	s := newTraverseService(t)
+	root, _ := s.CreateNode(t.Context(), &Node{Type: "category", Display: "root", Fields: Fields{"name": "root"}})
+	child, _ := s.CreateNode(t.Context(), &Node{Type: "category", Display: "child", Fields: Fields{"name": "child", "parent": root}})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	if _, err := s.CreateNode(ctx, &Node{Type: "category", Display: "x", Fields: Fields{"name": "x"}}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("CreateNode error = %v, want context.Canceled", err)
+	}
+	display := "patched"
+	current, _ := s.GetNodeById(t.Context(), child)
+	if err := s.PatchNode(ctx, child, &NodePatch{Revision: &current.Revision, Display: &display}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("PatchNode error = %v, want context.Canceled", err)
+	}
+	if err := s.DeleteNode(ctx, child); !errors.Is(err, context.Canceled) {
+		t.Fatalf("DeleteNode error = %v, want context.Canceled", err)
+	}
+	if _, err := s.LoadTree(ctx, "category", BypassPolicy()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("LoadTree error = %v, want context.Canceled", err)
+	}
+	if _, err := s.Traverse(ctx, "category", child, "parent", 5); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Traverse error = %v, want context.Canceled", err)
+	}
+	if _, err := s.GetNodeById(ctx, child); !errors.Is(err, context.Canceled) {
+		t.Fatalf("GetNodeById error = %v, want context.Canceled", err)
+	}
+	if err := s.RebuildSearch(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("RebuildSearch error = %v, want context.Canceled", err)
 	}
 }

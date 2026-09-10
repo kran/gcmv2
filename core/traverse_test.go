@@ -31,9 +31,9 @@ func newTraverseService(t *testing.T) *Service {
 // 造树: root → a → b（b.parent=a, a.parent=root）
 func buildTree(t *testing.T, s *Service) (root, a, b int64) {
 	t.Helper()
-	root, _ = s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "root"}})
-	a, _ = s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "a", "parent": root}})
-	b, _ = s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "b", "parent": a}})
+	root, _ = s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: Fields{"name": "root"}})
+	a, _ = s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: Fields{"name": "a", "parent": root}})
+	b, _ = s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: Fields{"name": "b", "parent": a}})
 	return
 }
 
@@ -42,7 +42,7 @@ func TestTraverseUp(t *testing.T) {
 	root, a, b := buildTree(t, s)
 
 	// b 向上: [a, root]
-	got, err := s.Traverse("category", b, "parent", 10)
+	got, err := s.Traverse(t.Context(), "category", b, "parent", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,12 +50,12 @@ func TestTraverseUp(t *testing.T) {
 		t.Fatalf("traverse b: %v", got)
 	}
 	// a 向上: [root]
-	got, _ = s.Traverse("category", a, "parent", 10)
+	got, _ = s.Traverse(t.Context(), "category", a, "parent", 10)
 	if !reflect.DeepEqual(got, []int64{root}) {
 		t.Fatalf("traverse a: %v", got)
 	}
 	// root 向上: 空
-	got, _ = s.Traverse("category", root, "parent", 10)
+	got, _ = s.Traverse(t.Context(), "category", root, "parent", 10)
 	if len(got) != 0 {
 		t.Fatalf("traverse root: %v", got)
 	}
@@ -65,7 +65,7 @@ func TestSubtreeDown(t *testing.T) {
 	s := newTraverseService(t)
 	root, a, b := buildTree(t, s)
 
-	got, err := s.Subtree("category", root, "parent", 10)
+	got, err := s.Subtree(t.Context(), "category", root, "parent", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,12 +73,12 @@ func TestSubtreeDown(t *testing.T) {
 		t.Fatalf("subtree root: %v", got)
 	}
 	// a 的子树: [b]
-	got, _ = s.Subtree("category", a, "parent", 10)
+	got, _ = s.Subtree(t.Context(), "category", a, "parent", 10)
 	if !reflect.DeepEqual(got, []int64{b}) {
 		t.Fatalf("subtree a: %v", got)
 	}
 	// b 无子树
-	got, _ = s.Subtree("category", b, "parent", 10)
+	got, _ = s.Subtree(t.Context(), "category", b, "parent", 10)
 	if len(got) != 0 {
 		t.Fatalf("subtree b: %v", got)
 	}
@@ -89,12 +89,12 @@ func TestTraverseMaxHops(t *testing.T) {
 	_, a, b := buildTree(t, s)
 
 	// 1 跳: 只到 a
-	got, _ := s.Traverse("category", b, "parent", 1)
+	got, _ := s.Traverse(t.Context(), "category", b, "parent", 1)
 	if !reflect.DeepEqual(got, []int64{a}) {
 		t.Fatalf("1 hop: %v", got)
 	}
 	// 子树 1 跳: root 只到 a
-	got, _ = s.Subtree("category", a, "parent", 1)
+	got, _ = s.Subtree(t.Context(), "category", a, "parent", 1)
 	if !reflect.DeepEqual(got, []int64{b}) {
 		t.Fatalf("subtree 1 hop: %v", got)
 	}
@@ -103,14 +103,14 @@ func TestTraverseMaxHops(t *testing.T) {
 func TestEquivalenceClass(t *testing.T) {
 	s := newTraverseService(t)
 	// 等价类: x ↔ y ↔ z（只存单向边 x→y, y→z — 等价无方向, 类内全可达）
-	x, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "x"}})
-	y, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "y"}})
-	z, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "z"}})
-	alone, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "alone"}})
-	s.AddEdge(x, y, "synonym", 0)
-	s.AddEdge(y, z, "synonym", 0)
+	x, _ := s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: Fields{"name": "x"}})
+	y, _ := s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: Fields{"name": "y"}})
+	z, _ := s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: Fields{"name": "z"}})
+	alone, _ := s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: Fields{"name": "alone"}})
+	s.AddEdge(t.Context(), x, y, "synonym", 0)
+	s.AddEdge(t.Context(), y, z, "synonym", 0)
 
-	got, err := s.EquivalenceClass("category", y, "synonym", 10)
+	got, err := s.EquivalenceClass(t.Context(), "category", y, "synonym", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,11 +118,11 @@ func TestEquivalenceClass(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("class y: %v, want %v", got, want)
 	}
-	if edges, total, err := s.OutEdges("category", z, "synonym", 1, 10); err != nil || total != 1 || len(edges) != 1 {
+	if edges, total, err := s.OutEdges(t.Context(), "category", z, "synonym", 1, 10); err != nil || total != 1 || len(edges) != 1 {
 		t.Fatalf("equivalence OutEdges reverse = %d, %#v, %v", total, edges, err)
 	}
 	// 孤立节点: 只有自己
-	got, _ = s.EquivalenceClass("category", alone, "synonym", 10)
+	got, _ = s.EquivalenceClass(t.Context(), "category", alone, "synonym", 10)
 	if !reflect.DeepEqual(got, []int64{alone}) {
 		t.Fatalf("class alone: %v", got)
 	}
@@ -130,22 +130,22 @@ func TestEquivalenceClass(t *testing.T) {
 
 func TestTransitiveRelationRejectsCycle(t *testing.T) {
 	s := newTraverseService(t)
-	a, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "a"}})
-	b, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "b"}})
-	if _, err := s.AddEdge(a, b, "parent", 0); err != nil {
+	a, _ := s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: Fields{"name": "a"}})
+	b, _ := s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: Fields{"name": "b"}})
+	if _, err := s.AddEdge(t.Context(), a, b, "parent", 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AddEdge(b, a, "parent", 0); err == nil {
+	if _, err := s.AddEdge(t.Context(), b, a, "parent", 0); err == nil {
 		t.Fatal("cycle must be rejected")
 	}
-	got, err := s.Traverse("category", a, "parent", 5)
+	got, err := s.Traverse(t.Context(), "category", a, "parent", 5)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(got, []int64{b}) {
 		t.Fatalf("traverse after rejected cycle: %v", got)
 	}
-	if _, err := s.EquivalenceClass("category", a, "parent", 10); err == nil {
+	if _, err := s.EquivalenceClass(t.Context(), "category", a, "parent", 10); err == nil {
 		t.Fatal("non-equivalence field must be rejected")
 	}
 }
@@ -154,16 +154,16 @@ func TestTransitiveRelationRejectsCycle(t *testing.T) {
 func TestTraverseValidation(t *testing.T) {
 	s := newTraverseService(t)
 	root, _, _ := buildTree(t, s)
-	if _, err := s.Traverse("category", root, "ghost", 10); err == nil {
+	if _, err := s.Traverse(t.Context(), "category", root, "ghost", 10); err == nil {
 		t.Fatal("unknown field must fail")
 	}
-	if _, err := s.Traverse("category", root, "name", 10); err == nil {
+	if _, err := s.Traverse(t.Context(), "category", root, "name", 10); err == nil {
 		t.Fatal("non-ref field must fail")
 	}
-	if _, err := s.Subtree("category", 999, "parent", 10); err == nil {
+	if _, err := s.Subtree(t.Context(), "category", 999, "parent", 10); err == nil {
 		t.Fatal("missing start must fail")
 	}
-	if _, err := s.Traverse("category", root, "children", 10); err == nil {
+	if _, err := s.Traverse(t.Context(), "category", root, "children", 10); err == nil {
 		t.Fatal("non-transitive ref must fail")
 	}
 }
@@ -173,15 +173,15 @@ func TestAncestorsDepthOrder(t *testing.T) {
 	s := newFilterSvc(t)
 	// 先建叶后建根 — id 序与层级序相反: leaf(id1) → mid(id2) → top(id3)
 	// 父链: leaf 的父 = mid, mid 的父 = top
-	top, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "顶", "slug": "top"}})
-	mid, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "中", "slug": "mid", "parent": top}})
-	leaf, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "叶", "parent": mid}})
+	top, _ := s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: Fields{"name": "顶", "slug": "top"}})
+	mid, _ := s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: Fields{"name": "中", "slug": "mid", "parent": top}})
+	leaf, _ := s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: Fields{"name": "叶", "parent": mid}})
 	// Traverse(id 序) 与 Ancestors(深度序) 对照
-	tr, err := s.Traverse("category", leaf, "parent", 20)
+	tr, err := s.Traverse(t.Context(), "category", leaf, "parent", 20)
 	if err != nil {
 		t.Fatal(err)
 	}
-	anc, err := s.Ancestors("category", leaf, "parent", 20)
+	anc, err := s.Ancestors(t.Context(), "category", leaf, "parent", 20)
 	if err != nil {
 		t.Fatal(err)
 	}

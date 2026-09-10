@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -23,22 +24,23 @@ const maxRelationDepth = 4
 
 type queryCompiler struct {
 	service *Service
+	ctx     context.Context
 	nodes   int
 	alias   int
 }
 
-func (s *Service) compileWhere(typeName string, expression gquery.Expr) (dba.Node, error) {
-	return s.compileWhereAt(typeName, expression, "nodes")
+func (s *Service) compileWhere(ctx context.Context, typeName string, expression gquery.Expr) (dba.Node, error) {
+	return s.compileWhereAt(ctx, typeName, expression, "nodes")
 }
 
-func (s *Service) compileWhereAt(typeName string, expression gquery.Expr, nodeRef string) (dba.Node, error) {
+func (s *Service) compileWhereAt(ctx context.Context, typeName string, expression gquery.Expr, nodeRef string) (dba.Node, error) {
 	if _, ok := s.types.Type(typeName); !ok {
 		return dba.Node{}, fmt.Errorf("%w: type %q not defined", ErrInvalidQuery, typeName)
 	}
 	if expression == nil {
 		return dba.Expr("1 = 1"), nil
 	}
-	compiler := &queryCompiler{service: s}
+	compiler := &queryCompiler{service: s, ctx: ctx}
 	return compiler.compile(expression, typeName, nodeRef, 0)
 }
 
@@ -401,7 +403,7 @@ func (c *queryCompiler) compileRelated(expr gquery.Related, typeName, nodeRef st
 func (c *queryCompiler) resolveSet(set gquery.Set, expectedType string) ([]any, error) {
 	switch value := set.(type) {
 	case gquery.Subtree:
-		root, err := c.service.GetNodeByAddress(value.Address)
+		root, err := c.service.GetNodeByAddress(c.ctx, value.Address)
 		if err != nil {
 			return nil, err
 		}
@@ -415,7 +417,7 @@ func (c *queryCompiler) resolveSet(set gquery.Set, expectedType string) ([]any, 
 		if !ok {
 			return nil, fmt.Errorf("%w: type %q is not tree-enabled", ErrInvalidValue, root.Type)
 		}
-		ids, err := c.service.Subtree(root.Type, root.ID, tree.Parent, maxRelationDepth*5)
+		ids, err := c.service.Subtree(c.ctx, root.Type, root.ID, tree.Parent, maxRelationDepth*5)
 		if err != nil {
 			return nil, err
 		}

@@ -68,7 +68,7 @@ func (c *CmsCtx) Actor() Actor {
 	if token == "" {
 		return c.actor
 	}
-	session, err := c.site.engine.ValidSession(token)
+	session, err := c.site.engine.ValidSession(c.R.Context(), token)
 	if err != nil || session == nil {
 		return c.actor
 	}
@@ -76,7 +76,7 @@ func (c *CmsCtx) Actor() Actor {
 	if !ok {
 		return c.actor
 	}
-	node, err := c.site.engine.GetNodeById(session.NodeID)
+	node, err := c.site.engine.GetNodeById(c.R.Context(), session.NodeID)
 	if err != nil || node == nil || node.ArchivedAt != nil || node.Type != realm.NodeType {
 		return c.actor
 	}
@@ -97,7 +97,7 @@ func (c *CmsCtx) Principal() (*core.Node, error) {
 	if c.principalLoaded {
 		return c.principal, nil
 	}
-	node, err := c.site.engine.GetNodeById(actor.NodeID)
+	node, err := c.site.engine.GetNodeById(c.R.Context(), actor.NodeID)
 	if err != nil {
 		return nil, err
 	}

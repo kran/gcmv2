@@ -21,9 +21,9 @@ func (s *Site) nodeHandler(ctx *CmsCtx) {
 	var n *core.Node
 	var err error
 	if id, e := strconv.ParseInt(raw, 10, 64); e == nil {
-		n, err = s.engine.GetNodeById(id)
+		n, err = s.engine.GetNodeById(ctx.R.Context(), id)
 	} else {
-		n, err = s.engine.GetNodeByAddress(raw)
+		n, err = s.engine.GetNodeByAddress(ctx.R.Context(), raw)
 	}
 	if err != nil {
 		slog.Error("node lookup failed", "path", raw, "err", err)
@@ -78,7 +78,7 @@ func (s *Site) render404(ctx *CmsCtx) {
 	var buf bytes.Buffer
 	data := map[string]any{"Path": ctx.R.URL.Path}
 	_ = s.engine.Hooks().Fire(HookRender, ctx, data) // 404 上下文失败不阻断 404 页
-	err := s.render.Render(&buf, []string{"404.html"}, data)
+	err := s.render.Render(ctx.R.Context(), &buf, []string{"404.html"}, data)
 	if err == nil {
 		ctx.SetHeader("Content-Type", "text/html; charset=utf-8")
 		ctx.W.WriteHeader(http.StatusNotFound)

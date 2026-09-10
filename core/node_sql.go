@@ -4,6 +4,7 @@ package core
 // 列白名单防注入; fields 一律 json_patch merge。
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,8 +28,8 @@ var (
 // ── 读 ────────────────────────────────────────
 
 // GetNodeById 按 id 取节点; 不存在返回 (nil, nil)。
-func (s *Service) GetNodeById(id int64) (*Node, error) {
-	n, err := s.db.Select("nodes", `id = #{1}`, id).FetchOne[Node]()
+func (s *Service) GetNodeById(ctx context.Context, id int64) (*Node, error) {
+	n, err := s.db.WithCtx(ctx).Select("nodes", `id = #{1}`, id).FetchOne[Node]()
 	if err != nil {
 		return nil, err
 	}
@@ -39,7 +40,7 @@ func (s *Service) GetNodeById(id int64) (*Node, error) {
 }
 
 // GetNodeByAddress 按 addressable capability 的全局地址查节点。
-func (s *Service) GetNodeByAddress(address string) (*Node, error) {
+func (s *Service) GetNodeByAddress(ctx context.Context, address string) (*Node, error) {
 	if address == "" {
 		return nil, nil
 	}
@@ -60,7 +61,7 @@ func (s *Service) GetNodeByAddress(address string) (*Node, error) {
 		return nil, nil
 	}
 	query := `SELECT * FROM nodes WHERE archived_at IS NULL AND (` + strings.Join(conditions, " OR ") + `) LIMIT 1`
-	n, err := s.db.Add(query, args...).FetchOne[Node]()
+	n, err := s.db.WithCtx(ctx).Add(query, args...).FetchOne[Node]()
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +73,7 @@ func (s *Service) GetNodeByAddress(address string) (*Node, error) {
 // CreateNode 建节点: 校验 → 事务（BeforeCreate → INSERT → ref 落边 → AfterCreate）。
 // 返回新节点 ID; 不修改调用方传入的 Node。未知字段直接报错，避免拼写错误和
 // 客户端/Schema 漂移被静默吞掉。
-func (s *Service) CreateNode(n *Node) (int64, error) {
+func (s *Service) CreateNode(ctx context.Context, n *Node) (int64, error) {
 	if n == nil {
 		return 0, errors.New("core: create: nil node")
 	}
@@ -102,7 +103,7 @@ func (s *Service) CreateNode(n *Node) (int64, error) {
 	m.UpdatedAt = now
 
 	var id int64
-	err = s.db.Transaction(func(tx *dba.SQL) error {
+	err = s.db.WithCtx(ctx).Transaction(func(tx *dba.SQL) error {
 		err := s.hooks.Fire(HookNodeBeforeCreate, tx, &m)
 		if err != nil {
 			return err
@@ -150,11 +151,11 @@ func (s *Service) CreateNode(n *Node) (int64, error) {
 
 // PatchNode 差量更新: 非 nil 列（dba.Update map）+ fields json_patch merge。
 // 空 patch（全 nil + fields 空）→ 零 UPDATE（幂等）。
-func (s *Service) PatchNode(id int64, patch *NodePatch) error {
+func (s *Service) PatchNode(ctx context.Context, id int64, patch *NodePatch) error {
 	if patch == nil {
 		return errors.New("core: patch: nil patch")
 	}
-	existing, err := s.GetNodeById(id)
+	existing, err := s.GetNodeById(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -175,7 +176,7 @@ func (s *Service) PatchNode(id int64, patch *NodePatch) error {
 		return fmt.Errorf("core: type %q not defined", existing.Type)
 	}
 
-	return s.db.Transaction(func(tx *dba.SQL) error {
+	return s.db.WithCtx(ctx).Transaction(func(tx *dba.SQL) error {
 		err := s.hooks.Fire(HookNodeBeforeUpdate, tx, patch)
 		if err != nil {
 			return err
@@ -259,8 +260,8 @@ func (s *Service) PatchNode(id int64, patch *NodePatch) error {
 
 // DeleteNode permanently deletes a Node after applying every incoming
 // reference's on_delete policy in one transaction.
-func (s *Service) DeleteNode(id int64) error {
-	return s.db.Transaction(func(tx *dba.SQL) error {
+func (s *Service) DeleteNode(ctx context.Context, id int64) error {
+	return s.db.WithCtx(ctx).Transaction(func(tx *dba.SQL) error {
 		return s.deleteNodeTx(tx, id, make(map[int64]bool))
 	})
 }

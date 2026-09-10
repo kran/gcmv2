@@ -9,14 +9,14 @@ import (
 
 func TestPolicyScopeCannotBeWeakenedByUserWhere(t *testing.T) {
 	service := newTestService(t)
-	_, err := service.CreateNode(&Node{
+	_, err := service.CreateNode(t.Context(), &Node{
 		Type: "article", Display: "public",
 		Fields: Fields{"title": "public", "publication_state": "published"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = service.CreateNode(&Node{
+	_, err = service.CreateNode(t.Context(), &Node{
 		Type: "article", Display: "draft",
 		Fields: Fields{"title": "draft", "publication_state": "draft"},
 	})
@@ -39,7 +39,7 @@ func TestPolicyScopeCannotBeWeakenedByUserWhere(t *testing.T) {
 
 func TestPolicyScopeNilDeniesAll(t *testing.T) {
 	service := newTestService(t)
-	_, err := service.CreateNode(&Node{
+	_, err := service.CreateNode(t.Context(), &Node{
 		Type: "article", Display: "public",
 		Fields: Fields{"title": "public", "publication_state": "published"},
 	})

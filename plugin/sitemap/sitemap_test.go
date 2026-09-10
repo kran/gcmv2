@@ -39,13 +39,13 @@ func TestSitemap(t *testing.T) {
 	s := testSite(t)
 	eng := s.Engine()
 	// 已发布（slug）
-	eng.CreateNode(&core.Node{Type: "article", Display: "甲",
+	eng.CreateNode(t.Context(), &core.Node{Type: "article", Display: "甲",
 		Fields: map[string]any{"body": "x", "slug": "article-a", "publication_state": "published"}})
 	// 已发布（无 slug → id）
-	eng.CreateNode(&core.Node{Type: "article", Display: "乙",
+	eng.CreateNode(t.Context(), &core.Node{Type: "article", Display: "乙",
 		Fields: map[string]any{"body": "y", "publication_state": "published"}})
 	// 草稿 — 不出现
-	eng.CreateNode(&core.Node{Type: "article", Display: "草稿",
+	eng.CreateNode(t.Context(), &core.Node{Type: "article", Display: "草稿",
 		Fields: map[string]any{"body": "z", "publication_state": "draft"}})
 
 	req := mustReq(t, "GET", "/sitemap.xml")

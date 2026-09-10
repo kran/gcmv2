@@ -15,10 +15,10 @@ func publishedScope() QueryScope {
 // 树形态: root → a → b; root → c（c 下架 status=0 不入树）
 func buildTreeForTree(t *testing.T, s *Service) (root, a, b int64) {
 	t.Helper()
-	root, _ = s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "root", "slug": "root", "publication_state": "published", "position": 1}})
-	a, _ = s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "a", "slug": "a", "publication_state": "published", "position": 1, "parent": root}})
-	b, _ = s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "b", "slug": "b", "publication_state": "published", "position": 2, "parent": a}})
-	c, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "c", "slug": "c", "publication_state": "draft", "parent": root}})
+	root, _ = s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: Fields{"name": "root", "slug": "root", "publication_state": "published", "position": 1}})
+	a, _ = s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: Fields{"name": "a", "slug": "a", "publication_state": "published", "position": 1, "parent": root}})
+	b, _ = s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: Fields{"name": "b", "slug": "b", "publication_state": "published", "position": 2, "parent": a}})
+	c, _ := s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: Fields{"name": "c", "slug": "c", "publication_state": "draft", "parent": root}})
 	_ = c
 	return
 }
@@ -101,8 +101,8 @@ func TestTreeBasics(t *testing.T) {
 
 func TestTreeRejectsCycle(t *testing.T) {
 	s := newTraverseService(t)
-	a, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "a", "slug": "a", "publication_state": "published"}})
-	b, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: Fields{"name": "b", "slug": "b", "publication_state": "published", "parent": a}})
+	a, _ := s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: Fields{"name": "a", "slug": "a", "publication_state": "published"}})
+	b, _ := s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: Fields{"name": "b", "slug": "b", "publication_state": "published", "parent": a}})
 	if err := patchCurrent(t, s, a, &NodePatch{Fields: Fields{"parent": b}}); err == nil {
 		t.Fatal("tree cycle must be rejected")
 	}
@@ -129,8 +129,8 @@ types:
       - { name: position, kind: number, default: 0 }
       - { name: parent, kind: ref, to: department }
 `))
-	root, _ := s.CreateNode(&Node{Type: "department", Display: "总部", Fields: Fields{"name": "总部"}})
-	child, _ := s.CreateNode(&Node{Type: "department", Display: "研发", Fields: Fields{"name": "研发", "parent": root}})
+	root, _ := s.CreateNode(t.Context(), &Node{Type: "department", Display: "总部", Fields: Fields{"name": "总部"}})
+	child, _ := s.CreateNode(t.Context(), &Node{Type: "department", Display: "研发", Fields: Fields{"name": "研发", "parent": root}})
 
 	if _, err := s.LoadTree(t.Context(), "department", QueryScope{}); err == nil {
 		t.Fatal("zero scope must be rejected")

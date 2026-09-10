@@ -1,18 +1,19 @@
 package core
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/kran/gcmv2/types"
 )
 
 // Traverse follows a transitive outgoing reference.
-func (s *Service) Traverse(typeName string, start int64, field string, maxHops int) ([]int64, error) {
-	err := s.validateTraversal(typeName, start, field, maxHops, false)
+func (s *Service) Traverse(ctx context.Context, typeName string, start int64, field string, maxHops int) ([]int64, error) {
+	err := s.validateTraversal(ctx, typeName, start, field, maxHops, false)
 	if err != nil {
 		return nil, err
 	}
-	return s.walk(`
+	return s.walk(ctx, `
 		WITH RECURSIVE walk(id, depth, path) AS (
 			SELECT to_node, 1, printf(',%d,%d,', from_node, to_node)
 			FROM edges WHERE field = #{1} AND from_node = #{2}
@@ -26,12 +27,12 @@ func (s *Service) Traverse(typeName string, start int64, field string, maxHops i
 }
 
 // Subtree follows a transitive reference in the incoming direction.
-func (s *Service) Subtree(typeName string, start int64, field string, maxHops int) ([]int64, error) {
-	err := s.validateTraversal(typeName, start, field, maxHops, false)
+func (s *Service) Subtree(ctx context.Context, typeName string, start int64, field string, maxHops int) ([]int64, error) {
+	err := s.validateTraversal(ctx, typeName, start, field, maxHops, false)
 	if err != nil {
 		return nil, err
 	}
-	return s.walk(`
+	return s.walk(ctx, `
 		WITH RECURSIVE walk(id, depth, path) AS (
 			SELECT from_node, 1, printf(',%d,%d,', to_node, from_node)
 			FROM edges WHERE field = #{1} AND to_node = #{2}
@@ -45,12 +46,12 @@ func (s *Service) Subtree(typeName string, start int64, field string, maxHops in
 }
 
 // Ancestors returns a transitive parent chain in root-to-leaf order.
-func (s *Service) Ancestors(typeName string, start int64, field string, maxHops int) ([]*Node, error) {
-	err := s.validateTraversal(typeName, start, field, maxHops, false)
+func (s *Service) Ancestors(ctx context.Context, typeName string, start int64, field string, maxHops int) ([]*Node, error) {
+	err := s.validateTraversal(ctx, typeName, start, field, maxHops, false)
 	if err != nil {
 		return nil, err
 	}
-	ids, err := s.walk(`
+	ids, err := s.walk(ctx, `
 		WITH RECURSIVE anc(id, depth, path) AS (
 			SELECT to_node, 1, printf(',%d,%d,', from_node, to_node)
 			FROM edges WHERE field = #{1} AND from_node = #{2}
@@ -66,7 +67,7 @@ func (s *Service) Ancestors(typeName string, start int64, field string, maxHops 
 	}
 	nodes := make([]*Node, 0, len(ids))
 	for _, id := range ids {
-		node, err := s.GetNodeById(id)
+		node, err := s.GetNodeById(ctx, id)
 		if err != nil {
 			return nil, err
 		}
@@ -77,18 +78,18 @@ func (s *Service) Ancestors(typeName string, start int64, field string, maxHops 
 	return nodes, nil
 }
 
-func (s *Service) walk(cte string, args ...any) ([]int64, error) {
-	return s.db.Add(cte, args...).FetchList[int64]()
+func (s *Service) walk(ctx context.Context, cte string, args ...any) ([]int64, error) {
+	return s.db.WithCtx(ctx).Add(cte, args...).FetchList[int64]()
 }
 
 // EquivalenceClass follows an equivalence relation in both directions and
 // includes the start Node.
-func (s *Service) EquivalenceClass(typeName string, start int64, field string, maxHops int) ([]int64, error) {
-	err := s.validateTraversal(typeName, start, field, maxHops, true)
+func (s *Service) EquivalenceClass(ctx context.Context, typeName string, start int64, field string, maxHops int) ([]int64, error) {
+	err := s.validateTraversal(ctx, typeName, start, field, maxHops, true)
 	if err != nil {
 		return nil, err
 	}
-	return s.walk(`
+	return s.walk(ctx, `
 		WITH RECURSIVE walk(id, depth, path) AS (
 			SELECT #{2}, 0, printf(',%d,', #{2})
 			UNION ALL
@@ -102,7 +103,7 @@ func (s *Service) EquivalenceClass(typeName string, start int64, field string, m
 		SELECT DISTINCT id FROM walk ORDER BY id`, field, start, maxHops)
 }
 
-func (s *Service) validateTraversal(typeName string, start int64, fieldName string, maxHops int, equivalence bool) error {
+func (s *Service) validateTraversal(ctx context.Context, typeName string, start int64, fieldName string, maxHops int, equivalence bool) error {
 	if maxHops <= 0 || maxHops > 100 {
 		return fmt.Errorf("core: traversal maxHops must be between 1 and 100")
 	}
@@ -117,7 +118,7 @@ func (s *Service) validateTraversal(typeName string, start int64, fieldName stri
 	} else if !field.Transitive && !isTreeField(s.types, typeName, fieldName) {
 		return fmt.Errorf("core: field %s.%s is not transitive", typeName, fieldName)
 	}
-	node, err := s.GetNodeById(start)
+	node, err := s.GetNodeById(ctx, start)
 	if err != nil {
 		return err
 	}

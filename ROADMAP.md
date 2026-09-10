@@ -195,12 +195,12 @@ employment(contact, account, role, start_at, end_at)  关系 Node
 ## 3.2 核心一致性
 
 - [x] Create 和 Patch 已统一字段类型校验；Patch 单独定义 null/required 语义。
-- [ ] 普通 Node.Fields 不包含 ref，但缺少明确的 RefID/RefIDs API，容易误用。
-- [ ] 直接 SQL seed 不会触发搜索同步。
+- [x] Node.Fields 不包含 ref；RefID/RefIDs/HasRef/FullNode 已提供明确读取入口。
+- [x] 直接 SQL seed 不会触发写路径同步，但启动期 `RebuildSearch` + `SyncRelationSchema` 兜底；站点迁移后必须显式重建。
 - [x] TypeDef 标量 unique/index 和全局 address 索引在启动时按 Schema 同步。
 - [ ] 业务 Web Hook 与 Core Hook 的作用范围容易混淆。
 - [ ] Engine 接口逐渐变大，但尚未明确哪些能力属于稳定公共 API。
-- [ ] DB 查询普遍不接收 request context，取消和超时无法贯穿。
+- [x] 全部数据库与外部 I/O 入口接收 request context（含写路径、图原语、认证、配置、迁移和渲染）。
 
 ## 3.3 CMS 假设泄漏
 
@@ -592,9 +592,10 @@ password.Mount(site, password.Options{Realm: "member"})
 
 ### 生命周期
 
-- [ ] `Site.Close() error`。
-- [ ] 增加返回 error 的 `web.Open()`，保留 panic 便捷入口。
-- [ ] DB 和 Migrator 支持 Context。
+- [x] `Site.Close() error`（幂等，释放连接池）。
+- [x] `web.Open()` / `core.Open()` 返回 error，`New` 保留 panic 便捷入口。
+- [x] DB 与 Migrator 支持 Context。
+- [x] `/healthz` 与 `/readyz` 运维探针。
 - [ ] 类型 Schema hash 和按需搜索重建。
 
 ### v0.9.0 验收
@@ -768,29 +769,22 @@ task          待办任务
 
 # 9. 下一步，只做这一批
 
-在继续设计 CRM UI 前，先完成 v0.8.4：
+v0.8.4 批次已全部完成（见 Phase 0）。当前批次是 **v0.9.0 收口**：
 
-1. 公共列表默认发布范围
-2. sort 白名单
-3. Patch 完整校验
-4. URL type 校验
-5. admin/api upload 默认认证
-6. Admin logout 和 Session 过期
-7. AddAuthMethod 类型校验
-8. ExpandPathMany 按 ID 对齐
-9. types.yaml 严格字段解析
-10. 查询复杂度上限
-11. 对应回归测试
+已完成：
 
-同时只写 ADR，不立即实现：
+- [x] 边界泄漏：mine endpoint、TemplateCandidates、select 特判、LoadTree/publication 耦合
+- [x] Context 贯穿全部数据库与外部 I/O 入口
+- [x] 生命周期：`Open`/`Close`、healthz/readyz、DB 与 Migrator Context
 
-- Node status/publication 语义
-- JSON + Edge 索引和约束策略
-- Query AST/QuerySpec
-- Auth Realm/Actor
-- Edge 与关系 Node 边界
+本批剩余：
 
-完成上述内容并由 association 回归通过后，再开始 v0.9.0。
+1. 结构化错误契约（Status/Code/Message、401/403/404/409/422、Hook 结构化错误）
+2. 写入侧授权：Create/Update/Delete/Transition 统一 Policy 与字段写入白名单
+3. 最小非 CMS 示例（account/contact/employment/opportunity/activity，不声明 user/article/page）
+4. 关闭 v0.9.0：跑完验收条件并把核心 API 标记为冻结候选
+
+完成后再开始 v0.10.0（审计、Workflow、关系 Node 后台视图）与 v0.11.0（聚合、导入导出、CRM 视图）。
 
 ---
 

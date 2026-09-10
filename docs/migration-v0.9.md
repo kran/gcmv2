@@ -99,7 +99,23 @@ Search(q, type, page, size)              -> Search(ctx, core.SearchQuery{Targets
 GET /api/nodes/mine?type=                -> site-owned owner listing (association: GET /api/me/content)
 Kind.Validate(v)                         -> Kind.Validate(fieldDef, v)
 TypeDef.TemplateCandidates()             -> web template candidates (web.nodeCandidates)
+web.New(dir)                             -> web.Open(dir) (*Site, error)
+core.New(db, ts)                         -> core.Open(db, ts) (*Service, error)
+site.DB().Pool().Close()                 -> site.Close()
+CreateNode/PatchNode/DeleteNode          -> ...(ctx, ...)
+GetNodeById/GetNodeByAddress             -> ...(ctx, ...)
+Traverse/Subtree/Ancestors/EquivalenceClass -> ...(ctx, ...)
+OutEdges/InEdges/AddEdge/RemoveEdge      -> ...(ctx, ...)
+RegisterAuth/FindAuth/AddAuthMethod      -> ...(ctx, ...)
+CreateSession/ValidSession/DeleteSession -> ...(ctx, ...)
+Settings get/set/list/delete             -> ...(ctx, ...)
+RebuildSearch()/Migrator.Up/UpDir        -> ...(ctx, ...)
+Render.Render(w, candidates, data)       -> Render(ctx, w, candidates, data)
 ```
+
+`New` remains as a panic-on-error convenience wrapper; process entry points should use
+`Open` so startup failures are logged instead of crashing with a stack trace. `Site.Close`
+is idempotent.
 
 `LoadTree` accepts an explicit `core.QueryScope`; pass the Policy scope on public routes and `core.BypassPolicy()` for internal or administrative trees. Trees no longer require a publication capability.
 

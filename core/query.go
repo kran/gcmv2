@@ -84,11 +84,11 @@ func (s *Service) buildQuery(ctx context.Context, query ListQuery) (*dba.SQL, er
 	if err != nil {
 		return nil, err
 	}
-	where, err := s.compileWhere(query.Type, effectiveWhere)
+	where, err := s.compileWhere(ctx, query.Type, effectiveWhere)
 	if err != nil {
 		return nil, err
 	}
-	order, err := s.compileSort(query.Type, query.Sort)
+	order, err := s.compileSort(ctx, query.Type, query.Sort)
 	if err != nil {
 		return nil, err
 	}
@@ -98,14 +98,14 @@ func (s *Service) buildQuery(ctx context.Context, query ListQuery) (*dba.SQL, er
 	return db, nil
 }
 
-func (s *Service) compileSort(typeName string, fields []gquery.SortField) (string, error) {
+func (s *Service) compileSort(ctx context.Context, typeName string, fields []gquery.SortField) (string, error) {
 	if len(fields) == 0 {
 		return `nodes."updated_at" DESC, nodes."id" DESC`, nil
 	}
 	if len(fields) > 8 {
 		return "", fmt.Errorf("%w: sort exceeds 8 fields", ErrQueryTooComplex)
 	}
-	compiler := &queryCompiler{service: s}
+	compiler := &queryCompiler{service: s, ctx: ctx}
 	parts := make([]string, 0, len(fields)+1)
 	hasID := false
 	seen := map[gquery.Path]bool{}

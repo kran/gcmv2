@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/kran/cho"
 	"github.com/kran/dba"
@@ -39,6 +40,10 @@ type Site struct {
 	secureCookies bool      // 前台/后台认证 Cookie 是否仅通过 HTTPS 发送
 	once          sync.Once // Setup 幂等 — 带锁不重复 mount 路由
 	started       bool      // Setup 已执行（Handler() 检查 — 防未 Setup）
+
+	alive     atomic.Bool // Close 之后为 false（readyz 不再报就绪）
+	closeOnce sync.Once   // Close 幂等
+	closeErr  error
 }
 
 // New 站点初始化（两阶段第 ① 步）。basedir 下固定路径:
@@ -49,15 +54,35 @@ type Site struct {
 //	static/     静态（自动建）
 //	uploads/    上传（自动建）
 //
-// New 定义全部内置 hook（Web/Node/Auth/Admin）+ 建 router（不挂路由）。
-// 失败（db/types/目录）panic — fail loud。
+// New 便捷入口: 初始化失败即 panic（fail loud 已在启动期可见）。
 func New(basedir string) *Site {
+	site, err := Open(basedir)
+	if err != nil {
+		panic(err.Error())
+	}
+	return site
+}
+
+// Open 站点初始化（两阶段第 ① 步）。与 New 等价, 但把 db/types/迁移/元数据
+// 同步的错误返回给调用方 — 进程入口可以记录日志后优雅退出, 不 panic。
+func Open(basedir string) (*Site, error) {
 	// ① 存储（固定 gcm.sqlite — slog.Default 日志）
-	db := openDB(filepath.Join(basedir, "gcm.sqlite"))
+	db, err := openDB(filepath.Join(basedir, "gcm.sqlite"))
+	if err != nil {
+		return nil, err
+	}
 	// ② 类型
-	ts := loadTypes(filepath.Join(basedir, "types.yaml"))
-	// ③ 引擎（New 已跑内置迁移）
-	engine := core.New(db, ts)
+	ts, err := loadTypes(filepath.Join(basedir, "types.yaml"))
+	if err != nil {
+		db.Pool().Close()
+		return nil, err
+	}
+	// ③ 引擎（已跑内置迁移 + Schema 元数据同步）
+	engine, err := core.Open(db, ts)
+	if err != nil {
+		db.Pool().Close()
+		return nil, err
+	}
 	// ④ 渲染
 	render := NewRender(filepath.Join(basedir, "templates"), engine)
 	// ⑤ Site（先建 — 工厂复用）
@@ -77,7 +102,8 @@ func New(basedir string) *Site {
 	defineAdminHooks(engine)
 	// ⑦ 建 router（空 — 不挂路由; 配置期 Hook 与 Router() 挂载先于 Setup 的 mount）
 	site.router = cho.New(site.CmsCtxMaker)
-	return site
+	site.alive.Store(true)
+	return site, nil
 }
 
 // Hook 配置期注册 handler（事件已在 New 定义 — 无时序问题）。
@@ -156,32 +182,42 @@ func (s *Site) Handler() http.Handler {
 	return s.router
 }
 
-// openDB 打开 SQLite（固定路径 + slog.Default 日志）— panic 失败。
-func openDB(path string) *dba.SQL {
+// Close 关闭站点并释放数据库连接池。幂等 — 重复调用返回首次结果。
+// 已接收的请求由 http.Server.Shutdown 负责排空, Close 只释放站点自身资源。
+func (s *Site) Close() error {
+	s.closeOnce.Do(func() {
+		s.alive.Store(false)
+		s.closeErr = s.db.Pool().Close()
+	})
+	return s.closeErr
+}
+
+// openDB 打开 SQLite（固定路径 + slog.Default 日志）。
+func openDB(path string) (*dba.SQL, error) {
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			panic("web: mkdir db dir: " + err.Error())
+			return nil, fmt.Errorf("web: mkdir db dir: %w", err)
 		}
 	}
 	// SQLite 外键默认关 — 每连接开启（级联删除 auth 等依赖 FK 生效）
 	db, err := dba.Open("sqlite", path+"?_pragma=foreign_keys(1)")
 	if err != nil {
-		panic("web: open db: " + err.Error())
+		return nil, fmt.Errorf("web: open db: %w", err)
 	}
-	return db.SetLogger(dba.NewLogger(slog.Default(), 0, false))
+	return db.SetLogger(dba.NewLogger(slog.Default(), 0, false)), nil
 }
 
-// loadTypes 加载类型定义（yaml; 失败 panic — fail loud）。
-func loadTypes(path string) *types.Types {
+// loadTypes 加载类型定义（yaml）— 非法定义响亮报错。
+func loadTypes(path string) (*types.Types, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		panic("web: read types: " + err.Error())
+		return nil, fmt.Errorf("web: read types: %w", err)
 	}
 	ts := types.New()
 	if err := ts.Load(data); err != nil {
-		panic("web: load types: " + err.Error())
+		return nil, fmt.Errorf("web: load types: %w", err)
 	}
-	return ts
+	return ts, nil
 }
 
 // setupApi 内容/认证 API 模块: /api 组（节点 CRUD/tree/upload/mine/auth 通用）。
@@ -194,9 +230,34 @@ func (s *Site) setupApi() {
 
 // setupWeb 内容渲染模块: 默认首页 + 节点路由 + 404 出口。
 func (s *Site) setupWeb() {
+	s.setupHealth()
 	s.router.Get("/", s.homeHandler)
 	s.router.Get("/node/{id}", s.nodeHandler)
 	s.router.SetNotFound(s.render404)
+}
+
+// setupHealth 运维探针。
+//
+//	/healthz 进程存活 — 不碰数据库, 永远 200。
+//	/readyz  可以接客 — 检查连接池; Close 后不再就绪。
+//
+// 两者不暴露版本/配置/SQLite 细节, 无认证也可安全公开。
+func (s *Site) setupHealth() {
+	s.router.Get("/healthz", func(ctx *CmsCtx) {
+		ctx.String(http.StatusOK, "ok")
+	})
+	s.router.Get("/readyz", func(ctx *CmsCtx) {
+		if !s.alive.Load() {
+			ctx.String(http.StatusServiceUnavailable, "closing")
+			return
+		}
+		if err := s.db.Pool().DB.PingContext(ctx.R.Context()); err != nil {
+			slog.Error("readyz: database ping", "err", err)
+			ctx.String(http.StatusServiceUnavailable, "database unavailable")
+			return
+		}
+		ctx.String(http.StatusOK, "ready")
+	})
 }
 
 // homeHandler 默认首页（渲染 home.html; HookRender 已注入页面上下文 — 站点

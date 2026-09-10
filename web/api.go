@@ -77,12 +77,12 @@ func (s *Site) apiCreateNode(ctx *CmsCtx) {
 		ctx.Error(http.StatusForbidden, err.Error())
 		return
 	}
-	id, err := s.engine.CreateNode(&node)
+	id, err := s.engine.CreateNode(ctx.R.Context(), &node)
 	if err != nil {
 		ctx.Error(http.StatusBadRequest, err.Error())
 		return
 	}
-	created, err := s.engine.GetNodeById(id)
+	created, err := s.engine.GetNodeById(ctx.R.Context(), id)
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, err.Error())
 		return
@@ -134,7 +134,7 @@ func (s *Site) apiUpdateNode(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, "type not found")
 		return
 	}
-	existing, err := s.engine.GetNodeById(id)
+	existing, err := s.engine.GetNodeById(ctx.R.Context(), id)
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "internal error")
 		return
@@ -159,7 +159,7 @@ func (s *Site) apiUpdateNode(ctx *CmsCtx) {
 		ctx.Error(http.StatusForbidden, err.Error())
 		return
 	}
-	err = s.engine.PatchNode(id, &patch)
+	err = s.engine.PatchNode(ctx.R.Context(), id, &patch)
 	if errors.Is(err, core.ErrRevisionConflict) {
 		ctx.Error(http.StatusConflict, err.Error())
 		return
@@ -183,7 +183,7 @@ func (s *Site) apiDeleteNode(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, "invalid id")
 		return
 	}
-	existing, err := s.engine.GetNodeById(id)
+	existing, err := s.engine.GetNodeById(ctx.R.Context(), id)
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "internal error")
 		return

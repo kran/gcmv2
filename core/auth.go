@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -38,7 +39,7 @@ const SessionTTL = 7 * 24 * time.Hour
 
 // RegisterAuth atomically creates an authentication-enabled Node and binds an
 // opaque credential to it.
-func (s *Service) RegisterAuth(nodeType, method, identifier string, data Fields, n *Node) (int64, error) {
+func (s *Service) RegisterAuth(ctx context.Context, nodeType, method, identifier string, data Fields, n *Node) (int64, error) {
 	td, ok := s.types.Type(nodeType)
 	if !ok {
 		return 0, fmt.Errorf("core: auth: type %q not defined", nodeType)
@@ -49,7 +50,7 @@ func (s *Service) RegisterAuth(nodeType, method, identifier string, data Fields,
 	if method == "" || identifier == "" {
 		return 0, errors.New("core: auth: method and identifier required")
 	}
-	existing, err := s.FindAuth(nodeType, method, identifier)
+	existing, err := s.FindAuth(ctx, nodeType, method, identifier)
 	if err != nil {
 		return 0, err
 	}
@@ -62,8 +63,8 @@ func (s *Service) RegisterAuth(nodeType, method, identifier string, data Fields,
 	n.Type = nodeType
 
 	var nodeID int64
-	err = s.db.Transaction(func(tx *dba.SQL) error {
-		id, err := s.CreateNode(n)
+	err = s.db.WithCtx(ctx).Transaction(func(tx *dba.SQL) error {
+		id, err := s.CreateNode(ctx, n)
 		if err != nil {
 			return err
 		}
@@ -86,14 +87,14 @@ func (s *Service) RegisterAuth(nodeType, method, identifier string, data Fields,
 }
 
 // FindAuth finds a credential by Node type, method, and identifier.
-func (s *Service) FindAuth(nodeType, method, identifier string) (*AuthMethod, error) {
-	return s.db.Add(
+func (s *Service) FindAuth(ctx context.Context, nodeType, method, identifier string) (*AuthMethod, error) {
+	return s.db.WithCtx(ctx).Add(
 		`SELECT * FROM auth_methods WHERE type = #{1} AND method = #{2} AND identifier = #{3}`,
 		nodeType, method, identifier).FetchOne[AuthMethod]()
 }
 
 // AddAuthMethod binds an opaque credential to an existing Node.
-func (s *Service) AddAuthMethod(nodeType string, nodeID int64, method, identifier string, data Fields) error {
+func (s *Service) AddAuthMethod(ctx context.Context, nodeType string, nodeID int64, method, identifier string, data Fields) error {
 	if method == "" || identifier == "" {
 		return errors.New("core: auth: method and identifier required")
 	}
@@ -101,7 +102,7 @@ func (s *Service) AddAuthMethod(nodeType string, nodeID int64, method, identifie
 	if !ok || !td.Capabilities.Authentication {
 		return fmt.Errorf("core: auth: type %q is not auth-enabled", nodeType)
 	}
-	node, err := s.GetNodeById(nodeID)
+	node, err := s.GetNodeById(ctx, nodeID)
 	if err != nil {
 		return err
 	}
@@ -111,7 +112,7 @@ func (s *Service) AddAuthMethod(nodeType string, nodeID int64, method, identifie
 	if node.Type != nodeType {
 		return fmt.Errorf("core: auth: node %d is type %q, not %q", nodeID, node.Type, nodeType)
 	}
-	existing, err := s.FindAuth(nodeType, method, identifier)
+	existing, err := s.FindAuth(ctx, nodeType, method, identifier)
 	if err != nil {
 		return err
 	}
@@ -123,13 +124,13 @@ func (s *Service) AddAuthMethod(nodeType string, nodeID int64, method, identifie
 		NodeType: nodeType, NodeID: nodeID, Method: method, Identifier: identifier,
 		Data: data, CreatedAt: now, UpdatedAt: now,
 	}
-	_, err = s.db.Insert("auth_methods", authMethod).Exec()
+	_, err = s.db.WithCtx(ctx).Insert("auth_methods", authMethod).Exec()
 	return err
 }
 
 // RemoveAuthMethod unbinds a credential while retaining at least one method.
-func (s *Service) RemoveAuthMethod(nodeType, method, identifier string) error {
-	count, err := s.db.Add(
+func (s *Service) RemoveAuthMethod(ctx context.Context, nodeType, method, identifier string) error {
+	count, err := s.db.WithCtx(ctx).Add(
 		`SELECT COUNT(1) FROM auth_methods WHERE type = #{1} AND node_id =
 		 (SELECT node_id FROM auth_methods WHERE type = #{1} AND method = #{2} AND identifier = #{3})`,
 		nodeType, method, identifier).FetchOne[int64]()
@@ -139,18 +140,18 @@ func (s *Service) RemoveAuthMethod(nodeType, method, identifier string) error {
 	if count != nil && *count <= 1 {
 		return errors.New("core: auth: cannot remove last auth method")
 	}
-	_, err = s.db.Delete("auth_methods", `type = #{1} AND method = #{2} AND identifier = #{3}`,
+	_, err = s.db.WithCtx(ctx).Delete("auth_methods", `type = #{1} AND method = #{2} AND identifier = #{3}`,
 		nodeType, method, identifier).Exec()
 	return err
 }
 
 // CreateSession creates a Realm-bound session and returns the raw bearer token.
 // Only its SHA-256 hash is stored.
-func (s *Service) CreateSession(realm string, nodeID int64) (string, error) {
+func (s *Service) CreateSession(ctx context.Context, realm string, nodeID int64) (string, error) {
 	if realm == "" {
 		return "", errors.New("core: auth: session realm required")
 	}
-	node, err := s.GetNodeById(nodeID)
+	node, err := s.GetNodeById(ctx, nodeID)
 	if err != nil {
 		return "", err
 	}
@@ -173,7 +174,7 @@ func (s *Service) CreateSession(realm string, nodeID int64) (string, error) {
 		TokenHash: sessionTokenHash(token), Realm: realm, NodeID: nodeID,
 		ExpiresAt: now.Add(SessionTTL), CreatedAt: now,
 	}
-	_, err = s.db.Insert("sessions", session).Exec()
+	_, err = s.db.WithCtx(ctx).Insert("sessions", session).Exec()
 	if err != nil {
 		return "", err
 	}
@@ -181,12 +182,12 @@ func (s *Service) CreateSession(realm string, nodeID int64) (string, error) {
 }
 
 // ValidSession resolves a raw token. Invalid or expired tokens return nil.
-func (s *Service) ValidSession(token string) (*Session, error) {
+func (s *Service) ValidSession(ctx context.Context, token string) (*Session, error) {
 	if token == "" {
 		return nil, nil
 	}
 	hash := sessionTokenHash(token)
-	record, err := s.db.Add(`SELECT * FROM sessions WHERE token_hash = #{1}`, hash).FetchOne[Session]()
+	record, err := s.db.WithCtx(ctx).Add(`SELECT * FROM sessions WHERE token_hash = #{1}`, hash).FetchOne[Session]()
 	if err != nil {
 		return nil, err
 	}
@@ -194,28 +195,28 @@ func (s *Service) ValidSession(token string) (*Session, error) {
 		return nil, nil
 	}
 	if record.ExpiresAt.Before(time.Now()) {
-		_, _ = s.db.Delete("sessions", `token_hash = #{1}`, hash).Exec()
+		_, _ = s.db.WithCtx(ctx).Delete("sessions", `token_hash = #{1}`, hash).Exec()
 		return nil, nil
 	}
 	if time.Until(record.ExpiresAt) < SessionTTL/2 {
 		record.ExpiresAt = time.Now().Add(SessionTTL)
-		_, _ = s.db.Update("sessions", dba.H{"expires_at": record.ExpiresAt}, `token_hash = #{1}`, hash).Exec()
+		_, _ = s.db.WithCtx(ctx).Update("sessions", dba.H{"expires_at": record.ExpiresAt}, `token_hash = #{1}`, hash).Exec()
 	}
 	return record, nil
 }
 
 // DeleteSession invalidates one raw session token.
-func (s *Service) DeleteSession(token string) error {
+func (s *Service) DeleteSession(ctx context.Context, token string) error {
 	if token == "" {
 		return nil
 	}
-	_, err := s.db.Delete("sessions", `token_hash = #{1}`, sessionTokenHash(token)).Exec()
+	_, err := s.db.WithCtx(ctx).Delete("sessions", `token_hash = #{1}`, sessionTokenHash(token)).Exec()
 	return err
 }
 
 // DeleteNodeSessions invalidates every frontend session for a Node.
-func (s *Service) DeleteNodeSessions(nodeID int64) error {
-	_, err := s.db.Delete("sessions", `node_id = #{1}`, nodeID).Exec()
+func (s *Service) DeleteNodeSessions(ctx context.Context, nodeID int64) error {
+	_, err := s.db.WithCtx(ctx).Delete("sessions", `node_id = #{1}`, nodeID).Exec()
 	return err
 }
 

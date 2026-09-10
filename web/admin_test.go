@@ -183,7 +183,7 @@ func TestAdminPasswordFlow(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("update = %d: %s", w.Code, w.Body.String())
 	}
-	current, err := s.Engine().GetNodeById(created.ID)
+	current, err := s.Engine().GetNodeById(t.Context(), created.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestAdminPasswordFlow(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("archive = %d: %s", w.Code, w.Body.String())
 	}
-	current, err = s.Engine().GetNodeById(created.ID)
+	current, err = s.Engine().GetNodeById(t.Context(), created.ID)
 	if err != nil || current.ArchivedAt == nil {
 		t.Fatalf("archived node = %#v, %v", current, err)
 	}

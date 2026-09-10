@@ -40,26 +40,26 @@ func newDeletePolicyService(t *testing.T) *Service {
 
 func TestDeletePolicies(t *testing.T) {
 	service := newDeletePolicyService(t)
-	account, _ := service.CreateNode(&Node{Type: "account", Display: "account", Fields: Fields{"name": "account"}})
-	contact, _ := service.CreateNode(&Node{Type: "contact", Display: "contact", Fields: Fields{"name": "contact"}})
-	note, _ := service.CreateNode(&Node{Type: "note", Display: "note", Fields: Fields{"text": "note", "account": account}})
-	contract, _ := service.CreateNode(&Node{Type: "contract", Display: "contract", Fields: Fields{"name": "contract", "account": account}})
-	employment, _ := service.CreateNode(&Node{Type: "employment", Display: "employment", Fields: Fields{
+	account, _ := service.CreateNode(t.Context(), &Node{Type: "account", Display: "account", Fields: Fields{"name": "account"}})
+	contact, _ := service.CreateNode(t.Context(), &Node{Type: "contact", Display: "contact", Fields: Fields{"name": "contact"}})
+	note, _ := service.CreateNode(t.Context(), &Node{Type: "note", Display: "note", Fields: Fields{"text": "note", "account": account}})
+	contract, _ := service.CreateNode(t.Context(), &Node{Type: "contract", Display: "contract", Fields: Fields{"name": "contract", "account": account}})
+	employment, _ := service.CreateNode(t.Context(), &Node{Type: "employment", Display: "employment", Fields: Fields{
 		"contact": contact, "account": account, "title": "manager",
 	}})
-	inbound, _, err := service.InEdges(account, "account", 1, 20)
+	inbound, _, err := service.InEdges(t.Context(), account, "account", 1, 20)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, edge := range inbound {
 		if edge.FromNode == contract {
-			if err := service.RemoveEdge(edge.ID); !errors.Is(err, ErrRequiredReference) {
+			if err := service.RemoveEdge(t.Context(), edge.ID); !errors.Is(err, ErrRequiredReference) {
 				t.Fatalf("remove required ref = %v", err)
 			}
 		}
 	}
 
-	err = service.DeleteNode(account)
+	err = service.DeleteNode(t.Context(), account)
 	if !errors.Is(err, ErrDeleteRestricted) {
 		t.Fatalf("delete with required inbound ref = %v", err)
 	}
@@ -67,21 +67,21 @@ func TestDeletePolicies(t *testing.T) {
 	if !errors.As(err, &restricted) || len(restricted.References) != 1 || restricted.References[0].SourceID != contract {
 		t.Fatalf("restricted details = %#v", restricted)
 	}
-	if node, _ := service.GetNodeById(account); node == nil {
+	if node, _ := service.GetNodeById(t.Context(), account); node == nil {
 		t.Fatal("restricted delete must roll back")
 	}
 
-	if err := service.DeleteNode(contract); err != nil {
+	if err := service.DeleteNode(t.Context(), contract); err != nil {
 		t.Fatal(err)
 	}
-	noteBefore, _ := service.GetNodeById(note)
-	if err := service.DeleteNode(account); err != nil {
+	noteBefore, _ := service.GetNodeById(t.Context(), note)
+	if err := service.DeleteNode(t.Context(), account); err != nil {
 		t.Fatal(err)
 	}
-	if node, _ := service.GetNodeById(employment); node != nil {
+	if node, _ := service.GetNodeById(t.Context(), employment); node != nil {
 		t.Fatal("cascade relation node must be deleted")
 	}
-	if node, _ := service.GetNodeById(note); node == nil {
+	if node, _ := service.GetNodeById(t.Context(), note); node == nil {
 		t.Fatal("set_null source must remain")
 	} else if node.Revision != noteBefore.Revision+1 {
 		t.Fatalf("set_null source revision = %d, want %d", node.Revision, noteBefore.Revision+1)
@@ -93,14 +93,14 @@ func TestDeletePolicies(t *testing.T) {
 
 func TestArchivePreservesEdgesAndRestore(t *testing.T) {
 	service := newDeletePolicyService(t)
-	account, _ := service.CreateNode(&Node{Type: "account", Display: "account", Fields: Fields{"name": "account"}})
-	contract, _ := service.CreateNode(&Node{Type: "contract", Display: "contract", Fields: Fields{"name": "contract", "account": account}})
-	node, _ := service.GetNodeById(account)
+	account, _ := service.CreateNode(t.Context(), &Node{Type: "account", Display: "account", Fields: Fields{"name": "account"}})
+	contract, _ := service.CreateNode(t.Context(), &Node{Type: "contract", Display: "contract", Fields: Fields{"name": "contract", "account": account}})
+	node, _ := service.GetNodeById(t.Context(), account)
 	if err := service.ArchiveNode(t.Context(), account, node.Revision); err != nil {
 		t.Fatal(err)
 	}
 	name := "changed"
-	if err := service.PatchNode(account, &NodePatch{Revision: &node.Revision, Display: &name}); !errors.Is(err, ErrNodeArchived) {
+	if err := service.PatchNode(t.Context(), account, &NodePatch{Revision: &node.Revision, Display: &name}); !errors.Is(err, ErrNodeArchived) {
 		t.Fatalf("patch archived node = %v", err)
 	}
 	if target, found, err := service.RefID(t.Context(), contract, "account"); err != nil || !found || target != account {
@@ -124,7 +124,7 @@ func TestArchivePreservesEdgesAndRestore(t *testing.T) {
 	if !hasRelationIssue(report, RelationArchivedRequired) {
 		t.Fatalf("missing archived required issue: %#v", report)
 	}
-	archived, _ := service.GetNodeById(account)
+	archived, _ := service.GetNodeById(t.Context(), account)
 	if err := service.RestoreNode(t.Context(), account, archived.Revision); err != nil {
 		t.Fatal(err)
 	}
@@ -136,10 +136,10 @@ func TestArchivePreservesEdgesAndRestore(t *testing.T) {
 
 func TestRelationIntegrityDetectsCorruption(t *testing.T) {
 	service := newDeletePolicyService(t)
-	accountA, _ := service.CreateNode(&Node{Type: "account", Display: "a", Fields: Fields{"name": "a"}})
-	accountB, _ := service.CreateNode(&Node{Type: "account", Display: "b", Fields: Fields{"name": "b"}})
-	contract, _ := service.CreateNode(&Node{Type: "contract", Display: "contract", Fields: Fields{"name": "contract", "account": accountA}})
-	missing, _ := service.CreateNode(&Node{Type: "contract", Display: "missing", Fields: Fields{"name": "missing", "account": accountA}})
+	accountA, _ := service.CreateNode(t.Context(), &Node{Type: "account", Display: "a", Fields: Fields{"name": "a"}})
+	accountB, _ := service.CreateNode(t.Context(), &Node{Type: "account", Display: "b", Fields: Fields{"name": "b"}})
+	contract, _ := service.CreateNode(t.Context(), &Node{Type: "contract", Display: "contract", Fields: Fields{"name": "contract", "account": accountA}})
+	missing, _ := service.CreateNode(t.Context(), &Node{Type: "contract", Display: "missing", Fields: Fields{"name": "missing", "account": accountA}})
 	_, err := service.db.Delete("edges", `from_node = #{1} AND field = 'account'`, missing).Exec()
 	if err != nil {
 		t.Fatal(err)
@@ -184,8 +184,8 @@ func hasRelationIssue(report RelationReport, kind RelationIssueKind) bool {
 
 func TestRelationIntegrityDetectsTreeCycle(t *testing.T) {
 	service := newTraverseService(t)
-	a, _ := service.CreateNode(&Node{Type: "category", Display: "a", Fields: Fields{"name": "a"}})
-	b, _ := service.CreateNode(&Node{Type: "category", Display: "b", Fields: Fields{"name": "b", "parent": a}})
+	a, _ := service.CreateNode(t.Context(), &Node{Type: "category", Display: "a", Fields: Fields{"name": "a"}})
+	b, _ := service.CreateNode(t.Context(), &Node{Type: "category", Display: "b", Fields: Fields{"name": "b", "parent": a}})
 	_, err := service.db.Add(`INSERT INTO edges
 		(from_node, field, to_node, sort, single_ref, symmetric, created_at)
 		VALUES (#{1}, 'parent', #{2}, 0, 1, 0, CURRENT_TIMESTAMP)`, a, b).Exec()

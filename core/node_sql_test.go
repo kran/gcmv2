@@ -58,7 +58,7 @@ func testDB(t testing.TB) *dba.SQL {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	if _, err := migrateUp(db); err != nil {
+	if _, err := migrateUp(t.Context(), db); err != nil {
 		t.Fatal(err)
 	}
 	return db
@@ -75,7 +75,7 @@ func newTestService(t *testing.T) *Service {
 
 func patchCurrent(t *testing.T, s *Service, id int64, patch *NodePatch) error {
 	t.Helper()
-	node, err := s.GetNodeById(id)
+	node, err := s.GetNodeById(t.Context(), id)
 	if err != nil {
 		return err
 	}
@@ -83,7 +83,7 @@ func patchCurrent(t *testing.T, s *Service, id int64, patch *NodePatch) error {
 		return ErrNotFound
 	}
 	patch.Revision = &node.Revision
-	return s.PatchNode(id, patch)
+	return s.PatchNode(t.Context(), id, patch)
 }
 
 func TestNodeSchemaMigration(t *testing.T) {
@@ -115,7 +115,7 @@ func TestNodeSchemaMigration(t *testing.T) {
 
 func TestCreateAndGet(t *testing.T) {
 	s := newTestService(t)
-	id, err := s.CreateNode(&Node{Type: "article", Display: "t",
+	id, err := s.CreateNode(t.Context(), &Node{Type: "article", Display: "t",
 		Fields: map[string]any{"title": "标题", "slug": "news", "publication_state": "published", "body": "正文", "views": 5}})
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +123,7 @@ func TestCreateAndGet(t *testing.T) {
 	if id == 0 {
 		t.Fatal("id = 0")
 	}
-	n, err := s.GetNodeById(id)
+	n, err := s.GetNodeById(t.Context(), id)
 	if err != nil || n == nil {
 		t.Fatal(err)
 	}
@@ -140,10 +140,10 @@ func TestCreateAndGet(t *testing.T) {
 
 func TestCreateSlugDup(t *testing.T) {
 	s := newTestService(t)
-	if _, err := s.CreateNode(&Node{Type: "article", Display: "t", Fields: map[string]any{"title": "t1", "slug": "a"}}); err != nil {
+	if _, err := s.CreateNode(t.Context(), &Node{Type: "article", Display: "t", Fields: map[string]any{"title": "t1", "slug": "a"}}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := s.CreateNode(&Node{Type: "article", Display: "t", Fields: map[string]any{"title": "t2", "slug": "a"}})
+	_, err := s.CreateNode(t.Context(), &Node{Type: "article", Display: "t", Fields: map[string]any{"title": "t2", "slug": "a"}})
 	if err == nil {
 		t.Fatal("slug dup should fail")
 	}
@@ -151,18 +151,18 @@ func TestCreateSlugDup(t *testing.T) {
 
 func TestCreateRefs(t *testing.T) {
 	s := newTestService(t)
-	cat, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: map[string]any{"name": "c"}})
-	id, err := s.CreateNode(&Node{Type: "article", Display: "t",
+	cat, _ := s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: map[string]any{"name": "c"}})
+	id, err := s.CreateNode(t.Context(), &Node{Type: "article", Display: "t",
 		Fields: map[string]any{"title": "t", "categories": []any{cat}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	edges, _, _ := s.OutEdges("article", id, "categories", 1, 10)
+	edges, _, _ := s.OutEdges(t.Context(), "article", id, "categories", 1, 10)
 	if len(edges) != 1 || edges[0].ToNode != cat {
 		t.Fatalf("edges = %+v", edges)
 	}
 	// fields 不含 ref
-	n, _ := s.GetNodeById(id)
+	n, _ := s.GetNodeById(t.Context(), id)
 	if _, ok := n.Fields["categories"]; ok {
 		t.Fatal("ref leaked into fields")
 	}
@@ -172,13 +172,13 @@ func TestCreateRefs(t *testing.T) {
 
 func TestPatchFieldsAndRevision(t *testing.T) {
 	s := newTestService(t)
-	id, _ := s.CreateNode(&Node{Type: "article", Display: "t",
+	id, _ := s.CreateNode(t.Context(), &Node{Type: "article", Display: "t",
 		Fields: map[string]any{"title": "t", "slug": "a", "publication_state": "draft", "position": 3, "body": "b"}})
 
 	if err := patchCurrent(t, s, id, &NodePatch{Fields: Fields{"slug": "b", "publication_state": "published"}}); err != nil {
 		t.Fatal(err)
 	}
-	n, _ := s.GetNodeById(id)
+	n, _ := s.GetNodeById(t.Context(), id)
 	if n.Fields.Str("slug") != "b" || n.Fields.Str("publication_state") != "published" || n.Fields.Int("position") != 3 {
 		t.Fatalf("patch fields = %+v", n)
 	}
@@ -189,11 +189,11 @@ func TestPatchFieldsAndRevision(t *testing.T) {
 
 func TestPatchSlugEmpty(t *testing.T) {
 	s := newTestService(t)
-	id, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: map[string]any{"title": "t", "slug": "a"}})
+	id, _ := s.CreateNode(t.Context(), &Node{Type: "article", Display: "t", Fields: map[string]any{"title": "t", "slug": "a"}})
 	if err := patchCurrent(t, s, id, &NodePatch{Fields: Fields{"slug": ""}}); err != nil {
 		t.Fatal(err)
 	}
-	n, _ := s.GetNodeById(id)
+	n, _ := s.GetNodeById(t.Context(), id)
 	if n.Fields.Str("slug") != "" {
 		t.Fatalf("slug should be cleared, got %q", n.Fields.Str("slug"))
 	}
@@ -201,14 +201,14 @@ func TestPatchSlugEmpty(t *testing.T) {
 
 func TestPatchFieldsMerge(t *testing.T) {
 	s := newTestService(t)
-	id, _ := s.CreateNode(&Node{Type: "article", Display: "t",
+	id, _ := s.CreateNode(t.Context(), &Node{Type: "article", Display: "t",
 		Fields: map[string]any{"title": "t", "body": "旧", "views": 100}})
 
 	// PATCH fields: 只给 body — views 保留（json_patch merge）
 	if err := patchCurrent(t, s, id, &NodePatch{Fields: map[string]any{"body": "新"}}); err != nil {
 		t.Fatal(err)
 	}
-	n, _ := s.GetNodeById(id)
+	n, _ := s.GetNodeById(t.Context(), id)
 	if n.Fields["body"] != "新" {
 		t.Fatalf("body = %v", n.Fields["body"])
 	}
@@ -219,14 +219,14 @@ func TestPatchFieldsMerge(t *testing.T) {
 
 func TestPatchFieldsNullDelete(t *testing.T) {
 	s := newTestService(t)
-	id, _ := s.CreateNode(&Node{Type: "article", Display: "t",
+	id, _ := s.CreateNode(t.Context(), &Node{Type: "article", Display: "t",
 		Fields: map[string]any{"title": "t", "body": "旧"}})
 
 	// PATCH fields: body = nil → 删除字段（json_patch RFC 7396）
 	if err := patchCurrent(t, s, id, &NodePatch{Fields: map[string]any{"body": nil}}); err != nil {
 		t.Fatal(err)
 	}
-	n, _ := s.GetNodeById(id)
+	n, _ := s.GetNodeById(t.Context(), id)
 	if _, ok := n.Fields["body"]; ok {
 		t.Fatalf("body should be deleted: %v", n.Fields)
 	}
@@ -234,14 +234,14 @@ func TestPatchFieldsNullDelete(t *testing.T) {
 
 func TestPatchRefNullClear(t *testing.T) {
 	s := newTestService(t)
-	cat, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: map[string]any{"name": "c"}})
-	id, _ := s.CreateNode(&Node{Type: "article", Display: "t",
+	cat, _ := s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: map[string]any{"name": "c"}})
+	id, _ := s.CreateNode(t.Context(), &Node{Type: "article", Display: "t",
 		Fields: map[string]any{"title": "t", "categories": []any{cat}}})
 	// 清空 ref（null = 只删边不加边 — PATCH 语义）
 	if err := patchCurrent(t, s, id, &NodePatch{Fields: map[string]any{"categories": nil}}); err != nil {
 		t.Fatal(err)
 	}
-	edges, _, _ := s.OutEdges("article", id, "categories", 1, 10)
+	edges, _, _ := s.OutEdges(t.Context(), "article", id, "categories", 1, 10)
 	if len(edges) != 0 {
 		t.Fatalf("ref should be cleared: %+v", edges)
 	}
@@ -249,15 +249,15 @@ func TestPatchRefNullClear(t *testing.T) {
 
 func TestPatchRefReplace(t *testing.T) {
 	s := newTestService(t)
-	cat1, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: map[string]any{"name": "c1"}})
-	cat2, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: map[string]any{"name": "c2"}})
-	id, _ := s.CreateNode(&Node{Type: "article", Display: "t",
+	cat1, _ := s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: map[string]any{"name": "c1"}})
+	cat2, _ := s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: map[string]any{"name": "c2"}})
+	id, _ := s.CreateNode(t.Context(), &Node{Type: "article", Display: "t",
 		Fields: map[string]any{"title": "t", "categories": []any{cat1}}})
 	// 换引用（只动出现的字段 — 差量）
 	if err := patchCurrent(t, s, id, &NodePatch{Fields: map[string]any{"categories": []any{cat2}}}); err != nil {
 		t.Fatal(err)
 	}
-	edges, _, _ := s.OutEdges("article", id, "categories", 1, 10)
+	edges, _, _ := s.OutEdges(t.Context(), "article", id, "categories", 1, 10)
 	if len(edges) != 1 || edges[0].ToNode != cat2 {
 		t.Fatalf("edges = %+v", edges)
 	}
@@ -265,12 +265,12 @@ func TestPatchRefReplace(t *testing.T) {
 
 func TestPatchNoOp(t *testing.T) {
 	s := newTestService(t)
-	id, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: map[string]any{"title": "t"}})
+	id, _ := s.CreateNode(t.Context(), &Node{Type: "article", Display: "t", Fields: map[string]any{"title": "t"}})
 	// 空 patch（全 nil + fields 空）— 幂等无错
-	if err := s.PatchNode(id, &NodePatch{}); err != nil {
+	if err := s.PatchNode(t.Context(), id, &NodePatch{}); err != nil {
 		t.Fatal(err)
 	}
-	n, _ := s.GetNodeById(id)
+	n, _ := s.GetNodeById(t.Context(), id)
 	if n.Fields["title"] != "t" {
 		t.Fatal("fields changed by empty patch")
 	}
@@ -278,14 +278,14 @@ func TestPatchNoOp(t *testing.T) {
 
 func TestPatchMissingNode(t *testing.T) {
 	s := newTestService(t)
-	if err := s.PatchNode(999, &NodePatch{}); err != ErrNotFound {
+	if err := s.PatchNode(t.Context(), 999, &NodePatch{}); err != ErrNotFound {
 		t.Fatalf("want ErrNotFound, got %v", err)
 	}
 }
 
 func TestCreateRejectsUnknownField(t *testing.T) {
 	s := newTestService(t)
-	_, err := s.CreateNode(&Node{
+	_, err := s.CreateNode(t.Context(), &Node{
 		Type: "article", Display: "t",
 		Fields: Fields{"title": "t", "typo": "must fail"},
 	})
@@ -304,7 +304,7 @@ types:
       - { name: happened_at, kind: timestamp }
 `)
 	s := New(testDB(t), ts)
-	id, err := s.CreateNode(&Node{
+	id, err := s.CreateNode(t.Context(), &Node{
 		Type: "item", Display: "item",
 		Fields: Fields{"name": "item", "state": "open", "happened_at": 100},
 	})
@@ -329,14 +329,14 @@ types:
 
 func TestCreateDefaultsAndAddress(t *testing.T) {
 	s := newTestService(t)
-	id, err := s.CreateNode(&Node{
+	id, err := s.CreateNode(t.Context(), &Node{
 		Type: "article", Display: "defaulted",
 		Fields: Fields{"title": "defaulted", "slug": "defaulted"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	node, err := s.GetNodeByAddress("defaulted")
+	node, err := s.GetNodeByAddress(t.Context(), "defaulted")
 	if err != nil || node == nil || node.ID != id {
 		t.Fatalf("address lookup: node=%#v err=%v", node, err)
 	}
@@ -347,15 +347,15 @@ func TestCreateDefaultsAndAddress(t *testing.T) {
 
 func TestPatchRevisionConflict(t *testing.T) {
 	s := newTestService(t)
-	id, _ := s.CreateNode(&Node{Type: "article", Display: "before", Fields: Fields{"title": "before"}})
-	node, _ := s.GetNodeById(id)
+	id, _ := s.CreateNode(t.Context(), &Node{Type: "article", Display: "before", Fields: Fields{"title": "before"}})
+	node, _ := s.GetNodeById(t.Context(), id)
 	staleRevision := node.Revision
 	first := "first"
-	if err := s.PatchNode(id, &NodePatch{Revision: &staleRevision, Display: &first}); err != nil {
+	if err := s.PatchNode(t.Context(), id, &NodePatch{Revision: &staleRevision, Display: &first}); err != nil {
 		t.Fatal(err)
 	}
 	second := "second"
-	err := s.PatchNode(id, &NodePatch{Revision: &staleRevision, Display: &second})
+	err := s.PatchNode(t.Context(), id, &NodePatch{Revision: &staleRevision, Display: &second})
 	if !errors.Is(err, ErrRevisionConflict) {
 		t.Fatalf("stale patch error = %v", err)
 	}
@@ -371,11 +371,11 @@ types:
       - { name: external_id, kind: text, required: true }
 `)
 	s := New(testDB(t), ts)
-	_, err := s.CreateNode(&Node{Type: "contact", Display: "one", Fields: Fields{"external_id": "same"}})
+	_, err := s.CreateNode(t.Context(), &Node{Type: "contact", Display: "one", Fields: Fields{"external_id": "same"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.CreateNode(&Node{Type: "contact", Display: "two", Fields: Fields{"external_id": "same"}})
+	_, err = s.CreateNode(t.Context(), &Node{Type: "contact", Display: "two", Fields: Fields{"external_id": "same"}})
 	if err == nil {
 		t.Fatal("duplicate schema unique value must fail")
 	}
@@ -385,19 +385,19 @@ types:
 
 func TestDelete(t *testing.T) {
 	s := newTestService(t)
-	cat, _ := s.CreateNode(&Node{Type: "category", Display: "t", Fields: map[string]any{"name": "c"}})
-	id, _ := s.CreateNode(&Node{Type: "article", Display: "t",
+	cat, _ := s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: map[string]any{"name": "c"}})
+	id, _ := s.CreateNode(t.Context(), &Node{Type: "article", Display: "t",
 		Fields: map[string]any{"title": "t", "categories": []any{cat}}})
 
-	if err := s.DeleteNode(id); err != nil {
+	if err := s.DeleteNode(t.Context(), id); err != nil {
 		t.Fatal(err)
 	}
-	n, _ := s.GetNodeById(id)
+	n, _ := s.GetNodeById(t.Context(), id)
 	if n != nil {
 		t.Fatal("node still exists")
 	}
 	// 入边清理
-	edges, _, _ := s.InEdges(cat, "categories", 1, 10)
+	edges, _, _ := s.InEdges(t.Context(), cat, "categories", 1, 10)
 	if len(edges) != 0 {
 		t.Fatal("edges not cleaned")
 	}
@@ -408,7 +408,7 @@ func TestDelete(t *testing.T) {
 func TestQueryPage(t *testing.T) {
 	s := newTestService(t)
 	for i := 0; i < 5; i++ {
-		s.CreateNode(&Node{Type: "article", Display: "t",
+		s.CreateNode(t.Context(), &Node{Type: "article", Display: "t",
 			Fields: map[string]any{"title": "t" + string(rune('a'+i)), "views": i, "position": i}})
 	}
 	list, total, err := s.QueryPage(t.Context(), ListQuery{
@@ -462,7 +462,7 @@ func newFilterSvc(t *testing.T) *Service {
 
 func TestPatchDisplayEmpty(t *testing.T) {
 	s := newTestService(t)
-	id, _ := s.CreateNode(&Node{Type: "article", Display: "t", Fields: Fields{"body": "x"}})
+	id, _ := s.CreateNode(t.Context(), &Node{Type: "article", Display: "t", Fields: Fields{"body": "x"}})
 	empty := ""
 	if err := patchCurrent(t, s, id, &NodePatch{Display: &empty}); err == nil {
 		t.Fatal("empty display should be rejected")
@@ -472,7 +472,7 @@ func TestPatchDisplayEmpty(t *testing.T) {
 	if err := patchCurrent(t, s, id, &NodePatch{Display: &ok}); err != nil {
 		t.Fatal(err)
 	}
-	n, _ := s.GetNodeById(id)
+	n, _ := s.GetNodeById(t.Context(), id)
 	if n.Display != "新名字" {
 		t.Fatalf("display = %q", n.Display)
 	}

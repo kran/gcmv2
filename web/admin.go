@@ -612,7 +612,7 @@ func (b *backend) createNode(ctx *CmsCtx) {
 		b.bad(ctx, errors.New("display required"))
 		return
 	}
-	id, err := b.eng.CreateNode(&node)
+	id, err := b.eng.CreateNode(ctx.R.Context(), &node)
 	if err != nil {
 		b.bad(ctx, err)
 		return
@@ -646,7 +646,7 @@ func (b *backend) updateNode(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, "invalid id")
 		return
 	}
-	existing, err := b.eng.GetNodeById(id)
+	existing, err := b.eng.GetNodeById(ctx.R.Context(), id)
 	if err != nil {
 		b.internal(ctx, err)
 		return
@@ -663,7 +663,7 @@ func (b *backend) updateNode(ctx *CmsCtx) {
 		b.bad(ctx, err)
 		return
 	}
-	err = b.eng.PatchNode(id, &patch)
+	err = b.eng.PatchNode(ctx.R.Context(), id, &patch)
 	if errors.Is(err, core.ErrRevisionConflict) {
 		ctx.Error(http.StatusConflict, err.Error())
 		return
@@ -719,7 +719,7 @@ func (b *backend) deleteNode(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, "invalid id")
 		return
 	}
-	err := b.eng.DeleteNode(id)
+	err := b.eng.DeleteNode(ctx.R.Context(), id)
 	if errors.Is(err, core.ErrDeleteRestricted) {
 		ctx.Error(http.StatusConflict, err.Error())
 		return
@@ -809,7 +809,7 @@ func (b *backend) inbound(ctx *CmsCtx) {
 	ids := []int64{nodeID}
 	if ctx.Query("subtree") == "1" {
 		// 分支节点类型 → Subtree（图原语）
-		n, err := b.eng.GetNodeById(nodeID)
+		n, err := b.eng.GetNodeById(ctx.R.Context(), nodeID)
 		if err != nil || n == nil {
 			ctx.Error(http.StatusBadRequest, "node not found")
 			return
@@ -819,7 +819,7 @@ func (b *backend) inbound(ctx *CmsCtx) {
 			ctx.Error(http.StatusBadRequest, "node type is not a tree")
 			return
 		}
-		tree, err := b.eng.Subtree(n.Type, nodeID, treeCapability.Parent, 20)
+		tree, err := b.eng.Subtree(ctx.R.Context(), n.Type, nodeID, treeCapability.Parent, 20)
 		if err != nil {
 			b.internal(ctx, err)
 			return
@@ -874,7 +874,7 @@ func (b *backend) expand(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, "node required")
 		return
 	}
-	node, err := b.eng.GetNodeById(nodeID)
+	node, err := b.eng.GetNodeById(ctx.R.Context(), nodeID)
 	if err != nil {
 		b.internal(ctx, err)
 		return
@@ -906,7 +906,7 @@ func (b *backend) expand(ctx *CmsCtx) {
 // listSettings 全部配置（可按分组过滤）。
 func (b *backend) listSettings(ctx *CmsCtx) {
 	group := ctx.Query("group")
-	list, err := b.eng.ListSettings(group)
+	list, err := b.eng.ListSettings(ctx.R.Context(), group)
 	if err != nil {
 		b.internal(ctx, err)
 		return
@@ -926,7 +926,7 @@ func (b *backend) setSetting(ctx *CmsCtx) {
 		b.bad(ctx, err)
 		return
 	}
-	if err := b.eng.SetSetting(in.Key, in.Group, in.Type, in.Value); err != nil {
+	if err := b.eng.SetSetting(ctx.R.Context(), in.Key, in.Group, in.Type, in.Value); err != nil {
 		b.bad(ctx, err)
 		return
 	}
@@ -934,7 +934,7 @@ func (b *backend) setSetting(ctx *CmsCtx) {
 }
 
 func (b *backend) deleteSetting(ctx *CmsCtx) {
-	if err := b.eng.DeleteSetting(ctx.PathValue("key")); err != nil {
+	if err := b.eng.DeleteSetting(ctx.R.Context(), ctx.PathValue("key")); err != nil {
 		ctx.Error(http.StatusNotFound, err.Error())
 		return
 	}
@@ -967,7 +967,7 @@ func (b *backend) relationIntegrity(ctx *CmsCtx) {
 }
 
 func (b *backend) rebuildSearch(ctx *CmsCtx) {
-	if err := b.eng.RebuildSearch(); err != nil {
+	if err := b.eng.RebuildSearch(ctx.R.Context()); err != nil {
 		b.internal(ctx, err)
 		return
 	}

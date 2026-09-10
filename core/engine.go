@@ -16,17 +16,17 @@ import (
 //   - auth 等未来能力: 接口向后扩展（实现补齐即可）, 不在现阶段占位
 type Engine interface {
 	// ── 写（hook 挂扩展点 — BeforeCreate/AfterCreate/...） ──
-	CreateNode(n *Node) (int64, error)
-	PatchNode(id int64, patch *NodePatch) error
+	CreateNode(ctx context.Context, n *Node) (int64, error)
+	PatchNode(ctx context.Context, id int64, patch *NodePatch) error
 	ArchiveNode(ctx context.Context, id, revision int64) error
 	RestoreNode(ctx context.Context, id, revision int64) error
-	DeleteNode(id int64) error
+	DeleteNode(ctx context.Context, id int64) error
 
 	// ── 读 ──
 	QueryPage(ctx context.Context, q ListQuery) ([]Node, int64, error)
 	Query(ctx context.Context, q ListQuery) ([]Node, error)
-	GetNodeById(id int64) (*Node, error)
-	GetNodeByAddress(address string) (*Node, error)
+	GetNodeById(ctx context.Context, id int64) (*Node, error)
+	GetNodeByAddress(ctx context.Context, address string) (*Node, error)
 	RefID(ctx context.Context, nodeID int64, field string) (int64, bool, error)
 	RefIDs(ctx context.Context, nodeID int64, field string) ([]int64, error)
 	HasRef(ctx context.Context, nodeID int64, field string, targetID int64) (bool, error)
@@ -38,37 +38,37 @@ type Engine interface {
 
 	// ── 图原语 ──
 	LoadTree(ctx context.Context, typeName string, scope QueryScope) (*Tree, error)
-	Subtree(typeName string, start int64, field string, maxHops int) ([]int64, error)
-	Ancestors(typeName string, start int64, field string, maxHops int) ([]*Node, error)
-	Traverse(typeName string, start int64, field string, maxHops int) ([]int64, error)
-	OutEdges(typeName string, from int64, field string, page, size int) ([]Edge, int64, error)
-	InEdges(to int64, field string, page, size int) ([]Edge, int64, error)
+	Subtree(ctx context.Context, typeName string, start int64, field string, maxHops int) ([]int64, error)
+	Ancestors(ctx context.Context, typeName string, start int64, field string, maxHops int) ([]*Node, error)
+	Traverse(ctx context.Context, typeName string, start int64, field string, maxHops int) ([]int64, error)
+	OutEdges(ctx context.Context, typeName string, from int64, field string, page, size int) ([]Edge, int64, error)
+	InEdges(ctx context.Context, to int64, field string, page, size int) ([]Edge, int64, error)
 
 	// ── 搜索/展开 ──
 	Search(ctx context.Context, query SearchQuery) ([]Node, int64, error)
-	RebuildSearch() error
-	EquivalenceClass(typeName string, start int64, field string, maxHops int) ([]int64, error)
+	RebuildSearch(ctx context.Context) error
+	EquivalenceClass(ctx context.Context, typeName string, start int64, field string, maxHops int) ([]int64, error)
 	Expand(ctx context.Context, id int64, paths ...query.ExpandPath) (*Node, error)
 	ExpandMany(ctx context.Context, ids []int64, paths ...query.ExpandPath) ([]*Node, error)
 	AutoExpand(typeName string) []query.ExpandPath
 
 	// ── 认证（opaque credentials + Realm-bound sessions） ──
-	RegisterAuth(nodeType, method, identifier string, data Fields, n *Node) (int64, error)
-	FindAuth(nodeType, method, identifier string) (*AuthMethod, error)
-	AddAuthMethod(nodeType string, nodeID int64, method, identifier string, data Fields) error
-	RemoveAuthMethod(nodeType, method, identifier string) error
-	CreateSession(realm string, nodeID int64) (string, error)
-	ValidSession(token string) (*Session, error)
-	DeleteSession(token string) error
-	DeleteNodeSessions(nodeID int64) error
+	RegisterAuth(ctx context.Context, nodeType, method, identifier string, data Fields, n *Node) (int64, error)
+	FindAuth(ctx context.Context, nodeType, method, identifier string) (*AuthMethod, error)
+	AddAuthMethod(ctx context.Context, nodeType string, nodeID int64, method, identifier string, data Fields) error
+	RemoveAuthMethod(ctx context.Context, nodeType, method, identifier string) error
+	CreateSession(ctx context.Context, realm string, nodeID int64) (string, error)
+	ValidSession(ctx context.Context, token string) (*Session, error)
+	DeleteSession(ctx context.Context, token string) error
+	DeleteNodeSessions(ctx context.Context, nodeID int64) error
 
 	// ── 容器 ──
 	Types() *types.Types
 	Hooks() *HookBus
-	GetSetting(key string) (*Setting, error)
-	SetSetting(key, group, typ string, value any) error
-	ListSettings(group string) ([]Setting, error)
-	DeleteSetting(key string) error
+	GetSetting(ctx context.Context, key string) (*Setting, error)
+	SetSetting(ctx context.Context, key, group, typ string, value any) error
+	ListSettings(ctx context.Context, group string) ([]Setting, error)
+	DeleteSetting(ctx context.Context, key string) error
 
 	// others
 	Migrator() *Migrator

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -201,8 +202,8 @@ func (s *Service) fieldOnType(typeName, field string) (types.FieldDef, bool, err
 }
 
 // AddEdge manually inserts one schema-validated reference.
-func (s *Service) AddEdge(from, to int64, fieldName string, sort int) (int64, error) {
-	fromNode, err := s.GetNodeById(from)
+func (s *Service) AddEdge(ctx context.Context, from, to int64, fieldName string, sort int) (int64, error) {
+	fromNode, err := s.GetNodeById(ctx, from)
 	if err != nil {
 		return 0, err
 	}
@@ -218,7 +219,7 @@ func (s *Service) AddEdge(from, to int64, fieldName string, sort int) (int64, er
 	}
 	td, _ := s.types.Type(fromNode.Type)
 	var id int64
-	err = s.db.Transaction(func(tx *dba.SQL) error {
+	err = s.db.WithCtx(ctx).Transaction(func(tx *dba.SQL) error {
 		id, err = insertEdge(tx, s.types, td, field, from, to, sort)
 		return err
 	})
@@ -238,8 +239,8 @@ func deleteFieldEdges(tx *dba.SQL, nodeID int64, field types.FieldDef) error {
 }
 
 // RemoveEdge removes one reference without violating required cardinality.
-func (s *Service) RemoveEdge(id int64) error {
-	return s.db.Transaction(func(tx *dba.SQL) error {
+func (s *Service) RemoveEdge(ctx context.Context, id int64) error {
+	return s.db.WithCtx(ctx).Transaction(func(tx *dba.SQL) error {
 		edge, err := tx.Select("edges", `id = #{1}`, id).FetchOne[Edge]()
 		if err != nil {
 			return err

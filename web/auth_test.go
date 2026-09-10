@@ -114,7 +114,7 @@ func TestAuthCreateRule(t *testing.T) {
 
 func TestAuthSessionSecureCookie(t *testing.T) {
 	s := testSiteConfigured(t, func(site *Site) { site.SecureCookies(true) })
-	id, err := s.Engine().CreateNode(&core.Node{
+	id, err := s.Engine().CreateNode(t.Context(), &core.Node{
 		Type: "user", Display: "secure", Fields: core.Fields{"name": "secure"},
 	})
 	if err != nil {
@@ -190,7 +190,7 @@ func TestAPIKeyActorAdapter(t *testing.T) {
 
 func TestAuthRealmRejectsMismatchedSession(t *testing.T) {
 	s := testSite(t)
-	id, err := s.Engine().CreateNode(&core.Node{
+	id, err := s.Engine().CreateNode(t.Context(), &core.Node{
 		Type: "staff", Display: "staff", Fields: core.Fields{"name": "staff"},
 	})
 	if err != nil {
@@ -198,7 +198,7 @@ func TestAuthRealmRejectsMismatchedSession(t *testing.T) {
 	}
 	// Core stores Realm opaquely; Web rejects a Session whose Node does not
 	// match the server-side Realm mapping.
-	token, err := s.Engine().CreateSession("members", id)
+	token, err := s.Engine().CreateSession(t.Context(), "members", id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,7 @@ func TestAuthMe(t *testing.T) {
 func newSession(t *testing.T, s *Site) *http.Cookie {
 	t.Helper()
 	n := &core.Node{Display: "a", Fields: core.Fields{"name": "a"}}
-	id, err := s.Engine().RegisterAuth("user", "email", "a@x.com", core.Fields{"password": "x"}, n)
+	id, err := s.Engine().RegisterAuth(t.Context(), "user", "email", "a@x.com", core.Fields{"password": "x"}, n)
 	if err != nil {
 		t.Fatal(err)
 	}

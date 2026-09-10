@@ -35,13 +35,14 @@ const gcmVersionTable = "migr_gcm"
 
 // migrateUp 对 db 执行引擎内置迁移（embed core/migrations/*.sql; 版本表 migr_gcm）。
 // 返回本次应用数量（0 = 已最新 — 调用方据此判断是否需后续处理）。
-func migrateUp(db *dba.SQL) (int, error) {
-	return NewMigrator(db).Up(migrationSQL, gcmVersionTable)
+func migrateUp(ctx context.Context, db *dba.SQL) (int, error) {
+	return NewMigrator(db).Up(ctx, migrationSQL, gcmVersionTable)
 }
 
 // MigrateUp 引擎内置迁移（New 之后调用 — 建表）。
+// 不接收 Context: 引擎迁移发生在构造期, 没有请求生命周期可绑定。
 func (s *Service) MigrateUp() (int, error) {
-	return migrateUp(s.db)
+	return migrateUp(context.Background(), s.db)
 }
 
 // Migrator 站点业务表迁移执行器（gcm 只管自己的表; 站点项目自己的表
@@ -62,13 +63,13 @@ func NewMigrator(db *dba.SQL) *Migrator {
 
 // Up 执行 fsys 里的全部待应用迁移。tableName 是版本表名（与引擎迁移错开）。
 // 返回本次应用的数量。
-func (m *Migrator) Up(fsys fs.FS, tableName string) (int, error) {
+func (m *Migrator) Up(ctx context.Context, fsys fs.FS, tableName string) (int, error) {
 	opts := []goose.ProviderOption{goose.WithTableName(tableName)}
 	provider, err := goose.NewProvider(goose.DialectSQLite3, m.db.Pool().DB, fsys, opts...)
 	if err != nil {
 		return 0, fmt.Errorf("migrations: provider: %w", err)
 	}
-	results, err := provider.Up(context.Background())
+	results, err := provider.Up(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("migrations: up: %w", err)
 	}
@@ -76,6 +77,6 @@ func (m *Migrator) Up(fsys fs.FS, tableName string) (int, error) {
 }
 
 // UpDir 从本地目录执行迁移（开发期改迁移文件即生效, 不用重新编译 embed）。
-func (m *Migrator) UpDir(dir string, tableName string) (int, error) {
-	return m.Up(os.DirFS(dir), tableName)
+func (m *Migrator) UpDir(ctx context.Context, dir string, tableName string) (int, error) {
+	return m.Up(ctx, os.DirFS(dir), tableName)
 }

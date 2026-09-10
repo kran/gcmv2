@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"time"
 )
@@ -18,12 +19,12 @@ type Edge struct {
 }
 
 // OutEdges 出边（分页）。symmetric 字段: 双向展开（存一条查两向）。
-func (s *Service) OutEdges(typeName string, from int64, field string, page, size int) ([]Edge, int64, error) {
+func (s *Service) OutEdges(ctx context.Context, typeName string, from int64, field string, page, size int) ([]Edge, int64, error) {
 	_, undirected, err := s.fieldOnType(typeName, field)
 	if err != nil {
 		return nil, 0, err
 	}
-	node, err := s.GetNodeById(from)
+	node, err := s.GetNodeById(ctx, from)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -31,23 +32,23 @@ func (s *Service) OutEdges(typeName string, from int64, field string, page, size
 		return nil, 0, ErrNotFound
 	}
 	if undirected {
-		return s.edgePage(`field = #{1} AND symmetric = 1 AND (from_node = #{2} OR to_node = #{2})`,
+		return s.edgePage(ctx, `field = #{1} AND symmetric = 1 AND (from_node = #{2} OR to_node = #{2})`,
 			[]any{field, from}, page, size)
 	}
-	return s.edgePage(`from_node = #{1} AND field = #{2}`, []any{from, field}, page, size)
+	return s.edgePage(ctx, `from_node = #{1} AND field = #{2}`, []any{from, field}, page, size)
 }
 
 // InEdges returns logical incoming edges for a field. Undirected edges are
 // visible from both endpoints.
-func (s *Service) InEdges(to int64, field string, page, size int) ([]Edge, int64, error) {
+func (s *Service) InEdges(ctx context.Context, to int64, field string, page, size int) ([]Edge, int64, error) {
 	if field == "" {
 		return nil, 0, errors.New("core: edge field required")
 	}
-	return s.edgePage(`field = #{2} AND (to_node = #{1} OR (symmetric = 1 AND from_node = #{1}))`,
+	return s.edgePage(ctx, `field = #{2} AND (to_node = #{1} OR (symmetric = 1 AND from_node = #{1}))`,
 		[]any{to, field}, page, size)
 }
 
-func (s *Service) edgePage(where string, args []any, page, size int) ([]Edge, int64, error) {
-	db := s.db.Add(`SELECT ${F:*} FROM edges WHERE `+where+` ${order:ORDER BY sort, id}`, args...)
+func (s *Service) edgePage(ctx context.Context, where string, args []any, page, size int) ([]Edge, int64, error) {
+	db := s.db.WithCtx(ctx).Add(`SELECT ${F:*} FROM edges WHERE `+where+` ${order:ORDER BY sort, id}`, args...)
 	return db.FetchPage[Edge](page, size)
 }

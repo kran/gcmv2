@@ -79,14 +79,14 @@ func AuthSession(ctx *CmsCtx, realm AuthRealm, nodeID int64) (string, error) {
 	if !ok || configured.NodeType != realm.NodeType {
 		return "", fmt.Errorf("web: auth realm %q is not configured", realm.Name)
 	}
-	node, err := ctx.site.engine.GetNodeById(nodeID)
+	node, err := ctx.site.engine.GetNodeById(ctx.R.Context(), nodeID)
 	if err != nil {
 		return "", err
 	}
 	if node == nil || node.Type != realm.NodeType {
 		return "", fmt.Errorf("web: node %d does not belong to auth realm %q", nodeID, realm.Name)
 	}
-	token, err := ctx.site.engine.CreateSession(realm.Name, nodeID)
+	token, err := ctx.site.engine.CreateSession(ctx.R.Context(), realm.Name, nodeID)
 	if err != nil {
 		return "", err
 	}
@@ -105,7 +105,7 @@ func AuthSession(ctx *CmsCtx, realm AuthRealm, nodeID int64) (string, error) {
 
 func (b *authBackend) logout(ctx *CmsCtx) {
 	if token := ctx.authToken(); token != "" {
-		_ = b.eng.DeleteSession(token)
+		_ = b.eng.DeleteSession(ctx.R.Context(), token)
 	}
 	http.SetCookie(ctx.W, &http.Cookie{
 		Name: authCookie, Value: "", Path: "/", HttpOnly: true,

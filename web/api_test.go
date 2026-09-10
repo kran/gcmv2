@@ -19,14 +19,14 @@ import (
 func TestApiNodesList(t *testing.T) {
 	s := testSite(t)
 	for i := 0; i < 3; i++ {
-		if _, err := s.Engine().CreateNode(&core.Node{
+		if _, err := s.Engine().CreateNode(t.Context(), &core.Node{
 			Type: "article", Display: "文章",
 			Fields: map[string]any{"body": "内容", "publication_state": "published"},
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.Engine().CreateNode(&core.Node{
+	if _, err := s.Engine().CreateNode(t.Context(), &core.Node{
 		Type: "article", Display: "草稿",
 		Fields: map[string]any{"body": "不可公开", "publication_state": "draft"},
 	}); err != nil {
@@ -66,7 +66,7 @@ func TestApiNodesRejectsPublicFilterAndExpand(t *testing.T) {
 func TestApiNodesSort(t *testing.T) {
 	s := testSite(t)
 	for _, display := range []string{"甲", "乙"} {
-		_, err := s.Engine().CreateNode(&core.Node{
+		_, err := s.Engine().CreateNode(t.Context(), &core.Node{
 			Type: "article", Display: display,
 			Fields: map[string]any{"body": display, "publication_state": "published"},
 		})
@@ -106,7 +106,7 @@ func TestApiNodesUnknownType(t *testing.T) {
 
 func TestApiNodeTypeMismatch(t *testing.T) {
 	s := testSite(t)
-	id, err := s.Engine().CreateNode(&core.Node{
+	id, err := s.Engine().CreateNode(t.Context(), &core.Node{
 		Type: "article", Display: "文章",
 		Fields: map[string]any{"body": "内容", "publication_state": "published"},
 	})
@@ -135,14 +135,14 @@ func TestAPIUploadRequiresLoginAndValidContent(t *testing.T) {
 		t.Fatalf("anonymous upload = %d, want 401", w.Code)
 	}
 
-	userID, err := s.Engine().CreateNode(&core.Node{
+	userID, err := s.Engine().CreateNode(t.Context(), &core.Node{
 		Type: "user", Display: "上传用户",
 		Fields: map[string]any{"name": "上传用户", "role": "member"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, err := s.Engine().CreateSession("members", userID)
+	token, err := s.Engine().CreateSession(t.Context(), "members", userID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,17 +216,17 @@ func TestApiNodesMissingType(t *testing.T) {
 // TestApiTree 公开树: 只返回 Policy 范围内节点, 未知类型直接拒绝。
 func TestApiTree(t *testing.T) {
 	s := testSiteWithTemplates(t)
-	root, err := s.Engine().CreateNode(&core.Node{Type: "category", Display: "行业",
+	root, err := s.Engine().CreateNode(t.Context(), &core.Node{Type: "category", Display: "行业",
 		Fields: core.Fields{"name": "行业", "publication_state": "published"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := s.Engine().CreateNode(&core.Node{Type: "category", Display: "制造",
+	child, err := s.Engine().CreateNode(t.Context(), &core.Node{Type: "category", Display: "制造",
 		Fields: core.Fields{"name": "制造", "publication_state": "published", "parent": root}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Engine().CreateNode(&core.Node{Type: "category", Display: "草稿",
+	if _, err := s.Engine().CreateNode(t.Context(), &core.Node{Type: "category", Display: "草稿",
 		Fields: core.Fields{"name": "草稿", "publication_state": "draft", "parent": child}}); err != nil {
 		t.Fatal(err)
 	}
@@ -253,5 +253,29 @@ func TestApiTree(t *testing.T) {
 
 	if w := do(s, "GET", "/api/tree/ghost", nil); w.Code != http.StatusBadRequest {
 		t.Fatalf("unknown tree type = %d, want 400", w.Code)
+	}
+}
+
+// TestHealthEndpoints 运维探针: 存活不碰数据库, 就绪检查连接池并在 Close 后转 503。
+func TestHealthEndpoints(t *testing.T) {
+	s := testSite(t)
+	if w := do(s, "GET", "/healthz", nil); w.Code != http.StatusOK {
+		t.Fatalf("healthz = %d", w.Code)
+	}
+	if w := do(s, "GET", "/readyz", nil); w.Code != http.StatusOK {
+		t.Fatalf("readyz = %d", w.Code)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if w := do(s, "GET", "/readyz", nil); w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("readyz after close = %d, want 503", w.Code)
+	}
+	if w := do(s, "GET", "/healthz", nil); w.Code != http.StatusOK {
+		t.Fatalf("healthz after close = %d, want 200", w.Code)
+	}
+	// Close 幂等
+	if err := s.Close(); err != nil {
+		t.Fatalf("second close = %v", err)
 	}
 }

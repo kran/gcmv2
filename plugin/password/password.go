@@ -84,7 +84,7 @@ func (b *backend) register(ctx *web.CmsCtx) {
 		return
 	}
 	data := core.Fields{"password": string(hash)}
-	id, err := b.eng.RegisterAuth(b.realm.NodeType, input.Method, input.Identifier, data, node)
+	id, err := b.eng.RegisterAuth(ctx.R.Context(), b.realm.NodeType, input.Method, input.Identifier, data, node)
 	if err != nil {
 		ctx.Error(http.StatusBadRequest, err.Error())
 		return
@@ -116,7 +116,7 @@ func (b *backend) login(ctx *web.CmsCtx) {
 		ctx.Error(http.StatusBadRequest, "identifier and secret required")
 		return
 	}
-	method, err := b.eng.FindAuth(b.realm.NodeType, input.Method, input.Identifier)
+	method, err := b.eng.FindAuth(ctx.R.Context(), b.realm.NodeType, input.Method, input.Identifier)
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, "login failed")
 		return
@@ -167,7 +167,7 @@ func (b *backend) bind(ctx *web.CmsCtx) {
 		return
 	}
 	data := core.Fields{"password": string(hash)}
-	err = b.eng.AddAuthMethod(b.realm.NodeType, actor.NodeID, input.Method, input.Identifier, data)
+	err = b.eng.AddAuthMethod(ctx.R.Context(), b.realm.NodeType, actor.NodeID, input.Method, input.Identifier, data)
 	if err != nil {
 		ctx.Error(http.StatusBadRequest, err.Error())
 		return

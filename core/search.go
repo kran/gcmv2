@@ -58,7 +58,7 @@ type SearchIndex interface {
 	// Search executes an already policy-merged full-text plan.
 	Search(context.Context, SearchPlan) ([]Node, int64, error)
 	// Rebuild 全量重建索引（类型声明变化后调用, 如新增 searchable 类型）。
-	Rebuild() error
+	Rebuild(context.Context) error
 }
 
 // SetSearchIndex 替换检索引擎（默认 FTS5+bigram; 换引擎后调用方需自行 Rebuild）。
@@ -181,7 +181,7 @@ func (f *ftsIndex) Search(ctx context.Context, search SearchPlan) ([]Node, int64
 		return nil, 0, fmt.Errorf("core: search: empty query")
 	}
 	page := normalizePage(search.Page)
-	scope, err := f.compileTargets(search.Targets)
+	scope, err := f.compileTargets(ctx, search.Targets)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -210,8 +210,8 @@ func (f *ftsIndex) Search(ctx context.Context, search SearchPlan) ([]Node, int64
 	return rows, total, nil
 }
 
-func (f *ftsIndex) compileTargets(targets []SearchPlanTarget) (dba.Node, error) {
-	compiler := &queryCompiler{service: f.svc}
+func (f *ftsIndex) compileTargets(ctx context.Context, targets []SearchPlanTarget) (dba.Node, error) {
+	compiler := &queryCompiler{service: f.svc, ctx: ctx}
 	clauses := make([]dba.Node, 0, len(targets))
 	for _, target := range targets {
 		compiled, err := compiler.compile(target.Where, target.Type, "n", 0)
@@ -230,8 +230,8 @@ func (f *ftsIndex) compileTargets(targets []SearchPlanTarget) (dba.Node, error) 
 }
 
 // Rebuild 全量重建：所有 active + searchable Node 都进入索引。
-func (f *ftsIndex) Rebuild() error {
-	return f.svc.db.Transaction(func(tx *dba.SQL) error {
+func (f *ftsIndex) Rebuild(ctx context.Context) error {
+	return f.svc.db.WithCtx(ctx).Transaction(func(tx *dba.SQL) error {
 		if _, err := tx.Add(`DELETE FROM nodes_fts`).Exec(); err != nil {
 			return err
 		}
@@ -254,8 +254,8 @@ func (f *ftsIndex) Rebuild() error {
 
 // RebuildSearch 全量重建搜索索引（seed/批量导入后调用 — 索引是写路径同步的,
 // 直接 INSERT 的数据不会进索引）。
-func (s *Service) RebuildSearch() error {
-	return s.search.Rebuild()
+func (s *Service) RebuildSearch(ctx context.Context) error {
+	return s.search.Rebuild(ctx)
 }
 
 func (s *Service) shouldIndex(node *Node) bool {

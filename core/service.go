@@ -1,6 +1,8 @@
 package core
 
 import (
+	"fmt"
+
 	"github.com/kran/dba"
 	"github.com/kran/gcmv2/types"
 	_ "modernc.org/sqlite" // sqlite driver 注册
@@ -15,8 +17,9 @@ type Service struct {
 	search SearchIndex // 全文检索引擎（默认 FTS5; SetSearchIndex 可换）
 }
 
-// New 建引擎: 定义标准 hook 事件。
-func New(db *dba.SQL, ts *types.Types) *Service {
+// Open 建引擎: 定义标准 hook 事件、执行内置迁移、同步约束元数据与索引。
+// 失败返回错误 — 进程入口自己决定是否致命（测试/嵌入场景不 panic）。
+func Open(db *dba.SQL, ts *types.Types) (*Service, error) {
 	s := &Service{
 		db:    db,
 		types: ts,
@@ -37,20 +40,29 @@ func New(db *dba.SQL, ts *types.Types) *Service {
 		HookNodeAfterRestore:  func(*dba.SQL, *Node) error { return nil },
 	})
 	if err != nil {
-		panic("core: define standard hooks: " + err.Error())
+		return nil, fmt.Errorf("core: define standard hooks: %w", err)
 	}
 
 	if _, err = s.MigrateUp(); err != nil {
-		panic("core: migrate error: " + err.Error())
+		return nil, fmt.Errorf("core: migrate: %w", err)
 	}
 	if err = s.syncEdgeMetadata(); err != nil {
-		panic("core: edge metadata: " + err.Error())
+		return nil, fmt.Errorf("core: edge metadata: %w", err)
 	}
 	if err = s.syncSchemaIndexes(); err != nil {
-		panic("core: schema indexes: " + err.Error())
+		return nil, fmt.Errorf("core: schema indexes: %w", err)
 	}
 
 	s.initSearch()
+	return s, nil
+}
+
+// New 便捷入口: 建引擎失败即 panic（站点启动期 fail loud）。
+func New(db *dba.SQL, ts *types.Types) *Service {
+	s, err := Open(db, ts)
+	if err != nil {
+		panic(err.Error())
+	}
 	return s
 }
 

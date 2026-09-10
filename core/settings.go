@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,8 +33,8 @@ type Setting struct {
 }
 
 // GetSetting 取一条; 未找到返回 (nil, nil)。
-func (s *Service) GetSetting(key string) (*Setting, error) {
-	st, err := s.db.Add(`SELECT * FROM settings WHERE "key" = #{1}`, key).FetchOne[Setting]()
+func (s *Service) GetSetting(ctx context.Context, key string) (*Setting, error) {
+	st, err := s.db.WithCtx(ctx).Add(`SELECT * FROM settings WHERE "key" = #{1}`, key).FetchOne[Setting]()
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +48,7 @@ func (s *Service) GetSetting(key string) (*Setting, error) {
 }
 
 // SetSetting 写配置（upsert）。
-func (s *Service) SetSetting(key, group, typ string, value any) error {
+func (s *Service) SetSetting(ctx context.Context, key, group, typ string, value any) error {
 	if err := checkKey(key); err != nil {
 		return err
 	}
@@ -55,7 +56,7 @@ func (s *Service) SetSetting(key, group, typ string, value any) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Add(`INSERT INTO settings ("key", "group_name", "type", "value", "updated_at")
+	_, err = s.db.WithCtx(ctx).Add(`INSERT INTO settings ("key", "group_name", "type", "value", "updated_at")
 		VALUES (#{1}, #{2}, #{3}, #{4}, datetime('now'))
 		ON CONFLICT("key") DO UPDATE SET "group_name" = #{2}, "type" = #{3}, "value" = #{4}, updated_at = datetime('now')`,
 		key, group, typ, string(b)).Exec()
@@ -65,8 +66,8 @@ func (s *Service) SetSetting(key, group, typ string, value any) error {
 var _ = dba.SQL{}
 
 // GetSettingValue 取一条并 JSON 解码到 dest; 未找到返回 (false, nil)。
-func (s *Service) GetSettingValue(key string, dest any) (bool, error) {
-	st, err := s.GetSetting(key)
+func (s *Service) GetSettingValue(ctx context.Context, key string, dest any) (bool, error) {
+	st, err := s.GetSetting(ctx, key)
 	if err != nil || st == nil {
 		return false, err
 	}
@@ -81,11 +82,11 @@ func (s *Service) GetSettingValue(key string, dest any) (bool, error) {
 }
 
 // GetSettings 批量取（键列表, 缺失静默跳过）。
-func (s *Service) GetSettings(keys []string) (map[string]Setting, error) {
+func (s *Service) GetSettings(ctx context.Context, keys []string) (map[string]Setting, error) {
 	if len(keys) == 0 {
 		return map[string]Setting{}, nil
 	}
-	q := s.db.Add(`SELECT * FROM settings WHERE key IN (#{1|expand})`, keys)
+	q := s.db.WithCtx(ctx).Add(`SELECT * FROM settings WHERE key IN (#{1|expand})`, keys)
 	rows, err := q.FetchList[Setting]()
 	if err != nil {
 		return nil, fmt.Errorf("settings: %w", err)
@@ -101,8 +102,8 @@ func (s *Service) GetSettings(keys []string) (map[string]Setting, error) {
 }
 
 // ListSettings 全部配置（可按分组过滤）。
-func (s *Service) ListSettings(group string) ([]Setting, error) {
-	q := s.db.Add(`SELECT * FROM settings`)
+func (s *Service) ListSettings(ctx context.Context, group string) ([]Setting, error) {
+	q := s.db.WithCtx(ctx).Add(`SELECT * FROM settings`)
 	if group != "" {
 		q = q.Add(`WHERE group_name = #{1}`, group)
 	}
@@ -120,8 +121,8 @@ func (s *Service) ListSettings(group string) ([]Setting, error) {
 }
 
 // DeleteSetting 删配置。
-func (s *Service) DeleteSetting(key string) error {
-	affected, err := s.db.Add(`DELETE FROM settings WHERE key = #{1}`, key).Exec()
+func (s *Service) DeleteSetting(ctx context.Context, key string) error {
+	affected, err := s.db.WithCtx(ctx).Add(`DELETE FROM settings WHERE key = #{1}`, key).Exec()
 	if err != nil {
 		return err
 	}

@@ -11,14 +11,14 @@ import (
 
 func TestDefaultPolicyUsesPublicationCapability(t *testing.T) {
 	site := testSite(t)
-	publishedID, err := site.Engine().CreateNode(&core.Node{
+	publishedID, err := site.Engine().CreateNode(t.Context(), &core.Node{
 		Type: "article", Display: "published",
 		Fields: core.Fields{"publication_state": "published", "body": "visible"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = site.Engine().CreateNode(&core.Node{
+	_, err = site.Engine().CreateNode(t.Context(), &core.Node{
 		Type: "article", Display: "draft",
 		Fields: core.Fields{"publication_state": "draft", "body": "hidden"},
 	})
@@ -51,14 +51,14 @@ func TestCustomPolicyUsesActorAndCannotBeWeakened(t *testing.T) {
 			return gquery.False(), nil
 		})
 	})
-	_, err := site.Engine().CreateNode(&core.Node{
+	_, err := site.Engine().CreateNode(t.Context(), &core.Node{
 		Type: "article", Display: "published",
 		Fields: core.Fields{"publication_state": "published", "body": "visible"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	draftID, err := site.Engine().CreateNode(&core.Node{
+	draftID, err := site.Engine().CreateNode(t.Context(), &core.Node{
 		Type: "article", Display: "draft",
 		Fields: core.Fields{"publication_state": "draft", "body": "hidden"},
 	})
@@ -88,7 +88,7 @@ func TestExplicitPolicyCanExposeNonPublicationType(t *testing.T) {
 			return gquery.True(), nil
 		})
 	})
-	_, err := site.Engine().CreateNode(&core.Node{
+	_, err := site.Engine().CreateNode(t.Context(), &core.Node{
 		Type: "guestbook", Display: "visible", Fields: core.Fields{"title": "visible"},
 	})
 	if err != nil {

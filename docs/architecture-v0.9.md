@@ -449,7 +449,23 @@ FTS 只负责检索候选和相关性，不负责公开可见性。草稿可以�
 
 密码哈希只由 password 插件解释；Core 将 credential data 视为不透明数据。
 
-### 4.6 删除路径
+### 4.6 生命周期与运维探针
+
+```text
+web.Open(basedir) -> (*Site, error)   站点初始化（db/types/迁移/元数据同步）
+web.New(basedir)  -> *Site             相等语义, 失败 panic（便捷入口）
+core.Open(db, ts) -> (*Service, error) 引擎初始化（内置迁移 + Edge 元数据 + Schema 索引）
+core.New(db, ts)  -> *Service          失败 panic
+
+Site.Close() -> error                  幂等关闭站点并释放连接池
+
+GET /healthz 进程存活（不碰数据库）
+GET /readyz  可接客（Ping 连接池; Close 后 503）
+```
+
+进程入口用 Open 记录错误后退出；测试与嵌入场景用 Open 拿到错误而不是崩溃。
+
+### 4.7 删除路径
 
 ```text
 Public DELETE -> ArchiveNode
@@ -559,24 +575,19 @@ Admin/Core permanent delete
 
 ### 6.1 Context
 
-已覆盖：
+已贯穿全部数据库与外部 I/O 入口，没有“带/不带 Context”的双轨：
 
-- Query/QueryPage
-- Search
-- Expand/ExpandMany
-- RefID/RefIDs/HasRef/FullNode/FullNodes
-- Archive/Restore
-- CheckRelations/PreviewMerge
+- 写：CreateNode / PatchNode / Archive / Restore / DeleteNode / AddEdge / RemoveEdge
+- 读：Query / QueryPage / GetNodeById / GetNodeByAddress / LoadTree
+- 图：Traverse / Subtree / Ancestors / EquivalenceClass / OutEdges / InEdges
+- 关系：RefID / RefIDs / HasRef / FullNode / FullNodes / CheckRelations / PreviewMerge
+- 检索：Search / SearchIndex.Rebuild / RebuildSearch
+- 认证：RegisterAuth / FindAuth / AddMethod / RemoveMethod / Session 全套
+- 配置：Setting 全套；迁移：Migrator.Up / UpDir
+- 渲染：Render / 模板查询函数（模板内 `partial` 自动继承请求 Context）
 
-尚未贯穿：
-
-- Create/Patch/Permanent Delete
-- Traverse/Subtree/Ancestors/LoadTree
-- Auth/Session
-- Settings
-- Migrator/RebuildSearch
-
-v0 不应长期保留有 Context 和无 Context 两套平行 API；后续直接完成迁移。
+唯一保留的不带 Context 入口是 `Render.Partial`（站点程序式调用），它内部用 Background；
+模板请使用 `partial`/`partialOr` 函数。
 
 ### 6.2 Policy
 
@@ -633,10 +644,10 @@ Core 与 Admin API 已支持 archive/restore，但当前通用后台列表默认
 - append-only 审计日志与字段 before/after。
 - Outbox/Webhook 和持久任务。
 - API Key 的签发、哈希存储、撤销和过期管理；当前只有 Actor 适配入口。
+- 游标分页（页码分页的稳定排序已完成）。
 - 通用 Import/Export、批处理及幂等键。
-- Schema hash 和按需索引重建。
-- 稳定的结构化 API Error Code 契约。
-- `Site.Close()`、返回 error 的 Open、healthz/readyz。
+- Schema hash 与“Schema 未变则跳过重建”的搜索索引刷新策略。
+- 稳定的结构化 API Error Code 契约（Status/Code/Message、Hook 结构化错误）。
 
 ### 7.2 已清理的边界泄漏
 
@@ -707,14 +718,15 @@ v0.9 当前包含三项核心迁移：
 
 建议按以下顺序继续，避免在不稳定内核上堆业务功能：
 
-1. 清理通用 Web/Types 中的业务和展示边界泄漏。
-2. 将 Context 贯穿剩余数据库与外部 I/O API。
-3. 设计递归 Policy 的 typed Set 子查询。
-4. 建立结构化错误码和统一写操作授权。
-5. 建立审计模型，再开放可执行 Merge。
-6. 增加关系 Node 组合唯一约束和后台关系视图。
-7. 实现 Workflow、Aggregate、Import/Export 等应用能力。
-8. 最后用独立 CRM 示例验证，而不是把 CRM 名词写入 Core。
+1. [x] 清理通用 Web/Types 中的业务和展示边界泄漏。
+2. [x] 将 Context 贯穿剩余数据库与外部 I/O API。
+3. [x] 生命周期：Open/Close、healthz/readyz、DB 与 Migrator Context。
+4. [ ] 结构化错误码（Status/Code/Message、Hook 结构化错误）与统一写操作授权。
+5. [ ] 设计递归 Policy 的 typed Set 子查询。
+6. [ ] 建立审计模型，再开放可执行 Merge。
+7. [ ] 增加关系 Node 组合唯一约束和后台关系视图。
+8. [ ] 实现 Workflow、Aggregate、Import/Export 等应用能力。
+9. [ ] 用独立非 CMS 示例验证，而不是把 CRM 名词写入 Core。
 
 ---
 
