@@ -35,7 +35,7 @@
             <div class="type-item" :class="{ active: ft.active === 0 }" @click="clearTreeFilter(ft)">
               <span>全部</span>
             </div>
-            <el-tree :data="ft.nodes" node-key="id" default-expand-all
+            <el-tree :ref="'tree-' + ft.field" :data="ft.nodes" node-key="id" default-expand-all
                      :expand-on-click-node="false" highlight-current
                      :current-node-key="ft.active" @node-click="(n) => selectTreeNode(ft, n)">
               <template #default="{ data }">
@@ -221,6 +221,7 @@ export default {
             ft.active = n.id
             ft.activeLabel = this.titleOf(n)
             ft._ids = this.collectSubtree(n)
+            this.setTreeCurrent(ft, n.id)
             this.query.filter = this.combineTreeFilters()
             this.query.page = 1
             this.refresh()
@@ -229,9 +230,17 @@ export default {
             ft.active = 0
             ft.activeLabel = ''
             ft._ids = null
+            this.setTreeCurrent(ft, null)
             this.query.filter = this.combineTreeFilters()
             this.query.page = 1
             this.refresh()
+        },
+        // el-tree 的 current-node-key 只在初始化时生效: 之后选中/清除都得显式 setCurrentKey,
+        // 否则选过分类再点“全部”, 旧分类依然亮着。
+        setTreeCurrent(ft, key) {
+            const ref = this.$refs['tree-' + ft.field]
+            const tree = Array.isArray(ref) ? ref[0] : ref
+            if (tree && tree.setCurrentKey) tree.setCurrentKey(key)
         },
         selectTreeNode(ft, n) {
             this.onTreeClick(ft, n)

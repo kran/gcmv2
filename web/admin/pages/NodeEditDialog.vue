@@ -2,11 +2,10 @@
     <el-drawer append-to-body v-model="visibleModel" :title="isEdit ? '编辑 #' + node.id : '新建 ' + (typeName || '')"
                size="60%" :close-on-click-modal="false" :close-on-press-escape="false">
         <el-form>
-            <el-form-item label="显示">
-                <el-input v-model="form.display" placeholder="公共显示文本（列表/搜索/导航显示）" />
-            </el-form-item>
-            <el-divider style="margin:8px 0 16px;" />
+            <!-- display 也走构建器: 字段行结构（label/kind/必填）与下面字段完全一致 -->
             <field-renderer v-if="def" :fields="def.fields" v-model="form.fields"
+                            :display="form.display" show-display
+                            @update:display="form.display = $event"
                             :ref-preset="form.refPreset || {}" :defs="defs" :editing="isEdit" />
         </el-form>
         <template #footer>
