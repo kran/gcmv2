@@ -95,13 +95,15 @@ export default {
         },
         save() {
             this.saving = true
-            var fields = { ...(this.form.fields || {}) }
-            if (this.isEdit) {
-                ;((this.def && this.def.fields) || []).forEach(function (f) {
-                    if (f.immutable) delete fields[f.name]
-                })
-            }
-            var body = { display: this.form.display, fields: fields }
+            // 只提交类型声明的字段: 存量数据可能带未声明的历史键（v0.8 允许任意字段），
+            // 回传它们会被 v0.9 的 Schema 校验拒绝（422 unknown field）；不回传 = 不改动它们。
+            var declared = {}
+            var self = this
+            ;((this.def && this.def.fields) || []).forEach(function (f) {
+                if (self.isEdit && f.immutable) return
+                declared[f.name] = (self.form.fields || {})[f.name]
+            })
+            var body = { display: this.form.display, fields: declared }
             if (this.isEdit) body.revision = this.form.revision
             var p = this.isEdit
                 ? window.$api.updateNode(this.node.id, body)
