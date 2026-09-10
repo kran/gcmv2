@@ -5,18 +5,48 @@ package core
 // 设计:
 //   - 接口: Sync/DeleteNode/Search/Rebuild — 换引擎（jieba 分词 / Bleve 等）只换实现,
 //     调用方零改动。
-//   - "哪些节点进索引"由 searchable/publication capability 决定, Service 判断,
-//     引擎无脑"给什么索引什么"。
+//   - 所有 active + searchable 节点进入索引；可见范围由查询时 Policy Scope 决定。
 //   - Sync 收 tx: SQLite 实现与 nodes 同事务（强一致）; 外部引擎忽略 tx 自行管理。
 //   - 默认实现: SQLite FTS5 表 + bigram 预分词（CJK 2 字符滑窗, 英文/数字保留原词）。
 //     bigram 子串级精确（phrase 查询连续序列）; 零依赖, 新词自动覆盖。
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	"github.com/kran/dba"
+	gquery "github.com/kran/gcmv2/query"
 )
+
+// SearchTarget applies one Type-specific user filter and mandatory Policy scope.
+type SearchTarget struct {
+	Type  string
+	Where gquery.Expr
+	Scope QueryScope
+}
+
+// SearchQuery is the caller-facing full-text search contract. Targets are
+// explicit because each Type has its own Schema and Policy scope.
+type SearchQuery struct {
+	Text    string
+	Targets []SearchTarget
+	Page    gquery.Page
+}
+
+// SearchPlanTarget contains a Type and its already policy-merged filter.
+type SearchPlanTarget struct {
+	Type  string
+	Where gquery.Expr
+}
+
+// SearchPlan is passed to SearchIndex implementations only after Service has
+// checked target Types and merged every mandatory Policy scope.
+type SearchPlan struct {
+	Text    string
+	Targets []SearchPlanTarget
+	Page    gquery.Page
+}
 
 // SearchIndex 全文检索引擎契约。
 type SearchIndex interface {
@@ -25,9 +55,9 @@ type SearchIndex interface {
 	Sync(tx *dba.SQL, n *Node) error
 	// Delete 事务内删除节点索引（调用方保证节点确实不该在索引里）。
 	Delete(tx *dba.SQL, id int64) error
-	// Search 全文搜索: q 为原始查询词, typ 空 = 全类型; 返回节点分页 + 总数。
-	Search(q, typ string, page, size int) ([]Node, int64, error)
-	// Rebuild 全量重建索引（类型声明变化后调用, 如新增 search:true 类型）。
+	// Search executes an already policy-merged full-text plan.
+	Search(context.Context, SearchPlan) ([]Node, int64, error)
+	// Rebuild 全量重建索引（类型声明变化后调用, 如新增 searchable 类型）。
 	Rebuild() error
 }
 
@@ -144,45 +174,62 @@ func (f *ftsIndex) Delete(tx *dba.SQL, id int64) error {
 	return nil
 }
 
-// Search bm25 相关性排序 + JOIN nodes 取完整节点。
-func (f *ftsIndex) Search(q, typ string, page, size int) ([]Node, int64, error) {
-	bq := bigram(strings.TrimSpace(q))
+// Search performs bm25 ranking after applying every target's mandatory scope.
+func (f *ftsIndex) Search(ctx context.Context, search SearchPlan) ([]Node, int64, error) {
+	bq := bigram(strings.TrimSpace(search.Text))
 	if bq == "" {
 		return nil, 0, fmt.Errorf("core: search: empty query")
 	}
-	// phrase 查询: 连续 bigram = 原文子串（多词精确）; 单 bigram 直接匹配
-	match := `"` + bq + `"`
-	var total int64
-	where := `nodes_fts MATCH #{1}`
-	args := []any{match}
-	if typ != "" {
-		where += ` AND type = #{2}`
-		args = append(args, typ)
+	page := normalizePage(search.Page)
+	scope, err := f.compileTargets(search.Targets)
+	if err != nil {
+		return nil, 0, err
 	}
-	totalPtr, err := f.svc.db.Add(
-		`SELECT COUNT(1) FROM nodes_fts WHERE `+where, args...).FetchOne[int64]()
+	match := `"` + bq + `"`
+	where := dba.Expr(`nodes_fts MATCH #{1} AND n.archived_at IS NULL AND #{2}`, match, scope)
+
+	totalPtr, err := f.svc.db.WithCtx(ctx).Add(
+		`SELECT COUNT(1) FROM nodes_fts JOIN nodes n ON n.id = nodes_fts.rowid WHERE #{1}`,
+		where).FetchOne[int64]()
 	if err != nil {
 		return nil, 0, fmt.Errorf("core: search: %w", err)
 	}
+	var total int64
 	if totalPtr != nil {
 		total = *totalPtr
 	}
-	// fts5 列在 JOIN 下歧义: 子查询限行, 外层 JOIN nodes 取完整节点
-	// bm25 升序 = 相关性降序; 权重: type 0（过滤列）, title 10, body 1
-	// 链式 Add: 子查询分页段独立计数（#{1} = size, #{2} = offset）
-	dq := f.svc.db.Add(
-		`SELECT n.* FROM nodes n JOIN (
-			SELECT rowid FROM nodes_fts WHERE `+where+`
-			ORDER BY bm25(nodes_fts, 0.0, 10.0, 1.0)`, args...).
-		Add(`LIMIT #{1} OFFSET #{2}) f ON f.rowid = n.id`, size, (page-1)*size)
-	rows, err := dq.FetchList[Node]()
+
+	rows, err := f.svc.db.WithCtx(ctx).Add(
+		`SELECT n.* FROM nodes_fts JOIN nodes n ON n.id = nodes_fts.rowid
+		 WHERE #{1} ORDER BY bm25(nodes_fts, 0.0, 10.0, 1.0), n.id DESC
+		 LIMIT #{2} OFFSET #{3}`,
+		where, page.Size, (page.Number-1)*page.Size).FetchList[Node]()
 	if err != nil {
 		return nil, 0, fmt.Errorf("core: search: %w", err)
 	}
 	return rows, total, nil
 }
 
-// Rebuild 全量重建：是否索引由 capability 判定。
+func (f *ftsIndex) compileTargets(targets []SearchPlanTarget) (dba.Node, error) {
+	compiler := &queryCompiler{service: f.svc}
+	clauses := make([]dba.Node, 0, len(targets))
+	for _, target := range targets {
+		compiled, err := compiler.compile(target.Where, target.Type, "n", 0)
+		if err != nil {
+			return dba.Node{}, err
+		}
+		clauses = append(clauses, dba.Expr(`(n.type = #{1} AND #{2})`, target.Type, compiled))
+	}
+	args := make([]any, len(clauses))
+	parts := make([]string, len(clauses))
+	for i := range clauses {
+		args[i] = clauses[i]
+		parts[i] = fmt.Sprintf("#{%d}", i+1)
+	}
+	return dba.Expr("("+strings.Join(parts, " OR ")+")", args...), nil
+}
+
+// Rebuild 全量重建：所有 active + searchable Node 都进入索引。
 func (f *ftsIndex) Rebuild() error {
 	return f.svc.db.Transaction(func(tx *dba.SQL) error {
 		if _, err := tx.Add(`DELETE FROM nodes_fts`).Exec(); err != nil {
@@ -215,19 +262,44 @@ func (s *Service) shouldIndex(node *Node) bool {
 	if node == nil || node.ArchivedAt != nil {
 		return false
 	}
-	if _, ok := s.types.Searchable(node.Type); !ok {
-		return false
-	}
-	if _, hasPublication := s.types.Publication(node.Type); hasPublication {
-		return s.types.IsPublished(node.Type, node.Fields)
-	}
-	return true
+	_, ok := s.types.Searchable(node.Type)
+	return ok
 }
 
-// Search 全文搜索原语（索引范围由 capability 决定; 引擎由
-// SetSearchIndex 替换）。typ 空 = 全类型。
-func (s *Service) Search(q, typ string, page, size int) ([]Node, int64, error) {
-	return s.search.Search(q, typ, page, size)
+// Search executes schema-aware full-text search with mandatory Type scopes.
+// Scope merging happens before delegation so custom SearchIndex implementations
+// receive only effective, non-overridable filters.
+func (s *Service) Search(ctx context.Context, search SearchQuery) ([]Node, int64, error) {
+	if strings.TrimSpace(search.Text) == "" {
+		return nil, 0, fmt.Errorf("%w: search text required", ErrInvalidQuery)
+	}
+	if len(search.Targets) == 0 {
+		return nil, 0, fmt.Errorf("%w: search targets required", ErrInvalidQuery)
+	}
+	if len(search.Targets) > 64 {
+		return nil, 0, fmt.Errorf("%w: search exceeds 64 target types", ErrQueryTooComplex)
+	}
+	seen := make(map[string]bool, len(search.Targets))
+	targets := make([]SearchPlanTarget, len(search.Targets))
+	for i, target := range search.Targets {
+		if seen[target.Type] {
+			return nil, 0, fmt.Errorf("%w: duplicate search type %q", ErrInvalidQuery, target.Type)
+		}
+		seen[target.Type] = true
+		if _, ok := s.types.Searchable(target.Type); !ok {
+			return nil, 0, fmt.Errorf("%w: type %q is not searchable", ErrInvalidQuery, target.Type)
+		}
+		effective, err := target.Scope.apply(target.Where)
+		if err != nil {
+			return nil, 0, err
+		}
+		if effective == nil {
+			effective = gquery.True()
+		}
+		targets[i] = SearchPlanTarget{Type: target.Type, Where: effective}
+	}
+	plan := SearchPlan{Text: search.Text, Targets: targets, Page: normalizePage(search.Page)}
+	return s.search.Search(ctx, plan)
 }
 
 // ── 搜索同步 hook（注册在 New 的 Define 之后） ──

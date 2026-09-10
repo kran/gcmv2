@@ -30,10 +30,30 @@ func (s *Site) nodeHandler(ctx *CmsCtx) {
 		ctx.String(http.StatusInternalServerError, "500 internal server error")
 		return
 	}
-	if n == nil || !s.engine.Types().IsPublished(n.Type, n.Fields) {
+	if n == nil {
 		s.render404(ctx)
 		return
 	}
+	scope, err := s.policy.Scope(ctx, PolicyView, n.Type)
+	if err != nil {
+		slog.Error("node policy failed", "path", raw, "err", err)
+		ctx.String(http.StatusInternalServerError, "500 internal server error")
+		return
+	}
+	visible, err := s.engine.Query(ctx.R.Context(), core.ListQuery{
+		Type: n.Type, Where: gquery.EQ(gquery.System("id"), n.ID),
+		Scope: scope, Page: gquery.Page{Size: 1},
+	})
+	if err != nil {
+		slog.Error("node policy query failed", "path", raw, "err", err)
+		ctx.String(http.StatusInternalServerError, "500 internal server error")
+		return
+	}
+	if len(visible) == 0 {
+		s.render404(ctx)
+		return
+	}
+	n = &visible[0]
 	// 节点数据增强（站点 hook — url 注入等）
 	if err := s.engine.Hooks().Fire(HookNodeEnrich, ctx, n); err != nil {
 		slog.Error("node enrich hook failed", "path", raw, "err", err)
@@ -86,7 +106,7 @@ func nodeCandidates(ts *types.Types, n *core.Node) []string {
 }
 
 // apiNodes 公开记录列表: /api/nodes/{type}?sort=&page=&size=。
-// 只返回已发布节点；不接受 Lisp filter 和 expand。复杂查询由站点业务 API
+// 行范围由 Policy 追加；不接受 Lisp filter 和 expand。复杂查询由站点业务 API
 // 或受信管理端使用 Engine.Query 构建，避免向公网暴露存储表达式。
 func (s *Site) apiNodes(ctx *CmsCtx) {
 	typ := ctx.PathValue("type")
@@ -94,8 +114,8 @@ func (s *Site) apiNodes(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, "type not found")
 		return
 	}
-	publication, ok := s.engine.Types().Publication(typ)
-	if !ok {
+	_, publicationEnabled := s.engine.Types().Publication(typ)
+	if !publicationEnabled && !s.policy.Has(typ, PolicyList) {
 		ctx.Error(http.StatusNotFound, "type is not public")
 		return
 	}
@@ -110,11 +130,14 @@ func (s *Site) apiNodes(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, err.Error())
 		return
 	}
+	scope, err := s.policy.Scope(ctx, PolicyList, typ)
+	if err != nil {
+		ctx.String(http.StatusInternalServerError, "api: policy resolution failed")
+		return
+	}
 	q := core.ListQuery{
-		Type:  typ,
-		Where: gquery.EQ(gquery.Field(publication.Field), publication.Published),
-		Sort:  sort,
-		Page:  gquery.Page{Number: page, Size: size},
+		Type: typ, Scope: scope, Sort: sort,
+		Page: gquery.Page{Number: page, Size: size},
 	}
 	list, total, err := s.engine.QueryPage(ctx.R.Context(), q)
 	if err != nil {

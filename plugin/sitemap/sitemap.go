@@ -48,13 +48,18 @@ func Mount(s *web.Site, opts Options) {
 		site.Router().Get("/sitemap.xml", func(ctx *web.CmsCtx) {
 			list := make([]core.Node, 0)
 			for _, typeName := range s.Engine().Types().Names() {
-				publication, ok := s.Engine().Types().Publication(typeName)
-				if !ok {
+				_, publicationEnabled := s.Engine().Types().Publication(typeName)
+				if !publicationEnabled && !s.Policy().Has(typeName, web.PolicyExport) {
 					continue
+				}
+				scope, err := s.Policy().Scope(ctx, web.PolicyExport, typeName)
+				if err != nil {
+					ctx.Error(http.StatusInternalServerError, "sitemap policy: "+err.Error())
+					return
 				}
 				items, err := s.Engine().Query(ctx.R.Context(), core.ListQuery{
 					Type:  typeName,
-					Where: gquery.EQ(gquery.Field(publication.Field), publication.Published),
+					Scope: scope,
 					Sort:  []gquery.SortField{gquery.Asc(gquery.System("id"))},
 					Page:  gquery.Page{Size: 10000},
 				})

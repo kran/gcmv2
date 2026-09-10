@@ -316,13 +316,31 @@ func opportunityScope(actor Actor) query.Expr {
 }
 ```
 
-最终查询：
+最终查询通过不可由请求反序列化构造的 `core.QueryScope` 合并：
 
 ```go
-where = query.And(userWhere, policyWhere)
+core.ListQuery{
+    Type:  "opportunity",
+    Where: userWhere,
+    Scope: core.PolicyScope(policyWhere),
+}
 ```
 
-不允许用户输入替换 Policy，也不允许 count/list/export 使用不同 Scope。
+Core 在编译前执行 `query.And(userWhere, policyWhere)`。零值 Scope 直接报错；受信后台必须在调用点显式写 `core.BypassPolicy()`。用户输入不能替换 Policy，也不能让 count/list 使用不同 Scope。
+
+Web 层按 Actor、Action、Type 注册规则：
+
+```go
+site.Policy().Register("opportunity", web.PolicyList,
+    func(_ *web.CmsCtx, request web.PolicyRequest) (query.Expr, error) {
+        if request.Actor.Kind == web.ActorAdmin {
+            return query.True(), nil
+        }
+        return query.OneOf(query.Ref("owner"), request.Actor.NodeID), nil
+    })
+```
+
+未注册规则时，Web 对声明 publication capability 的 Type 使用 published scope；其他 Type 默认拒绝全部。Admin 查询不会隐式跳过 Policy，而是在每个受信调用点显式使用 `core.BypassPolicy()`。
 
 ## 查询成本
 
@@ -367,19 +385,19 @@ QueryPage(ctx context.Context, q ListQuery) ([]Node, int64, error)
 
 ## Search
 
-FTS 暂时保持独立：
+FTS 保持独立，但使用相同的 Filter AST 和 QueryScope：
 
 ```go
-Search(ctx, SearchQuery)
+Search(ctx, core.SearchQuery{
+    Text: text,
+    Targets: []core.SearchTarget{
+        {Type: "article", Where: userWhere, Scope: articleScope},
+        {Type: "member", Scope: memberScope},
+    },
+})
 ```
 
-原因：
-
-- FTS 有相关性分数
-- 排序语义不同
-- 查询语法和普通比较不同
-
-后续可以让 SearchQuery 接受 Filter AST 作为附加范围，但不把 FTS 强行伪装成普通比较操作。
+每个 Type 独立执行 Schema 校验和 Policy 合并，因为不同 Type 的字段及公开规则不同。FTS 保留相关性排序，不伪装成普通比较操作。
 
 ## AggregateQuery
 
@@ -444,17 +462,21 @@ v0.9 开发分支已完成查询核心改造：
 - 新增受管理员认证保护的 `POST /admin/query/{type}`。
 - association 业务查询全部改用 Go Builder。
 - Expand 改用 typed `query.ExpandPath`，逐跳维护 Schema Type；入边显式声明来源 Type。
+- ListQuery 强制携带不可伪造的 QueryScope，零值 Scope 拒绝执行。
+- Web PolicyRegistry 根据 Actor、Action 和 Type 返回 AST；未注册规则默认使用 publication scope，否则拒绝全部。
+- Admin 必须在调用点显式使用 `core.BypassPolicy()`。
+- SearchQuery 为每个目标 Type 独立携带 Where 与 Scope；所有 searchable Node 均进入 FTS，可见性只在查询时决定。
 
-Policy 合并属于下一实现阶段；AggregateQuery/Export 仍属于后续报表阶段，不在本次混入占位实现。
+AggregateQuery 和通用 Export 仍属于后续报表阶段；现有 sitemap export 已复用 PolicyExport scope。
 
 ## 验收条件
 
 - [x] Go Builder、Lisp、QuerySpec 产生同一种 AST。
 - [x] SQL Compiler 不接受原始 SQL。
 - [x] 当前 Type 的字段和操作符经过 Schema 校验。
-- [ ] Policy 可以安全追加且无法被用户弱化。
+- [x] Policy 可以安全追加且无法被用户弱化。
 - [x] 公网业务 API 不接触 Lisp。
-- [ ] count/list/export/aggregate 使用同一 Where 和 Policy。
+- [ ] count/list/search 和现有 sitemap export 已共享 Scope；AggregateQuery/通用 Export 尚未实现。
 - [x] 查询复杂度和 Context 取消有测试。
 - [x] association 全部查询迁移到新 Builder。
 - [x] 旧 Filter string 和旧编译路径被删除。

@@ -89,19 +89,20 @@ ADR-003 已完成：
 
 后续 Policy 只依赖 Actor，不再读取固定业务角色字段。
 
-### P1：Searchable 与 Publication 仍在索引层耦合
+### 已解决：Searchable 与 Publication 索引层解耦
 
 位置：`core/search.go` 的 `shouldIndex`
 
-当前启用 publication 的类型只有 published Node 进入 FTS。这导致：
+现在所有 active + searchable Node 都进入 FTS，publication 状态变化不再删除或重新加入索引。
 
-- 管理员无法用同一索引搜索草稿。
-- publication 变更会变成索引删除/重建，而不是查询 Scope。
-- Search Index 承担了公开策略职责。
+`SearchQuery` 为每个目标 Type 携带独立的 Where 和 QueryScope：
 
-建议：所有 searchable Node 都进入索引，公开/管理 Policy 在 SearchQuery 的 Filter AST 中合并。FTS 只负责检索，不决定可见性。
+- 公共搜索由 Web PolicyRegistry 添加 publication scope。
+- Admin 搜索显式使用 `core.BypassPolicy()`。
+- 每个 Type 的 Scope 都重新执行 Schema 校验。
+- 相关性排序和分页在 Policy 过滤之后执行。
 
-目标：Policy 阶段。
+FTS 现在只负责检索，不决定可见性。
 
 ### P2：Tree 原语与“公开树”耦合
 
@@ -176,7 +177,7 @@ array/object 是否注册成正式 Kind 需要单独决定。它们需要递归�
 
 ```text
 1. [x] 实现 ADR-003 Auth Realm / Actor，删除 user/password/role 假设
-2. [ ] 实现 Policy，并解除 Searchable/Publication 索引耦合
+2. [x] 实现查询 Policy Scope，并解除 Searchable/Publication 索引耦合
 3. [ ] 实现 ADR-004 的基数、删除策略、关系代数和 Merge
 4. [ ] 清理 mine endpoint、TemplateCandidates、select 特判等边界问题
 5. [ ] 继续 Context 贯穿

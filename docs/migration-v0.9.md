@@ -93,6 +93,9 @@ AuthSession(ctx, engine, nodeID)         -> AuthSession(ctx, realm, nodeID)
 CreateSession(nodeID)                    -> CreateSession(realm, nodeID)
 ValidSession(token) node ID result       -> ValidSession(token) *Session result
 core.VerifyPassword                     -> credential plugin verification
+ListQuery{...}                           -> ListQuery{Scope: core.PolicyScope(...), ...}
+trusted admin/background query           -> Scope: core.BypassPolicy()
+Search(q, type, page, size)              -> Search(ctx, core.SearchQuery{Targets: ...})
 ```
 
 Core migration `00010_auth_realms.sql` replaces plaintext Session tokens with SHA-256 hashes and adds the Realm column. Existing frontend Sessions are intentionally invalidated, so users must sign in again after upgrading. `auth_methods.type` remains the authenticated NodeType; Realm-to-NodeType mapping is server configuration and is not duplicated there.

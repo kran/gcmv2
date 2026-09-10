@@ -11,7 +11,7 @@ import (
 func queryAll(t *testing.T, service *Service, typeName string, where gquery.Expr) []Node {
 	t.Helper()
 	list, _, err := service.QueryPage(t.Context(), ListQuery{
-		Type: typeName, Where: where,
+		Type: typeName, Where: where, Scope: BypassPolicy(),
 		Page: gquery.Page{Number: 1, Size: 100},
 	})
 	if err != nil {
@@ -127,7 +127,8 @@ func TestQuerySchemaValidation(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := s.Query(t.Context(), ListQuery{
-				Type: "article", Where: test.where, Page: gquery.Page{Size: 10},
+				Type: "article", Where: test.where, Scope: BypassPolicy(),
+				Page: gquery.Page{Size: 10},
 			})
 			if !errors.Is(err, test.want) {
 				t.Fatalf("error = %v, want %v", err, test.want)
@@ -148,7 +149,9 @@ func TestQueryHonorsCanceledContext(t *testing.T) {
 	s := newTestService(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err := s.Query(ctx, ListQuery{Type: "article", Page: gquery.Page{Size: 10}})
+	_, err := s.Query(ctx, ListQuery{
+		Type: "article", Scope: BypassPolicy(), Page: gquery.Page{Size: 10},
+	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want context.Canceled", err)
 	}

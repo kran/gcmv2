@@ -515,7 +515,7 @@ func (b *backend) listNodes(ctx *CmsCtx) {
 		sortFields = []gquery.SortField{gquery.Desc(gquery.System("id"))}
 	}
 	list, total, err := b.eng.QueryPage(ctx.R.Context(), core.ListQuery{
-		Type: typ, Where: where, Sort: sortFields,
+		Type: typ, Where: where, Scope: core.BypassPolicy(), Sort: sortFields,
 		Page: gquery.Page{Number: page, Size: size},
 	})
 	if err != nil {
@@ -557,7 +557,7 @@ func (b *backend) queryNodes(ctx *CmsCtx) {
 	}
 	page.Size = min(page.Size, 100)
 	list, total, err := b.eng.QueryPage(ctx.R.Context(), core.ListQuery{
-		Type: typeName, Where: where, Sort: sortFields, Page: page,
+		Type: typeName, Where: where, Scope: core.BypassPolicy(), Sort: sortFields, Page: page,
 	})
 	if err != nil {
 		b.bad(ctx, err)
@@ -719,7 +719,7 @@ func (b *backend) tree(ctx *CmsCtx) {
 		return
 	}
 	list, err := b.eng.Query(ctx.R.Context(), core.ListQuery{
-		Type: typ, Page: gquery.Page{Size: 10000},
+		Type: typ, Scope: core.BypassPolicy(), Page: gquery.Page{Size: 10000},
 	})
 	if err != nil {
 		b.internal(ctx, err)
@@ -919,7 +919,7 @@ func (b *backend) search(ctx *CmsCtx) {
 	}
 	if typ != "" {
 		list, total, err := b.eng.QueryPage(ctx.R.Context(), core.ListQuery{
-			Type: typ, Where: where,
+			Type: typ, Where: where, Scope: core.BypassPolicy(),
 			Page: gquery.Page{Number: page, Size: size},
 		})
 		if err != nil {
@@ -934,7 +934,7 @@ func (b *backend) search(ctx *CmsCtx) {
 	var total int64
 	for _, typeName := range b.eng.Types().Names() {
 		list, count, err := b.eng.QueryPage(ctx.R.Context(), core.ListQuery{
-			Type: typeName, Where: where,
+			Type: typeName, Where: where, Scope: core.BypassPolicy(),
 			Page: gquery.Page{Number: page, Size: size},
 		})
 		if err != nil {

@@ -159,14 +159,14 @@ employment(contact, account, role, start_at, end_at)  关系 Node
 - [x] Core 不假定存在名为 user 的类型。
 - [x] Session 指向一个 auth-enabled Node，并绑定服务端 Realm。
 - [x] Web 层将 Session、Admin 解析成 Actor，并提供 API Key Actor 适配入口。
-- [ ] Policy 只依赖 Actor 能力，不依赖固定业务类型名。
+- [x] Policy Resolver 只接收 Actor、Action 和 Type；具体业务类型规则由 Site 注册。
 - [x] 客户端永远不能直接决定内部认证 NodeType。
 
 ## 2.6 Query 不变量
 
 - [ ] 所有查询最终进入同一种 AST。
 - [ ] 所有字段、关系、操作符和排序必须经过 Schema 校验。
-- [ ] Policy 条件与用户条件在 AST 层合并，用户不能覆盖 Policy。
+- [x] Policy 条件与用户条件在 AST 层合并，用户不能覆盖 Policy。
 - [ ] 公网 Query 必须有复杂度、分页和执行时间限制。
 - [ ] 文本 Lisp 只是 AST 的一种输入格式，不是核心数据结构。
 
@@ -386,10 +386,10 @@ q.Where = query.And(
 )
 ```
 
-- [ ] 用户 Query 和 Policy Query 分开构建。
-- [ ] Policy 在 AST 层强制合并。
-- [ ] 用户不能覆盖、删除或弱化 Policy 条件。
-- [ ] count、list、export、aggregate 必须使用完全相同的 Policy。
+- [x] 用户 Query 和 Policy Query 分开构建。
+- [x] Policy 在 AST 层强制合并。
+- [x] 用户不能覆盖、删除或弱化 Policy 条件。
+- [ ] count/list/search 和 sitemap export 已共享 Scope；AggregateQuery/通用 Export 尚未实现。
 
 ## 4.11 聚合查询独立设计
 
@@ -541,7 +541,7 @@ CRM 的金额不能默认使用 float64。
 - [ ] 增加 Go Query Builder。
 - [ ] Schema-aware 校验。
 - [x] 结构化 Sort（已在 v0.8.4 提前完成）。
-- [ ] Policy AST 合并。
+- [x] Policy AST 合并，ListQuery/SearchQuery 缺少显式 Scope 时拒绝执行。
 - [x] 当前 Lisp/expand 复杂度限制（已在 v0.8.4 提前完成）。
 - [ ] request context 取消和数据库查询超时。
 - [ ] JSON QuerySpec 原型。
@@ -619,11 +619,11 @@ password.Mount(site, password.Options{Realm: "member"})
 
 ### Policy
 
-- [ ] BeforeList/BeforeView/BeforeSearch/BeforeUpload。
+- [x] List/View/Search/Export 使用 Actor + Action + Type 解析行级 Scope。
 - [ ] Create/Update/Delete/Transition 权限统一。
-- [ ] 行级查询范围。
+- [x] 行级查询范围在 AST 层与用户条件合并。
 - [ ] 字段只读和字段写入白名单。
-- [ ] Admin 绕过 Policy 必须显式，不使用隐含旁路。
+- [x] Admin 绕过 Policy 必须显式使用 `core.BypassPolicy()`。
 
 ### Workflow
 

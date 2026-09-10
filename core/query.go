@@ -9,10 +9,12 @@ import (
 	gquery "github.com/kran/gcmv2/query"
 )
 
-// ListQuery is the single structured query contract. Type is required.
+// ListQuery is the single structured query contract. Type and an explicit
+// server-created Scope are required.
 type ListQuery struct {
 	Type   string
 	Where  gquery.Expr
+	Scope  QueryScope
 	Sort   []gquery.SortField
 	Expand []gquery.ExpandPath
 	Page   gquery.Page
@@ -78,7 +80,11 @@ func (s *Service) buildQuery(ctx context.Context, query ListQuery) (*dba.SQL, er
 	if query.Type == "" {
 		return nil, fmt.Errorf("%w: type required", ErrInvalidQuery)
 	}
-	where, err := s.compileWhere(query.Type, query.Where)
+	effectiveWhere, err := query.Scope.apply(query.Where)
+	if err != nil {
+		return nil, err
+	}
+	where, err := s.compileWhere(query.Type, effectiveWhere)
 	if err != nil {
 		return nil, err
 	}

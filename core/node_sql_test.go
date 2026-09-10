@@ -403,7 +403,7 @@ func TestQueryPage(t *testing.T) {
 			Fields: map[string]any{"title": "t" + string(rune('a'+i)), "views": i, "position": i}})
 	}
 	list, total, err := s.QueryPage(t.Context(), ListQuery{
-		Type: "article", Page: gquery.Page{Number: 1, Size: 2},
+		Type: "article", Scope: BypassPolicy(), Page: gquery.Page{Number: 1, Size: 2},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -412,7 +412,7 @@ func TestQueryPage(t *testing.T) {
 		t.Fatalf("total=%d list=%d", total, len(list))
 	}
 	list, _, err = s.QueryPage(t.Context(), ListQuery{
-		Type: "article",
+		Type: "article", Scope: BypassPolicy(),
 		Sort: []gquery.SortField{gquery.Desc(gquery.Field("views"))},
 		Page: gquery.Page{Number: 1, Size: 5},
 	})
@@ -426,7 +426,7 @@ func TestQueryPage(t *testing.T) {
 		gquery.System("id DESC"), gquery.System("id; DELETE FROM nodes"), gquery.Field("missing"),
 	} {
 		_, _, err := s.QueryPage(t.Context(), ListQuery{
-			Type: "article", Sort: []gquery.SortField{gquery.Asc(path)},
+			Type: "article", Scope: BypassPolicy(), Sort: []gquery.SortField{gquery.Asc(path)},
 			Page: gquery.Page{Number: 1, Size: 5},
 		})
 		if err == nil {

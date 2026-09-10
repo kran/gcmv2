@@ -36,7 +36,7 @@ type Engine interface {
 	InEdges(to int64, field string, page, size int) ([]Edge, int64, error)
 
 	// ── 搜索/展开 ──
-	Search(q, typ string, page, size int) ([]Node, int64, error)
+	Search(ctx context.Context, query SearchQuery) ([]Node, int64, error)
 	RebuildSearch() error
 	EquivalenceClass(typeName string, start int64, field string, maxHops int) ([]int64, error)
 	Expand(ctx context.Context, id int64, paths ...query.ExpandPath) (*Node, error)

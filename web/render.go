@@ -101,7 +101,8 @@ func (e *Render) queryFuncs() template.FuncMap {
 			}
 			where := gquery.EQ(gquery.Field(publication.Field), publication.Published)
 			list, err := eng.Query(context.Background(), core.ListQuery{
-				Type: typ, Where: where, Page: gquery.Page{Number: page, Size: size},
+				Type: typ, Scope: core.PolicyScope(where),
+				Page: gquery.Page{Number: page, Size: size},
 			})
 			fail(err)
 			return list
@@ -116,9 +117,12 @@ func (e *Render) queryFuncs() template.FuncMap {
 			}
 			return st.Value
 		},
-		// search: 全文检索（索引范围由 searchable/publication capability 决定）
+		// search: 全文检索（匿名模板使用 publication Policy scope）。
 		"search": func(q, typ string, page, size int) []core.Node {
-			list, _, err := eng.Search(q, typ, page, size)
+			targets := publicSearchTargets(eng, typ)
+			list, _, err := eng.Search(context.Background(), core.SearchQuery{
+				Text: q, Targets: targets, Page: gquery.Page{Number: page, Size: size},
+			})
 			fail(err)
 			return list
 		},
@@ -155,8 +159,14 @@ func (e *Render) queryFuncs() template.FuncMap {
 		"filterList": func(typ, expr string, params map[string]any, page, size int) []core.Node {
 			where, err := gquery.ParseLisp(expr, params)
 			fail(err)
+			publication, ok := eng.Types().Publication(typ)
+			if !ok {
+				panic(fmt.Errorf("render: type %q is not publication-enabled", typ))
+			}
+			policyWhere := gquery.EQ(gquery.Field(publication.Field), publication.Published)
 			list, err := e.eng.Query(context.Background(), core.ListQuery{
-				Type: typ, Where: where, Page: gquery.Page{Number: page, Size: size},
+				Type: typ, Where: where, Scope: core.PolicyScope(policyWhere),
+				Page: gquery.Page{Number: page, Size: size},
 			})
 			fail(err)
 			return list
@@ -214,6 +224,26 @@ func (e *Render) queryFuncs() template.FuncMap {
 			return t.Format(layout)
 		},
 	}
+}
+
+func publicSearchTargets(eng core.Engine, typeName string) []core.SearchTarget {
+	names := eng.Types().Names()
+	if typeName != "" {
+		names = []string{typeName}
+	}
+	targets := make([]core.SearchTarget, 0, len(names))
+	for _, name := range names {
+		if _, ok := eng.Types().Searchable(name); !ok {
+			continue
+		}
+		publication, ok := eng.Types().Publication(name)
+		if !ok {
+			continue
+		}
+		where := gquery.EQ(gquery.Field(publication.Field), publication.Published)
+		targets = append(targets, core.SearchTarget{Type: name, Scope: core.PolicyScope(where)})
+	}
+	return targets
 }
 
 func expandTemplateNodes(eng core.Engine, expression string, ids []int64, many bool) any {

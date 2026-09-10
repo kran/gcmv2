@@ -28,6 +28,10 @@ type queryCompiler struct {
 }
 
 func (s *Service) compileWhere(typeName string, expression gquery.Expr) (dba.Node, error) {
+	return s.compileWhereAt(typeName, expression, "nodes")
+}
+
+func (s *Service) compileWhereAt(typeName string, expression gquery.Expr, nodeRef string) (dba.Node, error) {
 	if _, ok := s.types.Type(typeName); !ok {
 		return dba.Node{}, fmt.Errorf("%w: type %q not defined", ErrInvalidQuery, typeName)
 	}
@@ -35,7 +39,7 @@ func (s *Service) compileWhere(typeName string, expression gquery.Expr) (dba.Nod
 		return dba.Expr("1 = 1"), nil
 	}
 	compiler := &queryCompiler{service: s}
-	return compiler.compile(expression, typeName, "nodes", 0)
+	return compiler.compile(expression, typeName, nodeRef, 0)
 }
 
 func (c *queryCompiler) compile(expression gquery.Expr, typeName, nodeRef string, depth int) (dba.Node, error) {

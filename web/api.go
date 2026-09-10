@@ -103,16 +103,24 @@ func (s *Site) apiViewNode(ctx *CmsCtx) {
 		ctx.Error(http.StatusBadRequest, "invalid id")
 		return
 	}
-	n, err := s.engine.GetNodeById(id)
+	scope, err := s.policy.Scope(ctx, PolicyView, typ)
+	if err != nil {
+		ctx.Error(http.StatusInternalServerError, "policy resolution failed")
+		return
+	}
+	items, err := s.engine.Query(ctx.R.Context(), core.ListQuery{
+		Type: typ, Where: gquery.EQ(gquery.System("id"), id),
+		Scope: scope, Page: gquery.Page{Size: 1},
+	})
 	if err != nil {
 		ctx.Error(http.StatusInternalServerError, err.Error())
 		return
 	}
-	if n == nil || n.Type != typ || !s.engine.Types().IsPublished(n.Type, n.Fields) {
+	if len(items) == 0 {
 		ctx.Error(http.StatusNotFound, "not found")
 		return
 	}
-	_ = ctx.Json(http.StatusOK, map[string]any{"node": n})
+	_ = ctx.Json(http.StatusOK, map[string]any{"node": &items[0]})
 }
 
 // apiUpdateNode PUT /api/nodes/{type}/{id} — Fire HookBeforeUpdate（归属/角色）。
@@ -223,6 +231,7 @@ func (s *Site) apiMine(ctx *CmsCtx) {
 		list, total, err := s.engine.QueryPage(ctx.R.Context(), core.ListQuery{
 			Type:  typ,
 			Where: gquery.OneOf(gquery.Ref("author"), principal.ID),
+			Scope: core.BypassPolicy(),
 			Page:  gquery.Page{Number: page, Size: size},
 		})
 		if err != nil {
@@ -242,6 +251,7 @@ func (s *Site) apiMine(ctx *CmsCtx) {
 		items, err := s.engine.Query(ctx.R.Context(), core.ListQuery{
 			Type:  typeName,
 			Where: gquery.OneOf(gquery.Ref("author"), principal.ID),
+			Scope: core.BypassPolicy(),
 			Page:  gquery.Page{Size: size},
 		})
 		if err != nil {

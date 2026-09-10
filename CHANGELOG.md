@@ -23,6 +23,8 @@
 - `CmsCtx.User` and `RequireRole` are removed; use `Actor` and `Principal`.
 - Session APIs now require a Realm and resolve a `core.Session` instead of a bare Node ID.
 - `core.VerifyPassword` is removed; credential verification belongs to the password plugin.
+- `ListQuery` requires an explicit `QueryScope`; trusted administrative callers must use `core.BypassPolicy()`.
+- `Search` now accepts context-aware `SearchQuery` with Type-specific targets and scopes.
 
 ### Added
 
@@ -43,6 +45,9 @@
 - Unified Anonymous, Node, Admin, and API Key Actor model with lazy Node Principal loading.
 - Realm-isolated password register/login/bind endpoints and cross-Realm bind rejection.
 - SHA-256 Session token storage and bulk Node session revocation.
+- Server-side PolicyRegistry keyed by Actor, action, and Type.
+- Mandatory AST-level Policy merging for list, count, view, search, and sitemap export paths.
+- Type-specific Search targets, allowing one cross-Type FTS query without weakening per-Type Policy.
 
 ### Migration
 
@@ -52,6 +57,7 @@
 - No runtime fallback reads old columns and no source compatibility layer is provided.
 - Register Auth Realms before mounting credential plugins and update clients to `/api/auth/{realm}/...`.
 - Core migration `00010_auth_realms.sql` replaces plaintext Session tokens with hashes and invalidates existing frontend Sessions.
+- Rebuild the FTS index after upgrading: drafts and other non-public searchable Nodes now remain indexed, while visibility is enforced by Policy at query time.
 
 ## v0.8.4
 
