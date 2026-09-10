@@ -533,6 +533,7 @@ CRM 的金额不能默认使用 float64。
 - [x] 分离 Schema、Capability 和 View 元数据。
 - [ ] Create/Patch 已使用统一 Validator；Import 尚未实现。
 - [x] 唯一约束和索引声明。
+- [x] 复合字段（array/object）Load 期递归校验嵌套 Kind，并拒绝嵌套 ref/ref[]。
 - [ ] 默认值、immutable 已实现；条件必填和跨字段校验待实现。
 - [x] 删除策略 restrict/set_null/cascade。
 

@@ -94,6 +94,20 @@ types:
 
 `relation` 是后台和 API 展示提示，数据本质仍是普通 Node + ref，不建立第二套存储引擎。
 
+### 3. 引用只允许作为顶层字段
+
+`array` / `object` 是 `fields` JSON 的结构语法，内部只允许标量 kind：
+
+```yaml
+# 拒绝（Load 期报错）
+- { name: members, kind: array, item: { kind: ref, to: person } }
+- { name: meta, kind: object, fields: [ { name: lead, kind: ref, to: person } ] }
+```
+
+嵌套引用没有路径可落 Edge。若允许降级成 JSON 整数，就只剩裸 ID：没有外键、
+基数、删除策略、归档检查，`CheckRelations` 也无法发现，属于静默数据损坏。
+需要“一个对象数组里带引用”时，建模为关系 Node。
+
 ## 引用基数
 
 字段 Kind 决定基数：

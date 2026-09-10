@@ -191,6 +191,22 @@ type QueryOps struct {
 
 Compiler 不根据 `number`、`timestamp`、`select` 等具体名字推断能力。
 
+`array` / `object` 是复合字段的结构语法，不是注册 kind：形状由 `item` / `fields`
+递归描述，值存在 `fields` JSON。复合结构内部**只允许标量 kind**：
+
+```yaml
+# 允许
+- { name: tags, kind: array, item: { kind: text } }
+- { name: meta, kind: object, fields: [ { name: og_title, kind: text } ] }
+
+# 拒绝（Load 期报错）
+- { name: members, kind: array, item: { kind: ref, to: person } }
+```
+
+原因是嵌套引用没有路径可落 Edge：若降级成标量存进 `fields` JSON，就只剩裸 ID，
+没有外键、基数、删除策略，`CheckRelations` 也看不到。“数组/对象里带引用”的正确
+建模是关系 Node。
+
 ### 3.4 Capability
 
 Type 选择启用的通用行为：

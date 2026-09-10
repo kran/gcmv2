@@ -29,6 +29,7 @@
 - The unsafe mutation-only `Merge` operation is removed; use `PreviewMerge` until audited merge execution is available.
 - Public Node DELETE now archives; administrator DELETE remains the explicit permanent-delete path.
 - `InEdges` now filters the requested field and returns logical two-way results for symmetric/equivalence relations.
+- Composite fields reject any nested ref/ref[] Kind: previously such a declaration loaded successfully and stored raw IDs in `fields` JSON, bypassing edges, cardinality and delete policies.
 - `InEdges` now filters the requested field and, like `OutEdges`, returns logical two-way results for symmetric/equivalence relations.
 
 ### Added
@@ -57,6 +58,7 @@
 - Database-backed single-ref and symmetric-single cardinality constraints.
 - Canonical symmetric/equivalence storage, cycle rejection, and stricter traversal validation.
 - `relation` capability for attributed relation Nodes.
+- Composite field definitions are now fully validated at load time: nested Kinds must exist, their field constraints run, duplicate object sub-fields are rejected, and `array`/`object` no longer silently ignore `item`, `fields`, `to` or algebra declarations.
 - Context-aware `RefID`, `RefIDs`, `HasRef`, `FullNode`, and `FullNodes` APIs.
 - Read-only relation integrity report, protected admin inspection, and non-mutating merge previews.
 - Archive/restore operations that preserve Edges and revoke sessions for archived authentication Nodes.

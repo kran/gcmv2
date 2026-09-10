@@ -404,6 +404,94 @@ types:
 	}
 }
 
+// 复合结构内不允许引用: 嵌套 ref 落不了 Edge, 降级成 fields JSON 就只剩裸 ID。
+// 定义错误必须在 Load 期 fail-loud, 不能等到写入时才暴露。
+func TestCompositeRejectsRef(t *testing.T) {
+	cases := []struct {
+		name string
+		base string
+		want string
+	}{
+		{
+			name: "array item ref",
+			base: "      - { name: members, kind: array, item: { kind: ref } }",
+			want: "kind ref cannot be nested",
+		},
+		{
+			name: "array item ref with to",
+			base: "      - { name: members, kind: array, item: { kind: ref, to: person } }",
+			want: "kind ref cannot be nested",
+		},
+		{
+			name: "array item ref list",
+			base: "      - { name: members, kind: array, item: { kind: 'ref[]', to: person } }",
+			want: "kind ref[] cannot be nested",
+		},
+		{
+			name: "object sub-field ref",
+			base: "      - { name: meta, kind: object, fields: [ { name: lead, kind: ref, to: person } ] }",
+			want: "kind ref cannot be nested",
+		},
+		{
+			name: "nested object ref path",
+			base: "      - { name: meta, kind: object, fields: [ { name: inner, kind: object, fields: [ { name: lead, kind: ref } ] } ] }",
+			want: `field "meta.inner.lead"`,
+		},
+		{
+			name: "array item unknown kind",
+			base: "      - { name: members, kind: array, item: { kind: ghost } }",
+			want: "unknown kind",
+		},
+		{
+			name: "array declares to",
+			base: "      - { name: members, kind: array, to: person, item: { kind: text } }",
+			want: "must not declare to/algebra/on_delete",
+		},
+		{
+			name: "array declares on_delete",
+			base: "      - { name: members, kind: array, on_delete: cascade, item: { kind: text } }",
+			want: "must not declare to/algebra/on_delete",
+		},
+		{
+			name: "array declares fields",
+			base: "      - { name: members, kind: array, item: { kind: text }, fields: [ { name: a, kind: text } ] }",
+			want: "array must not declare fields",
+		},
+		{
+			name: "object declares item",
+			base: "      - { name: meta, kind: object, item: { kind: text }, fields: [ { name: a, kind: text } ] }",
+			want: "object must not declare item",
+		},
+		{
+			name: "object duplicate sub-field",
+			base: "      - { name: meta, kind: object, fields: [ { name: a, kind: text }, { name: a, kind: text } ] }",
+			want: "duplicate sub-field",
+		},
+		{
+			name: "object sub-field select needs options",
+			base: "      - { name: meta, kind: object, fields: [ { name: a, kind: select } ] }",
+			want: "select requires options",
+		},
+		{
+			name: "composite nesting depth",
+			base: "      - { name: nav, kind: array, item: { kind: object, fields: [ { name: a, kind: array, item: { kind: object, fields: [ { name: b, kind: array, item: { kind: object, fields: [ { name: c, kind: text } ] } } ] } } ] } }",
+			want: "nesting depth exceeds",
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			yaml := "types:\n  person: { fields: [] }\n  team:\n    fields:\n" + test.base + "\n"
+			err := New().Load([]byte(yaml))
+			if err == nil {
+				t.Fatal("definition must be rejected")
+			}
+			if !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error %q does not contain %q", err, test.want)
+			}
+		})
+	}
+}
+
 // cmx 语义补齐: strings 归一 + object 子字段 required + array 元素 required 忽略。
 func TestCompositeCmxSemantics(t *testing.T) {
 	raw := `

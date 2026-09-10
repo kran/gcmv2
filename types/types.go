@@ -103,6 +103,7 @@ type FieldDef struct {
 	Kind  string `yaml:"kind" json:"kind"`
 	To    string `yaml:"to" json:"to"` // ref/ref[]: 目标类型名
 	// 复合字段（结构语法, 非值类型 — 不进 kinds 注册表）:
+	// item/fields 只描述结构; 嵌套层不接受 ref/ref[]（引用必须用顶层字段）。
 	Options     []string   `yaml:"options,omitempty" json:"options,omitempty"` // kind=select: 可选项
 	Item        *FieldDef  `yaml:"item,omitempty" json:"item,omitempty"`       // kind=array: 元素定义（递归）
 	Fields      []FieldDef `yaml:"fields,omitempty" json:"fields,omitempty"`   // kind=object: 子字段（递归）
@@ -195,7 +196,7 @@ func (t *Types) Load(raw []byte) error {
 		td := cfg.Types[name]
 		for i, f := range td.Fields {
 			if f.Kind == "strings" {
-				f.Kind = "array"
+				f.Kind = KindArray
 				f.Item = &FieldDef{Kind: "text"} // string 归一为 array<string> — kind 已改名 text
 				td.Fields[i] = f
 			}
@@ -294,9 +295,9 @@ func (t *Types) validate(defs map[string]TypeDef) error {
 				return fmt.Errorf("types: type %q: duplicate field %q", name, f.Name)
 			}
 			seen[f.Name] = true
-			// 复合字段: 结构语法（递归 normalize, 不进 kinds 注册表 — 非值类型）
-			if f.Kind == "array" || f.Kind == "object" {
-				err := normalizeComposite(name, f, 0)
+			// 复合字段: 结构语法（递归校验, 不进 kinds 注册表 — 非值类型）
+			if f.Kind == KindArray || f.Kind == KindObject {
+				err := t.validateComposite(name, f.Name, f, defs, 0)
 				if err != nil {
 					return err
 				}
@@ -366,7 +367,7 @@ func (t *Types) IsTree(typeName string) bool {
 // FieldQueryOps 返回字段 Kind 声明的查询能力。array/object 是结构语法，
 // 只支持 exists/missing，因此返回零值。
 func (t *Types) FieldQueryOps(field FieldDef) QueryOps {
-	if field.Kind == "array" || field.Kind == "object" {
+	if field.Kind == KindArray || field.Kind == KindObject {
 		return QueryOps{}
 	}
 	kind, ok := t.kinds[field.Kind]
@@ -377,11 +378,12 @@ func (t *Types) FieldQueryOps(field FieldDef) QueryOps {
 }
 
 // IsRefKind 该 kind 是否引用系（ClassRef / ClassRefList）。
-// 复合字段（array/object）返回 false: 结构语法存 fields JSON, 非引用。
+// 复合字段（array/object）返回 false: 结构语法存 fields JSON, 非引用;
+// 嵌套 ref 在 Load 期就被拒绝, 因此不存在“内部带引用的复合字段”。
 // 未知 kind panic: Load 已保证字段 kind 存在（复合字段除外）, 未知即程序
 // bug（fail-loud, 不静默 — 静默会让 ref 字段被当标量存进 fields, 数据损坏）。
 func (t *Types) IsRefKind(kind string) bool {
-	if kind == "array" || kind == "object" {
+	if kind == KindArray || kind == KindObject {
 		return false // 复合字段: 非引用, 值存 fields JSON
 	}
 	k, ok := t.kinds[kind]
@@ -397,7 +399,7 @@ func (t *Types) IsRefKind(kind string) bool {
 func (t *Types) ValidateValue(typeName string, f FieldDef, v any) error {
 	// 复合字段: 结构递归（值判定下沉到叶子 kind）
 	switch f.Kind {
-	case "array":
+	case KindArray:
 		arr, ok := v.([]any)
 		if !ok {
 			return fmt.Errorf("types: %q.%s: expects array, got %T", typeName, f.Name, v)
@@ -410,7 +412,7 @@ func (t *Types) ValidateValue(typeName string, f FieldDef, v any) error {
 			}
 		}
 		return nil
-	case "object":
+	case KindObject:
 		obj, ok := v.(map[string]any)
 		if !ok {
 			return fmt.Errorf("types: %q.%s: expects object, got %T", typeName, f.Name, v)
@@ -524,41 +526,80 @@ func (t *Types) ValidatePatchFields(typeName string, fields map[string]any) erro
 // maxCompositeDepth 复合字段嵌套上限（防畸形配置）。
 const maxCompositeDepth = 4
 
-// normalizeComposite 递归校验复合字段: array 必带 item; object 必带 fields;
-// 子定义递归到叶子标量。校验在容器层（与 ValidateValue 同层递归）。
-func normalizeComposite(typeName string, f FieldDef, depth int) error {
+// validateComposite 递归校验复合字段: array 必带 item; object 必带 fields;
+// 递归到叶子时校验 kind 存在、没有引用代数声明, 并执行该 kind 自己的字段约束。
+//
+// 复合结构内不允许引用系 kind（ref/ref[]）: 嵌套引用没有路径可落 Edge,
+// 若降级成标量存进 fields JSON, 就只剩裸 ID — 没有外键、基数、删除策略,
+// 完整性检查也看不到。需要“数组/对象里带引用”时请建模为关系 Node。
+//
+// path 是相对路径（如 members[].person）, 嵌套层没有自己的字段名,
+// 用它生成可定位的错误。
+func (t *Types) validateComposite(typeName, path string, f FieldDef, defs map[string]TypeDef, depth int) error {
 	if depth > maxCompositeDepth {
-		return fmt.Errorf("types: type %q field %q: nesting depth exceeds %d", typeName, f.Name, maxCompositeDepth)
+		return fmt.Errorf("types: type %q field %q: nesting depth exceeds %d", typeName, path, maxCompositeDepth)
 	}
+	decl := f
+	decl.Name = path
 	switch f.Kind {
-	case "array":
+	case KindArray:
+		if err := rejectRefAttrs(typeName, decl); err != nil {
+			return err
+		}
 		if f.Item == nil {
-			return fmt.Errorf("types: type %q field %q: array requires item definition", typeName, f.Name)
+			return fmt.Errorf("types: type %q field %q: array requires item definition", typeName, path)
 		}
-		return normalizeComposite(typeName, *f.Item, depth+1)
-	case "object":
+		if len(f.Fields) > 0 {
+			return fmt.Errorf("types: type %q field %q: array must not declare fields", typeName, path)
+		}
+		return t.validateComposite(typeName, path+"[]", *f.Item, defs, depth+1)
+	case KindObject:
+		if err := rejectRefAttrs(typeName, decl); err != nil {
+			return err
+		}
 		if len(f.Fields) == 0 {
-			return fmt.Errorf("types: type %q field %q: object requires fields", typeName, f.Name)
+			return fmt.Errorf("types: type %q field %q: object requires fields", typeName, path)
 		}
+		if f.Item != nil {
+			return fmt.Errorf("types: type %q field %q: object must not declare item", typeName, path)
+		}
+		seen := make(map[string]bool, len(f.Fields))
 		for _, sub := range f.Fields {
 			if !nameRe.MatchString(sub.Name) {
-				return fmt.Errorf("types: type %q field %q.%s: must match %s", typeName, f.Name, sub.Name, nameRe)
+				return fmt.Errorf("types: type %q field %q.%s: must match %s", typeName, path, sub.Name, nameRe)
 			}
-			if err := normalizeComposite(typeName, sub, depth+1); err != nil {
+			if seen[sub.Name] {
+				return fmt.Errorf("types: type %q field %q: duplicate sub-field %q", typeName, path, sub.Name)
+			}
+			seen[sub.Name] = true
+			if err := t.validateComposite(typeName, path+"."+sub.Name, sub, defs, depth+1); err != nil {
 				return err
 			}
 		}
+		return nil
 	}
-	return nil
+	kind, ok := t.kinds[f.Kind]
+	if !ok {
+		return fmt.Errorf("types: type %q field %q: unknown kind %q", typeName, path, f.Kind)
+	}
+	if kind.Class() != ClassField {
+		return fmt.Errorf(
+			"types: type %q field %q: kind %s cannot be nested in array/object; use a top-level ref field or a relation Node",
+			typeName, path, f.Kind)
+	}
+	if err := rejectRefAttrs(typeName, decl); err != nil {
+		return err
+	}
+	return kind.ValidateField(t, typeName, decl, defs)
 }
 
 // isEmpty 空判断（required 检查用）: 复合字段按形状, 标量走 kind.IsEmpty。
 func (t *Types) isEmpty(kind string, v any) bool {
 	switch kind {
-	case "array":
+	case KindArray:
 		arr, ok := v.([]any)
 		return !ok || len(arr) == 0
-	case "object":
+	case KindObject:
 		obj, ok := v.(map[string]any)
 		return !ok || len(obj) == 0
 	}

@@ -121,4 +121,6 @@ err := site.Engine().SyncRelationSchema()
 
 after those site migrations. The old `FullFields` API is replaced by `FullNode`/`FullNodes`, whose `EditableNode.Values` explicitly contains scalar values plus ref IDs. Existing direct `Merge` calls must be removed; `PreviewMerge` is read-only until conflict resolution and audit-backed merge execution are implemented.
 
+Composite fields (`array` / `object`) must not contain `ref` or `ref[]` sub-fields. Such a declaration used to load successfully and store raw node IDs inside `fields` JSON, so it had no edge, no cardinality, no delete policy, and was invisible to `CheckRelations`. Types that used this shape must be remodelled as a relation Node; the Schema loader now rejects them with a `kind ref cannot be nested in array/object` error.
+
 Public `DELETE /api/nodes/{type}/{id}` now archives instead of permanently deleting. Authenticated administrators can call `POST /admin/nodes/{id}/archive` or `/restore` with `{"revision": n}`, while `DELETE /admin/nodes/{id}` remains the explicit permanent-delete operation and can return HTTP 409 for restricted references.

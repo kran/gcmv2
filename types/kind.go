@@ -43,3 +43,10 @@ const (
 	ClassRef                  // 单引用: 值 → 1 条 edge
 	ClassRefList              // 多引用: 值 → N 条 edge
 )
+
+// 复合字段结构语法。它们不是值类型（不进 kinds 注册表）: 形状由 FieldDef 的
+// Item/Fields 递归描述, 值校验在 Types 容器层递归完成。
+const (
+	KindArray  = "array"
+	KindObject = "object"
+)
