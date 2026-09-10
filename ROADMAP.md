@@ -627,7 +627,7 @@ password.Mount(site, password.Options{Realm: "member"})
 - [x] List/View/Search/Export 使用 Actor + Action + Type 解析行级 Scope。
 - [ ] Create/Update/Delete/Transition 权限统一。
 - [x] 行级查询范围在 AST 层与用户条件合并。
-- [ ] 字段只读和字段写入白名单。
+- [x] 字段只读和字段写入白名单（按类型的写规则：`web.write.<action>.<type>`）。
 - [x] Admin 绕过 Policy 必须显式使用 `core.BypassPolicy()`。
 
 ### Workflow
@@ -784,7 +784,7 @@ v0.8.4 批次已全部完成（见 Phase 0）。当前批次是 **v0.9.0 收口*
 
 本批剩余：
 
-1. 写入侧授权：Create/Update/Delete/Transition 统一 Policy 与字段写入白名单（当前仍是安全缺口：注册一个写 Hook 就等于放行所有类型）
+1. 写入侧授权：Create/Update/Delete 已改为按类型的写规则（身份 + 字段白名单 + 值加工）；Transition/状态机尚未建模
 2. 最小非 CMS 示例（account/contact/employment/opportunity/activity，不声明 user/article/page）
 3. 关闭 v0.9.0：跑完验收条件并把核心 API 标记为冻结候选
 

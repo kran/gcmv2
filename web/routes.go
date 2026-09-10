@@ -34,7 +34,7 @@ func (s *Site) nodeHandler(ctx *CmsCtx) {
 		s.render404(ctx)
 		return
 	}
-	scope, err := s.policy.Scope(ctx, PolicyView, n.Type)
+	scope, err := s.ReadScope(ctx, ReadView, n.Type)
 	if err != nil {
 		slog.Error("node policy failed", "path", raw, "err", err)
 		ctx.String(http.StatusInternalServerError, "500 internal server error")
@@ -115,7 +115,7 @@ func (s *Site) apiNodes(ctx *CmsCtx) {
 		return
 	}
 	_, publicationEnabled := s.engine.Types().Publication(typ)
-	if !publicationEnabled && !s.policy.Exposes(typ, PolicyList) {
+	if !publicationEnabled && !s.Exposes(typ, ReadList) {
 		ctx.Fail(NotFound("type is not public"))
 		return
 	}
@@ -130,7 +130,7 @@ func (s *Site) apiNodes(ctx *CmsCtx) {
 		ctx.Fail(BadRequest("%s", err.Error()))
 		return
 	}
-	scope, err := s.policy.Scope(ctx, PolicyList, typ)
+	scope, err := s.ReadScope(ctx, ReadList, typ)
 	if err != nil {
 		ctx.Fail(err)
 		return

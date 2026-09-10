@@ -7,7 +7,7 @@ import (
 	gquery "github.com/kran/gcmv2/query"
 )
 
-// publishedScope 公开树范围（供树测试复用; 生产由 Web PolicyRegistry 提供）。
+// publishedScope 公开树范围（供树测试复用; 生产由 Web 的 publication 默认范围提供）。
 func publishedScope() QueryScope {
 	return PolicyScope(gquery.EQ(gquery.Field("publication_state"), "published"))
 }

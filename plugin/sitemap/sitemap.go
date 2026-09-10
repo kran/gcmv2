@@ -49,10 +49,10 @@ func Mount(s *web.Site, opts Options) {
 			list := make([]core.Node, 0)
 			for _, typeName := range s.Engine().Types().Names() {
 				_, publicationEnabled := s.Engine().Types().Publication(typeName)
-				if !publicationEnabled && !s.Policy().Exposes(typeName, web.PolicyExport) {
+				if !publicationEnabled && !s.Exposes(typeName, web.ReadExport) {
 					continue
 				}
-				scope, err := s.Policy().Scope(ctx, web.PolicyExport, typeName)
+				scope, err := s.ReadScope(ctx, web.ReadExport, typeName)
 				if err != nil {
 					ctx.Error(http.StatusInternalServerError, "sitemap policy: "+err.Error())
 					return

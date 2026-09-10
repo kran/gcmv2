@@ -41,8 +41,10 @@
 - Unknown Node types now answer 404 (`not_found`) instead of 400, and rejected uploads answer 413/422 (`upload_invalid`) instead of 400.
 - `core.ErrInvalidFields` marks Schema validation failures so the Web edge can return 422 `invalid_value`.
 - `InEdges` now filters the requested field and, like `OutEdges`, returns logical two-way results for symmetric/equivalence relations.
-- `PolicyAction` is now a string identifier backed by one `policyDefaults` table holding each system action's default behaviour; unregistered system actions resolve through that table instead of hard-coded branches. Sites may introduce their own namespaced actions (a name containing `.`), which carry no default and must be registered for the Type they are resolved on.
-- `PolicyRegistry.Has` is renamed to `PolicyRegistry.Exposes`.
+- Authorization is now a set of per-Type events instead of a separate `PolicyRegistry`: `web.read.list|view|search|export.<type>` narrow the row scope, `web.write.create|update|delete.<type>` decide identity, client-writable fields, and server-owned values. Register them with `Site.ReadRule` / `Site.WriteRule`; `Site.ReadScope` and `Site.Exposes` replace `Policy.Scope` and `Policy.Exposes`.
+- `PolicyRegistry`, `PolicyAction`, `PolicyRequest`, `PolicyRule`, `PolicyDefault`, `Policy.Write`, `Policy.RegisterWrite`, `Policy.Writable`, `Policy.Exposes`, `Policy.Scope` and `HookBeforeCreate` / `HookBeforeUpdate` / `HookBeforeDelete` are removed.
+- `HookBus` regains `Has` (does the event have handlers) and adds `Defined` (is the event declared).
+- Public node writes no longer fall back to "any registered Hook means every Type is writable". A Type without a `web.write.<action>.<type>` handler rejects with 401 for anonymous and 403 for authenticated callers; payload fields the rule did not allow answer 422 `invalid_value` with per-field details.
 
 ### Added
 
@@ -63,9 +65,9 @@
 - Unified Anonymous, Node, Admin, and API Key Actor model with lazy Node Principal loading.
 - Realm-isolated password register/login/bind endpoints and cross-Realm bind rejection.
 - SHA-256 Session token storage and bulk Node session revocation.
-- Server-side PolicyRegistry keyed by Actor, action, and Type.
-- One `policyDefaults` table defines every system action's default behaviour; unknown actions, and site actions without a rule for the Type, are rejected instead of silently falling back.
-- Site-defined policy actions, namespaced with a dot, so a site can scope a read surface no system action describes.
+- Site-defined read actions, so a site can scope a read surface no system action describes.
+- Per-Type authorization events for every read and write action, so one `(action, Type)` can resolve per request: a member and an editor can be allowed different fields, and several handlers compose (reads narrow by AND, write grants union).
+- A write rule that allows no field at all denies the request (403), and an unregistered site read action or a read rule that produced no scope is an error instead of a silent empty result.
 - Mandatory AST-level Policy merging for list, count, view, search, and sitemap export paths.
 - Type-specific Search targets, allowing one cross-Type FTS query without weakening per-Type Policy.
 - `on_delete: restrict|set_null|cascade` with safe defaults and transactional permanent deletion.

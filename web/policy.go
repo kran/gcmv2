@@ -2,141 +2,235 @@ package web
 
 import (
 	"fmt"
-	"strings"
+	"sort"
 
 	"github.com/kran/gcmv2/core"
 	gquery "github.com/kran/gcmv2/query"
 )
 
-// PolicyAction identifies one operation whose row scope must be resolved. The
-// framework owns the system actions because it owns the code paths calling them.
-// A Site may introduce its own action for a read surface no system action
-// describes, and must namespace it with a dot (for example "site.my_content").
-type PolicyAction string
+// 授权在 web 层就是一组按类型定义的事件：
+//
+//	web.read.<action>.<type>    读规则：收窄行范围（收窄 = AND 组合 — 只会更窄）
+//	web.write.<action>.<type>   写规则：判断身份 + 声明客户端可写字段 + 加工值
+//
+// 框架在 schema 加载后为每个类型定义这七个事件（definePolicyEvents），站点用
+// Site.ReadRule / Site.WriteRule 注册 handler。没有 handler 时：
+//
+//	读 → 系统读动作走 publication 默认（没有 publication capability 则全拒）
+//	写 → 拒绝（匿名 401 unauthorized / 已认证 403 forbidden）
+//
+// 事件名是总线上的普通事件名：写错名字或签名不匹配在注册期（Start 之前）就报错。
+
+// ReadAction 系统读动作。站点可以定义自己的读动作（任意非空名字），
+// 例如 association 的 "my_content"：同一个类型对不同入口需要不同的行范围。
+type ReadAction string
 
 const (
-	PolicyList   PolicyAction = "list"
-	PolicyView   PolicyAction = "view"
-	PolicySearch PolicyAction = "search"
-	PolicyExport PolicyAction = "export"
+	ReadList   ReadAction = "list"
+	ReadView   ReadAction = "view"
+	ReadSearch ReadAction = "search"
+	ReadExport ReadAction = "export"
 )
 
-// PolicyDefault is the behaviour of a system action whose Type has no rule.
-type PolicyDefault uint8
+// WriteAction 系统写动作。写动作由框架拥有（对应三个公开写端点），站点不能自定义。
+type WriteAction string
 
 const (
-	PolicyDefaultDeny          PolicyDefault = iota // no rows
-	PolicyDefaultPublishedOnly                      // rows whose publication field is published
+	WriteCreate WriteAction = "create"
+	WriteUpdate WriteAction = "update"
+	WriteDelete WriteAction = "delete"
 )
 
-// policyDefaults is the one table defining every system action: what it falls
-// back to when a Site registers no rule. Site actions are not listed here; they
-// carry no default and must be registered with a rule, so an unregistered site
-// action fails loud instead of silently falling back.
-var policyDefaults = map[PolicyAction]PolicyDefault{
-	PolicyList:   PolicyDefaultPublishedOnly,
-	PolicyView:   PolicyDefaultPublishedOnly,
-	PolicySearch: PolicyDefaultPublishedOnly,
-	PolicyExport: PolicyDefaultPublishedOnly,
+// systemReadActions 决定“没有 handler 时”的行为：系统读动作走 publication 默认，
+// 站点读动作未注册则报错（不静默回退到公开默认）。
+var systemReadActions = map[ReadAction]struct{}{
+	ReadList:   {},
+	ReadView:   {},
+	ReadSearch: {},
+	ReadExport: {},
 }
 
-func (a PolicyAction) system() bool {
-	_, ok := policyDefaults[a]
-	return ok
+var systemWriteActions = map[WriteAction]struct{}{
+	WriteCreate: {},
+	WriteUpdate: {},
+	WriteDelete: {},
 }
 
-// validAction accepts system actions (a rule may override them) and site actions
-// namespaced with a dot, so a later framework action cannot silently collide
-// with a name a Site already gave a different meaning.
-func validAction(action PolicyAction) bool {
-	return action.system() || strings.Contains(string(action), ".")
-}
+// ReadRule 收窄一次读取的行范围。必须把过滤 AND 进 *expr（nil = 尚未收窄）：
+//
+//	*expr = gquery.And(*expr, gquery.EQ(gquery.Field("author"), member.ID))
+//
+// 多个 handler 依次收窄（AND 组合）。返回错误即拒绝这次读取（可直接返回 *Error）。
+// Fire 之后 *expr 仍为 nil 视为配置错误（要“谁都看不到”就显式写 gquery.False()）。
+type ReadRule func(*CmsCtx, string, *gquery.Expr) error
 
-// PolicyRequest is the stable input to a row-scope rule.
-type PolicyRequest struct {
-	Actor  Actor
-	Action PolicyAction
-	Type   string
-}
-
-// PolicyRule returns a mandatory AST scope. Returning nil denies all rows.
-type PolicyRule func(*CmsCtx, PolicyRequest) (gquery.Expr, error)
-
-type policyKey struct {
-	typeName string
-	action   PolicyAction
-}
-
-// PolicyRegistry stores server-side read rules. Rules are immutable after
-// Site.Start. A system action with no registered rule falls back to its
-// PolicyDefault; a site action with no rule for the Type is rejected.
-type PolicyRegistry struct {
-	site  *Site
-	rules map[policyKey]PolicyRule
-}
-
-func newPolicyRegistry(site *Site) *PolicyRegistry {
-	return &PolicyRegistry{site: site, rules: make(map[policyKey]PolicyRule)}
-}
-
-// Register installs one Type/action policy rule during Site configuration.
-func (p *PolicyRegistry) Register(typeName string, action PolicyAction, rule PolicyRule) {
-	if p.site.started {
-		panic("web: register policy after Start")
+// ReadEvent 读事件名：web.read.<action>.<type>。
+func ReadEvent(action ReadAction, typeName string) string {
+	if action == "" || typeName == "" {
+		panic("web: read action and type are required")
 	}
-	if _, ok := p.site.engine.Types().Type(typeName); !ok {
-		panic(fmt.Sprintf("web: policy type %q not defined", typeName))
+	return "web.read." + string(action) + "." + typeName
+}
+
+// WriteEvent 写事件名：web.write.<action>.<type>。
+func WriteEvent(action WriteAction, typeName string) string {
+	if action == "" || typeName == "" {
+		panic("web: write action and type are required")
 	}
-	if !validAction(action) {
-		panic(fmt.Sprintf("web: policy action %q must be a system action or contain a dot", action))
+	return "web.write." + string(action) + "." + typeName
+}
+
+// definePolicyEvents 为每个类型定义读/写授权事件（schema 加载后、站点注册前）。
+func (s *Site) definePolicyEvents() {
+	hooks := s.engine.Hooks()
+	readProto := func(*CmsCtx, string, *gquery.Expr) error { return nil }
+	writeProtos := map[WriteAction]any{
+		WriteCreate: func(*CmsCtx, *core.Node, *core.List[string]) error { return nil },
+		WriteUpdate: func(*CmsCtx, int64, *core.NodePatch, *core.List[string]) error { return nil },
+		WriteDelete: func(*CmsCtx, int64) error { return nil },
+	}
+	for _, typeName := range s.engine.Types().Names() {
+		for action := range systemReadActions {
+			if err := hooks.DefineHook(ReadEvent(action, typeName), readProto); err != nil {
+				panic("web: define read events: " + err.Error())
+			}
+		}
+		for action, proto := range writeProtos {
+			if err := hooks.DefineHook(WriteEvent(action, typeName), proto); err != nil {
+				panic("web: define write events: " + err.Error())
+			}
+		}
+	}
+}
+
+// ReadRule 注册一个类型的读规则。系统读动作的事件由框架预定义（注册即覆盖默认行为）；
+// 站点自定义读动作在首次注册时定义事件。
+func (s *Site) ReadRule(action ReadAction, typeName string, rule ReadRule) {
+	if s.started {
+		panic("web: register read rule after Start")
 	}
 	if rule == nil {
-		panic("web: nil policy rule")
+		panic("web: nil read rule")
 	}
-	key := policyKey{typeName: typeName, action: action}
-	if _, exists := p.rules[key]; exists {
-		panic(fmt.Sprintf("web: duplicate %s policy for %q", action, typeName))
+	if _, ok := s.engine.Types().Type(typeName); !ok {
+		panic(fmt.Sprintf("web: policy type %q not defined", typeName))
 	}
-	p.rules[key] = rule
+	event := ReadEvent(action, typeName)
+	s.defineEvent(event, func(*CmsCtx, string, *gquery.Expr) error { return nil })
+	s.Hook(event, rule)
 }
 
-// Exposes reports whether the Site registered an explicit rule for the Type and
-// action. It is what makes a Type without a publication capability publicly
-// readable, and what the public routes and sitemap check before serving a Type.
-func (p *PolicyRegistry) Exposes(typeName string, action PolicyAction) bool {
-	return p.rules[policyKey{typeName: typeName, action: action}] != nil
+// WriteRule 注册一个类型的写规则。签名由 action 决定，不匹配在注册期报错：
+//
+//	create: func(*CmsCtx, *core.Node, *core.List[string]) error
+//	update: func(*CmsCtx, int64, *core.NodePatch, *core.List[string]) error
+//	delete: func(*CmsCtx, int64) error
+//
+// 规则负责三件事：身份/归属判断（返回错误即拒绝）、allow.Append 声明客户端可写字段、
+// 就地加工客户端不可设置的值（如 author、publication_state）。
+// create/update 若一个字段都没声明，等于没有授权这个动作（403）。
+func (s *Site) WriteRule(action WriteAction, typeName string, rule any) {
+	if s.started {
+		panic("web: register write rule after Start")
+	}
+	if _, ok := systemWriteActions[action]; !ok {
+		panic(fmt.Sprintf("web: unknown write action %q", action))
+	}
+	if _, ok := s.engine.Types().Type(typeName); !ok {
+		panic(fmt.Sprintf("web: policy type %q not defined", typeName))
+	}
+	s.Hook(WriteEvent(action, typeName), rule)
 }
 
-// Scope resolves and seals the mandatory Core query scope for one read action.
-func (p *PolicyRegistry) Scope(ctx *CmsCtx, action PolicyAction, typeName string) (core.QueryScope, error) {
-	if _, ok := p.site.engine.Types().Type(typeName); !ok {
+// defineEvent 定义事件（已定义则忽略 — 系统动作由框架预定义）。
+func (s *Site) defineEvent(name string, proto any) {
+	if s.engine.Hooks().Defined(name) {
+		return
+	}
+	if err := s.engine.Hooks().DefineHook(name, proto); err != nil {
+		panic("web: define policy event: " + err.Error())
+	}
+}
+
+// ReadScope 解析一次读取的行范围：注册了规则就用规则；否则系统读动作走 publication
+// 默认，站点读动作未注册则报错（拼错动作名不会静默回退到公开默认）。
+func (s *Site) ReadScope(ctx *CmsCtx, action ReadAction, typeName string) (core.QueryScope, error) {
+	if _, ok := s.engine.Types().Type(typeName); !ok {
 		return core.QueryScope{}, fmt.Errorf("web: policy type %q not defined", typeName)
 	}
-	if rule := p.rules[policyKey{typeName: typeName, action: action}]; rule != nil {
-		request := PolicyRequest{Actor: ctx.Actor(), Action: action, Type: typeName}
-		where, err := rule(ctx, request)
-		if err != nil {
+	event := ReadEvent(action, typeName)
+	if s.engine.Hooks().Has(event) {
+		var expr gquery.Expr
+		if err := s.engine.Hooks().Fire(event, ctx, typeName, &expr); err != nil {
 			return core.QueryScope{}, err
 		}
-		return core.PolicyScope(where), nil
+		if expr == nil {
+			return core.QueryScope{}, fmt.Errorf("web: read rule %s produced no scope", event)
+		}
+		return core.PolicyScope(expr), nil
 	}
-	if !action.system() {
-		return core.QueryScope{}, fmt.Errorf("web: unknown policy action %q for type %q", action, typeName)
+	if _, ok := systemReadActions[action]; !ok {
+		return core.QueryScope{}, fmt.Errorf("web: no read rule registered for action %q on type %q", action, typeName)
 	}
-	return p.defaultScope(typeName, action), nil
+	return s.defaultScope(typeName), nil
 }
 
-// defaultScope applies the system action's fallback for a Type with no rule.
-// PublishedOnly needs the Type's publication capability; a Type without it has
-// no publishable rows, so it is denied.
-func (p *PolicyRegistry) defaultScope(typeName string, action PolicyAction) core.QueryScope {
-	if policyDefaults[action] != PolicyDefaultPublishedOnly {
-		return core.PolicyScope(gquery.False())
-	}
-	publication, ok := p.site.engine.Types().Publication(typeName)
+// Exposes 该类型的这个读动作是否被站点显式注册了规则。公开路由与 sitemap 用它
+// 判断没有 publication capability 的类型是否被站点主动暴露。
+func (s *Site) Exposes(typeName string, action ReadAction) bool {
+	return s.engine.Hooks().Has(ReadEvent(action, typeName))
+}
+
+// defaultScope 系统读动作未注册规则时的行为：有 publication capability 的只读已发布
+// 记录；没有该 capability 的类型没有可发布记录，全拒。
+func (s *Site) defaultScope(typeName string) core.QueryScope {
+	publication, ok := s.engine.Types().Publication(typeName)
 	if !ok {
 		return core.PolicyScope(gquery.False())
 	}
-	where := gquery.EQ(gquery.Field(publication.Field), publication.Published)
-	return core.PolicyScope(where)
+	return core.PolicyScope(gquery.EQ(gquery.Field(publication.Field), publication.Published))
+}
+
+// deniedWrite 未注册写规则的回复：匿名 401，已认证 403。
+func deniedWrite(ctx *CmsCtx, action WriteAction, typeName string) *Error {
+	message := fmt.Sprintf("%s is not allowed for type %q", action, typeName)
+	if ctx.Actor().Kind == ActorAnonymous {
+		return Unauthorized("%s", message)
+	}
+	return Forbidden("%s", message)
+}
+
+// fieldNames 客户端提交的字段名（写规则加工前快照 — 白名单只约束客户端，不约束规则）。
+func fieldNames(fields map[string]any) []string {
+	if len(fields) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(fields))
+	for name := range fields {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// rejectFields 返回不在 allowed 里的提交字段，键为字段名，可直接作为 422 details。
+func rejectFields(submitted []string, allowed []string) map[string]string {
+	if len(submitted) == 0 {
+		return nil
+	}
+	permitted := make(map[string]struct{}, len(allowed))
+	for _, name := range allowed {
+		permitted[name] = struct{}{}
+	}
+	var rejected map[string]string
+	for _, name := range submitted {
+		if _, ok := permitted[name]; ok {
+			continue
+		}
+		if rejected == nil {
+			rejected = make(map[string]string, len(submitted))
+		}
+		rejected[name] = "field is not client-writable"
+	}
+	return rejected
 }

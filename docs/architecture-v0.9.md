@@ -287,32 +287,79 @@ type EditableNode struct {
 
 配套 API：`FullNode`、`FullNodes`、`RefID`、`RefIDs`、`HasRef`。
 
-### 3.11 QueryScope 与 Policy
+### 3.11 授权：按类型定义的读写事件
 
-`QueryScope` 是 Core 读取 API 的可信边界。Web `PolicyRegistry` 按以下键解析范围：
-
-```text
-Actor + Action + Type
-```
-
-Action 是字符串标识，分两类：
+`QueryScope` 仍是 Core 读取 API 的可信边界（零值报错、只由 `PolicyScope`/`BypassPolicy` 构造、
+在 AST 层与用户条件合并）。Web 层不再有独立的策略注册表：**授权就是一组按类型定义的事件**，
+由 hook 总线承载（schema 加载后、站点注册前定义）：
 
 ```text
-系统 action（框架拥有调用点）    list / view / search / export
-站点 action（站点拥有调用点）    site.my_content 等，必须含 "."
+web.read.list|view|search|export.<type>     读规则：收窄行范围
+web.write.create|update|delete.<type>       写规则：身份 + 可写字段 + 值加工
 ```
 
-系统 action 在 `policyDefaults` 表里有唯一定义：未注册规则时的默认行为（`PolicyDefault`）。解析顺序是"已注册规则 → 否则系统 action 查表"，没有散落在函数体里的分支：
+```go
+// 读规则：必须把过滤 AND 进 *expr（nil = 尚未收窄）。多个 handler 依次收窄（AND — 只会更窄）。
+site.ReadRule(web.ReadList, "article", func(ctx *web.CmsCtx, _ string, expr *gquery.Expr) error {
+	member, err := ctx.Principal()
+	if err != nil {
+		return web.Unauthorized("请先登录")
+	}
+	*expr = gquery.And(*expr, gquery.OneOf(gquery.Ref("author"), member.ID))
+	return nil
+})
+
+// 写规则：签名由 action 决定，不匹配在注册期就报错。
+site.WriteRule(web.WriteCreate, "article", func(ctx *web.CmsCtx, node *core.Node, allow *core.List[string]) error {
+	member, err := publishingMember(ctx)   // 身份/归属判断：返回错误即拒绝
+	if err != nil {
+		return err
+	}
+	allow.Append("title", "body", "cover") // 客户端可写字段（并集 — 多个 handler 各自声明）
+	node.Fields["author"] = member.ID      // 客户端不可设置的值由规则就地加工
+	node.Fields["publication_state"] = "draft"
+	return nil
+})
+site.WriteRule(web.WriteUpdate, "article", func(*web.CmsCtx, int64, *core.NodePatch, *core.List[string]) error { ... })
+site.WriteRule(web.WriteDelete, "article", func(*web.CmsCtx, int64) error { ... })   // 只有 err，无字段
+```
+
+**未注册 handler 时的行为**（两边都没有"默认放行"）：
 
 ```text
-PolicyDefaultPublishedOnly   有 publication capability 的 Type → 只读已发布记录
-                             没有该 capability 的 Type → 全拒
-PolicyDefaultDeny            全拒
+读: 系统读动作（list/view/search/export）→ publication 默认
+      有 publication capability → 只读已发布记录
+      没有该 capability         → 全拒（没有可发布的记录）
+    站点读动作（如 my_content）  → 报错（拼错动作名不会静默回退到公开默认）
+    注册了规则但 *expr 仍为 nil  → 报错（要"谁都看不到"就显式写 gquery.False()）
+写: 拒绝（匿名 401 unauthorized / 已认证 403 forbidden）
 ```
 
-站点 action 没有默认值，必须在对应 Type 上注册规则；未注册就解析会直接报错，不会静默回退到公开默认。名字要求带 `.` 是为了让今后新增的系统 action 不会和站点已经使用的名字撞在同一个 `(Type, Action)` 键上而静默改变行为。
+**写路径的三个生效点**（POST / PUT / DELETE `/api/nodes/{type}[/{id}]`）：
 
-写 action（create / update / delete）与写路径一起入表，默认 `Deny`。
+```text
+1) 准入    Has(web.write.<action>.<type>)? 没有 → 401/403
+           （PUT 先于存在性检查：未注册写规则的类型不能当"这个 id 存不存在"的探测器）
+2) 规则    Fire(...) → 返回错误即拒绝；create/update 收集 core.List[string] 作为白名单
+           客户端提交的字段名在规则加工前快照，规则里的加工不影响判断
+           allow 为空（一个字段都没声明）→ 403（等于没有授权这个动作）
+           集合外的提交字段 → 422 invalid_value + details 指名
+3) 写入    Core：Schema 校验 + 引用基数 + revision 乐观锁
+```
+
+职责划分：
+
+```text
+Schema / DB    写进去的行必须合法（取值、唯一、引用基数）—— 不知道 Actor
+读写事件        谁能读（行范围）、谁能写（身份）、客户端能填哪些字段
+值加工          客户端不可设置的值（author、publication_state、HTML 清洗）也在同一个规则里
+```
+
+组合语义（无单例限制，多个 handler 叠加）：读按 AND 收窄；写按并集放宽 —— 后者是显式选择，
+代价归注册者（多加一条 `allow.Append` 就等于多放开一个字段）。
+
+`core.CreateNode/PatchNode/DeleteNode` 是内核原语，不做写授权：后台管理路径与站点自建端点
+都是受信调用方，自己负责校验（例如 association 的 `/api/me/profile` 手建 patch）。
 
 ### 3.12 Auth Realm、Actor 与 Principal
 
@@ -581,7 +628,7 @@ Admin/Core permanent delete
 已实现：
 
 - `ListQuery` 必须显式使用 PolicyScope 或 BypassPolicy。
-- Web PolicyRegistry 支持 list/view/search/export。
+- Web 读授权支持 list/view/search/export 四个读动作。
 - 公共列表、详情、搜索和 sitemap 应用服务端范围。
 - SearchQuery 为每个 Type 使用独立 Scope。
 - FTS 索引与 publication 可见性解耦。

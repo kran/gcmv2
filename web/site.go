@@ -34,7 +34,6 @@ type Site struct {
 	render        *Render
 	router        *cho.Cho[*CmsCtx]
 	auth          *AuthRegistry
-	policy        *PolicyRegistry
 	uploadsDir    string
 	debug         bool      // 开发模式: 渲染错误显示详情页
 	secureCookies bool      // 前台/后台认证 Cookie 是否仅通过 HTTPS 发送
@@ -95,11 +94,10 @@ func Open(basedir string) (*Site, error) {
 	}
 	// ⑥ 认证 Realm 注册表与内置 hook（配置期注册，Start 后不可变）
 	site.auth = newAuthRegistry(site)
-	site.policy = newPolicyRegistry(site)
 	defineWebHooks(engine)
-	defineNodeHooks(engine)
 	defineAuthHooks(engine)
 	defineAdminHooks(engine)
+	site.definePolicyEvents()
 	// ⑦ 建 router（空 — 不挂路由; 配置期 Hook 与 Router() 挂载先于 Setup 的 mount）
 	site.router = cho.New(site.CmsCtxMaker)
 	site.alive.Store(true)
@@ -149,9 +147,6 @@ func (s *Site) Engine() core.Engine { return s.engine }
 
 // Auth returns the Site's server-controlled authentication Realm registry.
 func (s *Site) Auth() *AuthRegistry { return s.auth }
-
-// Policy returns the Site's server-controlled row Policy registry.
-func (s *Site) Policy() *PolicyRegistry { return s.policy }
 
 // DB 底层数据库句柄（逃生舱 — admin 账号表等）。
 func (s *Site) DB() *dba.SQL { return s.db }

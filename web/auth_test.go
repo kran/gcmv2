@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/kran/cho"
@@ -81,37 +82,112 @@ func do(site *Site, method, path string, body any, cookies ...*http.Cookie) *htt
 	return w
 }
 
-func TestAuthCreateRule(t *testing.T) {
+func TestWriteRulesGateNodeWrites(t *testing.T) {
 	s := testSite(t)
-	// 无 hook = 默认拒绝（安全）
-	w := do(s, "POST", "/api/nodes/guestbook", map[string]any{"display": "hi"})
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("no hook create = %d", w.Code)
-	}
-	if code := errorCode(t, w); code != string(CodeForbidden) {
-		t.Fatalf("no hook create code = %q", code)
-	}
-	// AddHook 放行（站点深度权限 — 按类型）
-	s.Engine().Hooks().AddHook(HookBeforeCreate, func(ctx *CmsCtx, node *core.Node) error {
-		if node.Type == "article" {
-			return errors.New("article not allowed")
+	cookie := newSession(t, s)
+	// 未注册规则 = 拒绝。匿名调用者得到 401，已认证调用者得到 403。
+	for _, tc := range []struct {
+		method string
+		path   string
+		body   any
+	}{
+		{http.MethodPost, "/api/nodes/guestbook", map[string]any{"display": "hi"}},
+		{http.MethodPut, "/api/nodes/guestbook/1", map[string]any{"display": "x"}},
+		{http.MethodDelete, "/api/nodes/guestbook/1", nil},
+	} {
+		w := do(s, tc.method, tc.path, tc.body)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("anonymous %s %s = %d %s", tc.method, tc.path, w.Code, w.Body.String())
 		}
-		return nil
+		if code := errorCode(t, w); code != string(CodeUnauthorized) {
+			t.Fatalf("anonymous %s %s code = %q", tc.method, tc.path, code)
+		}
+		w = do(s, tc.method, tc.path, tc.body, cookie)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("authenticated %s %s = %d %s", tc.method, tc.path, w.Code, w.Body.String())
+		}
+		if code := errorCode(t, w); code != string(CodeForbidden) {
+			t.Fatalf("authenticated %s %s code = %q", tc.method, tc.path, code)
+		}
+	}
+}
+
+// TestWriteRulesBoundFieldsAndTypes 写规则同时限定类型、动作与可提交字段；
+// 白名单只约束客户端，规则自己可以写客户端不可提交的字段。
+func TestWriteRulesBoundFieldsAndTypes(t *testing.T) {
+	s := testSiteConfigured(t, func(site *Site) {
+		site.WriteRule(WriteCreate, "article", func(_ *CmsCtx, node *core.Node, allow *core.List[string]) error {
+			allow.Append("body")
+			node.Fields["publication_state"] = "published" // 规则写客户端不可提交的字段
+			return nil
+		})
+		site.WriteRule(WriteUpdate, "article", func(_ *CmsCtx, _ int64, _ *core.NodePatch, allow *core.List[string]) error {
+			allow.Append("body")
+			return nil
+		})
+		site.WriteRule(WriteDelete, "article", func(*CmsCtx, int64) error { return nil })
 	})
-	// guestbook 放行 → 201
-	w = do(s, "POST", "/api/nodes/guestbook", map[string]any{"display": "hi"})
+	// 白名单外的字段 → 422 + details 指名（仅限越权字段）。
+	w := do(s, http.MethodPost, "/api/nodes/article", map[string]any{
+		"display": "hi", "fields": map[string]any{"body": "b", "publication_state": "draft"},
+	})
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("undeclared field = %d %s", w.Code, w.Body.String())
+	}
+	var failure struct {
+		Code    string            `json:"code"`
+		Details map[string]string `json:"details"`
+	}
+	decodeBody(t, w, &failure)
+	if failure.Code != string(CodeInvalidValue) || failure.Details["publication_state"] == "" {
+		t.Fatalf("undeclared field payload = %#v", failure)
+	}
+	if _, reported := failure.Details["body"]; reported {
+		t.Fatalf("declared field reported as rejected: %#v", failure.Details)
+	}
+	// 白名单内 → 201，且 Hook 写入的 publication_state 生效。
+	w = do(s, http.MethodPost, "/api/nodes/article", map[string]any{
+		"display": "hi", "fields": map[string]any{"body": "b"},
+	})
 	if w.Code != http.StatusCreated {
-		t.Fatalf("allowed create = %d: %s", w.Code, w.Body.String())
+		t.Fatalf("declared field = %d %s", w.Code, w.Body.String())
 	}
-	// article 被 hook 拒绝 → 403
-	w = do(s, "POST", "/api/nodes/article", map[string]any{"display": "x"})
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("deny create = %d", w.Code)
+	var created struct {
+		ID   int64 `json:"id"`
+		Node struct {
+			Revision int64 `json:"revision"`
+		} `json:"node"`
 	}
-	// 无 hook 更新/default 拒绝
-	w = do(s, "PUT", "/api/nodes/guestbook/1", map[string]any{"display": "x"})
+	decodeBody(t, w, &created)
+	full, err := s.Engine().FullNode(t.Context(), created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := full.Values.Str("publication_state"); got != "published" {
+		t.Fatalf("hook field = %q, want published", got)
+	}
+	// 注册过的 update 同样只接受白名单字段。
+	w = do(s, http.MethodPut, "/api/nodes/article/"+strconv.FormatInt(created.ID, 10), map[string]any{
+		"revision": created.Node.Revision, "fields": map[string]any{"publication_state": "draft"},
+	})
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("update undeclared field = %d %s", w.Code, w.Body.String())
+	}
+	w = do(s, http.MethodPut, "/api/nodes/article/"+strconv.FormatInt(created.ID, 10), map[string]any{
+		"revision": created.Node.Revision, "fields": map[string]any{"body": "renamed"},
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("update declared field = %d %s", w.Code, w.Body.String())
+	}
+	// 未注册规则的 update 也不带规则也要拒绝，且拒绝先于存在性判断。
+	w = do(s, http.MethodPut, "/api/nodes/guestbook/999999", map[string]any{"display": "x"}, newSession(t, s))
 	if w.Code != http.StatusForbidden {
-		t.Fatalf("no hook update = %d", w.Code)
+		t.Fatalf("undeclared type update = %d %s", w.Code, w.Body.String())
+	}
+	// 删除：注册过 → 归档成功。
+	w = do(s, http.MethodDelete, "/api/nodes/article/"+strconv.FormatInt(created.ID, 10), nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("declared delete = %d %s", w.Code, w.Body.String())
 	}
 }
 
@@ -269,6 +345,28 @@ func TestAuthMe(t *testing.T) {
 }
 
 // newSession 建一个 user 节点 + auth（core.RegisterAuth）+ 会话（AuthSession），返回 cookie。
+func newSessionWithRole(t *testing.T, s *Site, role string) *http.Cookie {
+	t.Helper()
+	n := &core.Node{Display: role, Fields: core.Fields{"name": role, "role": role}}
+	id, err := s.Engine().RegisterAuth(t.Context(), "user", "email", role+"@x.com", core.Fields{"password": "x"}, n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("GET", "/", nil)
+	w := httptest.NewRecorder()
+	ctx := &CmsCtx{BaseContext: cho.MakeBaseContext(w, req), site: s}
+	if _, err := AuthSession(ctx, s.Auth().MustRealm("members"), id); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range w.Result().Cookies() {
+		if c.Name == authCookie {
+			return c
+		}
+	}
+	t.Fatal("auth cookie not set")
+	return nil
+}
+
 func newSession(t *testing.T, s *Site) *http.Cookie {
 	t.Helper()
 	n := &core.Node{Display: "a", Fields: core.Fields{"name": "a"}}

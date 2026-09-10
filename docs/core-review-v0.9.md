@@ -97,7 +97,7 @@ ADR-003 已完成：
 
 `SearchQuery` 为每个目标 Type 携带独立的 Where 和 QueryScope：
 
-- 公共搜索由 Web PolicyRegistry 添加 publication scope。
+- 公共搜索由 Web 读授权（未注册规则时 publication 默认）添加 scope。
 - Admin 搜索显式使用 `core.BypassPolicy()`。
 - 每个 Type 的 Scope 都重新执行 Schema 校验。
 - 相关性排序和分页在 Policy 过滤之后执行。

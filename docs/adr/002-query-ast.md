@@ -332,7 +332,7 @@ Web 层按 Actor、Action、Type 注册规则：
 
 ```go
 site.Policy().Register("opportunity", web.PolicyList,
-    func(_ *web.CmsCtx, request web.PolicyRequest) (query.Expr, error) {
+    func(_ *web.CmsCtx, typeName string, expr *query.Expr) error {
         if request.Actor.Kind == web.ActorAdmin {
             return query.True(), nil
         }

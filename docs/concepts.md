@@ -252,16 +252,18 @@ ErrInvalidQuery · ErrInvalidField · ErrInvalidOperator · ErrInvalidValue · E
 | `AuthRealm` / `AuthRegistry` | 服务端注册的认证域：Name ↔ NodeType（+ AllowRegister/Default） |
 | `AdminService` / `Admin` | 独立后台账号（bcrypt + session key + 过期） |
 
-### 6.3 授权（读侧）
+### 6.3 授权（读 / 写）
 
 | 概念 | 说明 |
 |---|---|
-| `PolicyRegistry` | 按 `(Type, Action)` 解析行范围；`Exposes` 判断该类型是否被显式暴露 |
-| `PolicyAction` | 字符串 action。系统 action：list / view / search / export；站点自命名 action 必须含 `.` |
-| `policyDefaults` 表 | 每个**系统** action 的唯一出处：未注册规则时的默认行为（`PolicyDefault`） |
-| `PolicyDefault` | `PublishedOnly`（有 publication 的 Type 只读已发布）/ `Deny`（全拒） |
-| `PolicyRule` | `func(*CmsCtx, PolicyRequest) (gquery.Expr, error)` |
-| 解析顺序 | 已注册规则 → 否则系统 action 查表；站点 action 未注册该 Type 则报错（不静默回退） |
+| `ReadAction` | list / view / search / export（系统读动作）；站点可自定义读动作（如 `my_content`） |
+| `WriteAction` | create / update / delete（系统写动作，对应三个公开写端点） |
+| 授权事件 | `web.read.<action>.<type>` / `web.write.<action>.<type>` —— schema 加载后按类型定义，授权就是注册这些事件的 handler |
+| `ReadRule` | `func(*CmsCtx, string, *gquery.Expr) error` —— AND 收窄行范围（`Site.ReadRule` 注册） |
+| 写规则 | create/update: `func(*CmsCtx, …, *core.List[string]) error`；delete: `func(*CmsCtx, int64) error`（`Site.WriteRule` 注册） |
+| `Site.ReadScope` | 解析读范围：有 handler → 用规则；无 → 系统读动作走 publication 默认，站点读动作报错 |
+| `Site.Exposes` | `Has(web.read.<action>.<type>)` —— 该类型是否被站点显式暴露 |
+| `deniedWrite` / `rejectFields` | 未注册写规则 → 401/403；白名单外字段 → 422 + details |
 
 ### 6.4 错误契约
 
@@ -325,8 +327,9 @@ highlight   代码高亮
 | `relation` capability | **无真实使用者**（只有测试） |
 | `equivalence` | **无真实使用者**（只有测试；association 用不上） |
 | `on_delete: cascade` | **无真实使用者**（association 全是默认） |
-| `PolicyRule` / `Register` | association 的 `site.my_content` 是唯一生产调用方（会员读自己的内容） |
-| `policyDefaults` 表 | 4 个系统 action 的默认行为由它解析；站点 action 没有默认，必须自带规则 |
+| 读授权事件 | association 的读动作 `my_content` + 公开读默认（publication）在用 |
+| 写授权事件 | association 为 article/event/supply 各注册 create/update/delete 规则（身份 + 字段 + 加工） |
+| 按角色的字段集 | web 测试覆盖（会员只写 body，编辑还能写发布状态）；association 无编辑流程 |
 | `Set`（SubtreeOf） | association 用 `Tree` + ref 集合替代 |
 | Lisp 前端 | Admin 列表 filter、模板 filterList |
 | QuerySpec | Admin `/admin/query/{type}` |
@@ -350,7 +353,7 @@ highlight   代码高亮
 3. 关系代数(3) + tree + relation      → 四种关系形态, association 只用到 tree
 4. Hook(18)                          → 生命周期 + 渲染 + 认证四类扩展点
 5. Expr(7) × Path(4) × Set(1)        → 查询表达力
-6. Action(4 系统 + 站点自命名) × Type(n) → 读策略键空间
+6. 授权事件 (4 读 + 3 写) × Type(n) → 事件名空间
 7. Code(12) × Status                 → 错误契约
 ```
 
@@ -358,7 +361,7 @@ highlight   代码高亮
 
 ```text
 关系语义层:  relation · equivalence · symmetric · on_delete:cascade
-授权层:      PolicyRule/Register · ActorAPIKey
+授权层:      ActorAPIKey（读/写授权事件已成为主路径，不再是“只有测试用”的概念）
 运维/合并层: MergePreview
 ```
 

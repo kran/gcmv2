@@ -109,7 +109,12 @@ func TestApiNodesUnknownType(t *testing.T) {
 }
 
 func TestApiNodeTypeMismatch(t *testing.T) {
-	s := testSite(t)
+	s := testSiteConfigured(t, func(site *Site) {
+		site.WriteRule(WriteUpdate, "guestbook", func(*CmsCtx, int64, *core.NodePatch, *core.List[string]) error {
+			return nil
+		})
+		site.WriteRule(WriteDelete, "guestbook", func(*CmsCtx, int64) error { return nil })
+	})
 	id, err := s.Engine().CreateNode(t.Context(), &core.Node{
 		Type: "article", Display: "文章",
 		Fields: map[string]any{"body": "内容", "publication_state": "published"},
@@ -201,7 +206,9 @@ func uploadRequest(t *testing.T, site *Site, token, name string, content []byte)
 }
 
 func TestAPIRejectsLegacyNodeColumns(t *testing.T) {
-	s := testSite(t)
+	s := testSiteConfigured(t, func(site *Site) {
+		site.WriteRule(WriteCreate, "article", func(*CmsCtx, *core.Node, *core.List[string]) error { return nil })
+	})
 	w := do(s, http.MethodPost, "/api/nodes/article", map[string]any{
 		"display": "legacy", "status": 1,
 		"fields": map[string]any{"body": "x"},
@@ -307,8 +314,14 @@ func errorCode(t *testing.T, w *httptest.ResponseRecorder) string {
 func TestErrorContract(t *testing.T) {
 	s := testSiteConfigured(t, func(site *Site) {
 		// 放行写入, 让后续断言落在数据契约上而不是默认拒绝上。
-		site.Hook(HookBeforeCreate, func(*CmsCtx, *core.Node) error { return nil })
-		site.Hook(HookBeforeUpdate, func(*CmsCtx, int64, *core.NodePatch) error { return nil })
+		site.WriteRule(WriteCreate, "article", func(_ *CmsCtx, _ *core.Node, allow *core.List[string]) error {
+			allow.Append("publication_state", "body")
+			return nil
+		})
+		site.WriteRule(WriteUpdate, "article", func(_ *CmsCtx, _ int64, _ *core.NodePatch, allow *core.List[string]) error {
+			allow.Append("body")
+			return nil
+		})
 	})
 	// 401: 未认证
 	w := do(s, "GET", "/api/auth/me", nil)
@@ -356,10 +369,10 @@ func TestErrorContract(t *testing.T) {
 	}
 }
 
-// TestHookRejectionCarriesStructuredCode Hook 可以用 *web.Error 精确表达语义。
-func TestHookRejectionCarriesStructuredCode(t *testing.T) {
+// TestWriteRuleRejectionCarriesStructuredCode 写规则可以用 *web.Error 精确表达语义。
+func TestWriteRuleRejectionCarriesStructuredCode(t *testing.T) {
 	s := testSiteConfigured(t, func(site *Site) {
-		site.Hook(HookBeforeCreate, func(*CmsCtx, *core.Node) error {
+		site.WriteRule(WriteCreate, "article", func(*CmsCtx, *core.Node, *core.List[string]) error {
 			return InvalidFields(map[string]string{"title": "标题已存在"})
 		})
 	})

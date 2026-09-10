@@ -42,8 +42,18 @@ func NewHookBus() *HookBus {
 	return &HookBus{hooks: map[string]*Hook{}}
 }
 
-// HasHook 事件是否注册了 handler（权限类 hook — 无 handler = 默认拒绝）。
-func (b *HookBus) HasHook(name string) bool {
+// Defined 事件是否已声明（DefineHook 过）。注册前判重用，与 Has 区分：
+// 已声明但没有 handler 的事件仍然 Defined。
+func (b *HookBus) Defined(name string) bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	_, ok := b.hooks[name]
+	return ok
+}
+
+// Has 事件是否注册了 handler。按类型命名的授权事件用它判断
+// “站点是否为这个 (操作, 类型) 注册了规则”。
+func (b *HookBus) Has(name string) bool {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	h, ok := b.hooks[name]
