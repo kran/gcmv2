@@ -1,7 +1,6 @@
 package web
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/kran/cho"
@@ -51,7 +50,7 @@ func defineNodeHooks(svc core.Engine) {
 func (s *Site) apiCreateNode(ctx *CmsCtx) {
 	typ := ctx.PathValue("type")
 	if _, ok := s.engine.Types().Type(typ); !ok {
-		ctx.Error(http.StatusBadRequest, "type not found")
+		ctx.Fail(NotFound("type not found"))
 		return
 	}
 	var input struct {
@@ -60,31 +59,31 @@ func (s *Site) apiCreateNode(ctx *CmsCtx) {
 	}
 	err := decodeStrictJSON(ctx.R.Body, &input)
 	if err != nil {
-		ctx.Error(http.StatusBadRequest, err.Error())
+		ctx.Fail(BadRequest("%s", err.Error()))
 		return
 	}
 	node := core.Node{Type: typ, Display: input.Display, Fields: input.Fields}
 	if node.Display == "" {
-		ctx.Error(http.StatusBadRequest, "display required")
+		ctx.Fail(InvalidValue("display required"))
 		return
 	}
 	// 权限: 无 hook 定义 = 默认拒绝（安全 — 站点必须显式放行该类型）
 	if !s.engine.Hooks().HasHook(HookBeforeCreate) {
-		ctx.Error(http.StatusForbidden, "create not allowed")
+		ctx.Fail(Forbidden("create not allowed"))
 		return
 	}
 	if err := s.engine.Hooks().Fire(HookBeforeCreate, ctx, &node); err != nil {
-		ctx.Error(http.StatusForbidden, err.Error())
+		ctx.Reject(err)
 		return
 	}
 	id, err := s.engine.CreateNode(ctx.R.Context(), &node)
 	if err != nil {
-		ctx.Error(http.StatusBadRequest, err.Error())
+		ctx.Fail(err)
 		return
 	}
 	created, err := s.engine.GetNodeById(ctx.R.Context(), id)
 	if err != nil {
-		ctx.Error(http.StatusInternalServerError, err.Error())
+		ctx.Fail(err)
 		return
 	}
 	_ = ctx.Json(http.StatusCreated, map[string]any{"id": id, "node": created})
@@ -94,17 +93,17 @@ func (s *Site) apiCreateNode(ctx *CmsCtx) {
 func (s *Site) apiViewNode(ctx *CmsCtx) {
 	typ := ctx.PathValue("type")
 	if _, ok := s.engine.Types().Type(typ); !ok {
-		ctx.Error(http.StatusBadRequest, "type not found")
+		ctx.Fail(NotFound("type not found"))
 		return
 	}
 	id := ctx.PathNum("id", 0)
 	if id == 0 {
-		ctx.Error(http.StatusBadRequest, "invalid id")
+		ctx.Fail(BadRequest("invalid id"))
 		return
 	}
 	scope, err := s.policy.Scope(ctx, PolicyView, typ)
 	if err != nil {
-		ctx.Error(http.StatusInternalServerError, "policy resolution failed")
+		ctx.Fail(err)
 		return
 	}
 	items, err := s.engine.Query(ctx.R.Context(), core.ListQuery{
@@ -112,11 +111,11 @@ func (s *Site) apiViewNode(ctx *CmsCtx) {
 		Scope: scope, Page: gquery.Page{Size: 1},
 	})
 	if err != nil {
-		ctx.Error(http.StatusInternalServerError, err.Error())
+		ctx.Fail(err)
 		return
 	}
 	if len(items) == 0 {
-		ctx.Error(http.StatusNotFound, "not found")
+		ctx.Fail(NotFound("not found"))
 		return
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{"node": &items[0]})
@@ -127,45 +126,41 @@ func (s *Site) apiUpdateNode(ctx *CmsCtx) {
 	typ := ctx.PathValue("type")
 	id := ctx.PathNum("id", 0)
 	if id == 0 {
-		ctx.Error(http.StatusBadRequest, "invalid id")
+		ctx.Fail(BadRequest("invalid id"))
 		return
 	}
 	if _, ok := s.engine.Types().Type(typ); !ok {
-		ctx.Error(http.StatusBadRequest, "type not found")
+		ctx.Fail(NotFound("type not found"))
 		return
 	}
 	existing, err := s.engine.GetNodeById(ctx.R.Context(), id)
 	if err != nil {
-		ctx.Error(http.StatusInternalServerError, "internal error")
+		ctx.Fail(err)
 		return
 	}
 	if existing == nil || existing.Type != typ {
-		ctx.Error(http.StatusNotFound, "not found")
+		ctx.Fail(NotFound("not found"))
 		return
 	}
 	// 差量语义: client 提交 NodePatch（全指针 — nil = 不改字段; PATCH）
 	var patch core.NodePatch
 	err = decodeStrictJSON(ctx.R.Body, &patch)
 	if err != nil {
-		ctx.Error(http.StatusBadRequest, err.Error())
+		ctx.Fail(BadRequest("%s", err.Error()))
 		return
 	}
 	// 权限: 无 hook 默认拒绝
 	if !s.engine.Hooks().HasHook(HookBeforeUpdate) {
-		ctx.Error(http.StatusForbidden, "update not allowed")
+		ctx.Fail(Forbidden("update not allowed"))
 		return
 	}
 	if err := s.engine.Hooks().Fire(HookBeforeUpdate, ctx, id, &patch); err != nil {
-		ctx.Error(http.StatusForbidden, err.Error())
+		ctx.Reject(err)
 		return
 	}
 	err = s.engine.PatchNode(ctx.R.Context(), id, &patch)
-	if errors.Is(err, core.ErrRevisionConflict) {
-		ctx.Error(http.StatusConflict, err.Error())
-		return
-	}
 	if err != nil {
-		ctx.Error(http.StatusBadRequest, err.Error())
+		ctx.Fail(err)
 		return
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
@@ -175,38 +170,34 @@ func (s *Site) apiUpdateNode(ctx *CmsCtx) {
 func (s *Site) apiDeleteNode(ctx *CmsCtx) {
 	typ := ctx.PathValue("type")
 	if _, ok := s.engine.Types().Type(typ); !ok {
-		ctx.Error(http.StatusBadRequest, "type not found")
+		ctx.Fail(NotFound("type not found"))
 		return
 	}
 	id := ctx.PathNum("id", 0)
 	if id == 0 {
-		ctx.Error(http.StatusBadRequest, "invalid id")
+		ctx.Fail(BadRequest("invalid id"))
 		return
 	}
 	existing, err := s.engine.GetNodeById(ctx.R.Context(), id)
 	if err != nil {
-		ctx.Error(http.StatusInternalServerError, "internal error")
+		ctx.Fail(err)
 		return
 	}
 	if existing == nil || existing.Type != typ {
-		ctx.Error(http.StatusNotFound, "not found")
+		ctx.Fail(NotFound("not found"))
 		return
 	}
 	if !s.engine.Hooks().HasHook(HookBeforeDelete) {
-		ctx.Error(http.StatusForbidden, "delete not allowed")
+		ctx.Fail(Forbidden("delete not allowed"))
 		return
 	}
 	if err := s.engine.Hooks().Fire(HookBeforeDelete, ctx, id); err != nil {
-		ctx.Error(http.StatusForbidden, err.Error())
+		ctx.Reject(err)
 		return
 	}
 	err = s.engine.ArchiveNode(ctx.R.Context(), id, existing.Revision)
-	if errors.Is(err, core.ErrRevisionConflict) {
-		ctx.Error(http.StatusConflict, err.Error())
-		return
-	}
 	if err != nil {
-		ctx.Error(http.StatusNotFound, err.Error())
+		ctx.Fail(err)
 		return
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
@@ -225,17 +216,17 @@ func (s *Site) apiUpload(ctx *CmsCtx) {
 func (s *Site) apiTree(ctx *CmsCtx) {
 	typ := ctx.PathValue("type")
 	if _, ok := s.engine.Types().Type(typ); !ok {
-		ctx.Error(http.StatusBadRequest, "type not found")
+		ctx.Fail(NotFound("type not found"))
 		return
 	}
 	scope, err := s.policy.Scope(ctx, PolicyList, typ)
 	if err != nil {
-		ctx.Error(http.StatusInternalServerError, "policy resolution failed")
+		ctx.Fail(err)
 		return
 	}
 	tree, err := s.engine.LoadTree(ctx.R.Context(), typ, scope)
 	if err != nil {
-		ctx.Error(http.StatusInternalServerError, err.Error())
+		ctx.Fail(err)
 		return
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{"items": tree.JsonNodes()})

@@ -23,7 +23,15 @@ var (
 	ErrRevisionConflict = errors.New("core: node revision conflict")
 	// ErrNodeArchived means an operation requires an active Node.
 	ErrNodeArchived = errors.New("core: node is archived")
+	// ErrInvalidFields means the submitted fields failed Schema validation
+	// (missing required, wrong Kind, immutable, duplicate ref target).
+	ErrInvalidFields = errors.New("core: invalid fields")
 )
+
+// invalidFields 包装 Schema/值校验错误（Web 边界据此返回 422）。
+func invalidFields(err error) error {
+	return fmt.Errorf("%w: %w", ErrInvalidFields, err)
+}
 
 // ── 读 ────────────────────────────────────────
 
@@ -83,13 +91,13 @@ func (s *Service) CreateNode(ctx context.Context, n *Node) (int64, error) {
 	}
 	fields, err := s.types.ApplyDefaults(n.Type, n.Fields)
 	if err != nil {
-		return 0, err
+		return 0, invalidFields(err)
 	}
 	if err := s.types.ValidateFields(n.Type, fields); err != nil {
-		return 0, err
+		return 0, invalidFields(err)
 	}
 	if n.Display == "" {
-		return 0, errors.New("core: create: display required")
+		return 0, invalidFields(errors.New("core: create: display required"))
 	}
 	// 内部拷贝，不触碰调用方。BeforeCreate 可以补充字段，因此事务内会
 	// 再次校验并在校验后拆分引用。
@@ -112,7 +120,7 @@ func (s *Service) CreateNode(ctx context.Context, n *Node) (int64, error) {
 			return errors.New("core: create: type is immutable")
 		}
 		if m.Display == "" {
-			return errors.New("core: create: display required")
+			return invalidFields(errors.New("core: create: display required"))
 		}
 		m.ID = 0
 		m.Revision = 1
@@ -120,7 +128,7 @@ func (s *Service) CreateNode(ctx context.Context, n *Node) (int64, error) {
 		m.CreatedAt = now
 		m.UpdatedAt = now
 		if err = s.types.ValidateFields(m.Type, m.Fields); err != nil {
-			return err
+			return invalidFields(err)
 		}
 		scalar, refs, err := splitRefs(td, s.types, m.Fields)
 		if err != nil {
@@ -182,7 +190,7 @@ func (s *Service) PatchNode(ctx context.Context, id int64, patch *NodePatch) err
 			return err
 		}
 		if err = s.types.ValidatePatchFields(existing.Type, patch.Fields); err != nil {
-			return err
+			return invalidFields(err)
 		}
 
 		scalarPatch := Fields{}
@@ -202,7 +210,7 @@ func (s *Service) PatchNode(ctx context.Context, id int64, patch *NodePatch) err
 		cols := map[string]any{}
 		if patch.Display != nil {
 			if *patch.Display == "" {
-				return errors.New("core: patch: display required")
+				return invalidFields(errors.New("core: patch: display required"))
 			}
 			cols["display"] = *patch.Display
 		}

@@ -340,7 +340,48 @@ Anonymous / Node / Admin / APIKey
 - 无向边未规范化
 - transitive/tree 环
 
-### 3.15 Merge Preview
+### 3.15 错误契约
+
+HTTP 边界的错误是结构化值，不是字符串：
+
+```json
+{"error":"人类可读信息","code":"invalid_value","details":{"title":"必填"}}
+```
+
+- `error`：面向人的信息（可以本地化、可以改写）。
+- `code`：稳定机器标识（契约），客户端只能按 code 分支。
+- `details`：可选字段级错误，表单回显用。
+
+Code 与 HTTP 语义的固定映射：
+
+```text
+invalid_request    400  请求体/参数格式错误
+unauthorized       401  未认证或凭据失效
+forbidden          403  已认证但无权限
+not_found          404  不存在或不可见
+conflict           409  版本/唯一/归档状态冲突
+delete_restricted  409  incoming 引用阻止永久删除
+invalid_value      422  字段值不符合 Schema
+invalid_query      422  查询字段/操作符/值未过 Schema 校验
+query_too_complex  422  查询超出预算
+upload_invalid     413/422  上传缺文件、类型/大小/内容非法
+internal           500  未预期错误（细节只进日志）
+unavailable        503  依赖不可用
+```
+
+三条例外：
+
+- `CmsCtx.Error(status, message)` 保留 cho 的调用形态，但响应体自动带上由 status
+  推导的 Code，不会出现“没有 Code”的响应。
+- `CmsCtx.Fail(err)` 用于 API 出口：`*Error` 原样输出，core/types 已知错误映射到
+  404/409/422，其他错误记日志后输出通用 500（内部细节不外泄）。
+- `CmsCtx.Reject(err)` 用于权限/业务 Hook：`*Error` 原样输出，其他错误默认 403 +
+  原始信息（站点文案随站点变，客户端改用 Code）。
+
+站点 Hook 可以返回 `web.Forbidden(...)` / `web.Unauthorized(...)` /
+`web.InvalidFields(...)` 精确表达语义；框架自己的信息保持简短英文，站点文案自行决定。
+
+### 3.16 Merge Preview
 
 `PreviewMerge` 只报告：
 
@@ -591,9 +632,9 @@ Admin/Core permanent delete
 
 ### 6.2 Policy
 
-读取侧行级 Policy 已完成。以下仍依赖 Web Hook 或尚未统一：
+读取侧行级 Policy 已完成，错误语义已有稳定 Code。以下仍依赖 Web Hook 或尚未统一：
 
-- Create/Update/Delete/Transition 权限模型
+- Create/Update/Delete/Transition 权限模型（当前仅“无 Hook = 默认拒绝”）
 - 字段级读取和写入白名单
 - 上传授权的统一 Policy 表达
 - 嵌套 typed Set 子查询中的递归 Type Policy
@@ -647,7 +688,6 @@ Core 与 Admin API 已支持 archive/restore，但当前通用后台列表默认
 - 游标分页（页码分页的稳定排序已完成）。
 - 通用 Import/Export、批处理及幂等键。
 - Schema hash 与“Schema 未变则跳过重建”的搜索索引刷新策略。
-- 稳定的结构化 API Error Code 契约（Status/Code/Message、Hook 结构化错误）。
 
 ### 7.2 已清理的边界泄漏
 
@@ -721,12 +761,13 @@ v0.9 当前包含三项核心迁移：
 1. [x] 清理通用 Web/Types 中的业务和展示边界泄漏。
 2. [x] 将 Context 贯穿剩余数据库与外部 I/O API。
 3. [x] 生命周期：Open/Close、healthz/readyz、DB 与 Migrator Context。
-4. [ ] 结构化错误码（Status/Code/Message、Hook 结构化错误）与统一写操作授权。
-5. [ ] 设计递归 Policy 的 typed Set 子查询。
-6. [ ] 建立审计模型，再开放可执行 Merge。
-7. [ ] 增加关系 Node 组合唯一约束和后台关系视图。
-8. [ ] 实现 Workflow、Aggregate、Import/Export 等应用能力。
-9. [ ] 用独立非 CMS 示例验证，而不是把 CRM 名词写入 Core。
+4. [x] 结构化错误码（Status/Code/Message、Hook 结构化错误）。
+5. [ ] 统一写操作授权（Create/Update/Delete 的 Policy 与字段白名单）。
+6. [ ] 设计递归 Policy 的 typed Set 子查询。
+7. [ ] 建立审计模型，再开放可执行 Merge。
+8. [ ] 增加关系 Node 组合唯一约束和后台关系视图。
+9. [ ] 实现 Workflow、Aggregate、Import/Export 等应用能力。
+10. [ ] 用独立非 CMS 示例验证，而不是把 CRM 名词写入 Core。
 
 ---
 

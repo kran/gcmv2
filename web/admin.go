@@ -204,12 +204,13 @@ type backend struct {
 // fail-loud 可见性优先; 敏感 SQL 细节留在日志）。
 func (b *backend) internal(ctx *CmsCtx, err error) {
 	slog.Error("admin internal", "path", ctx.R.URL.Path, "err", err)
-	_ = ctx.Error(http.StatusInternalServerError, "internal error")
+	_ = Internal("internal error").write(ctx)
 }
 
-// bad 客户端错误（校验/参数）: 直接透传, 前端表单回显。
-func (b *backend) bad(ctx *CmsCtx, err error) {
-	ctx.Error(http.StatusBadRequest, err.Error())
+// fail 错误出口: 结构化/Core 已知错误按契约映射（422/404/409）,
+// 未预期错误只记日志并返回通用 500。
+func (b *backend) fail(ctx *CmsCtx, err error) {
+	ctx.Fail(err)
 }
 
 // ── UI 静态 + 上传 ────────────────────────────────
@@ -258,68 +259,68 @@ func (b *backend) upload(ctx *CmsCtx) {
 // 落 uploads。admin 后台上传与前台 API 上传共用。
 func saveUpload(uploadDir string, ctx *CmsCtx) {
 	if uploadDir == "" {
-		ctx.Error(http.StatusBadRequest, "uploads disabled")
+		ctx.Fail(BadRequest("uploads disabled"))
 		return
 	}
 	maxBytes := int64(8 << 20) // 8MB 硬上限
 	ctx.R.Body = http.MaxBytesReader(ctx.W, ctx.R.Body, maxBytes)
 	if err := ctx.R.ParseMultipartForm(maxBytes); err != nil {
-		ctx.Error(http.StatusRequestEntityTooLarge, "file too large (max 8MB)")
+		ctx.Fail(Errorf(http.StatusRequestEntityTooLarge, CodeUploadInvalid, "file too large (max 8MB)"))
 		return
 	}
 	f, fh, err := ctx.R.FormFile("file")
 	if err != nil {
-		ctx.Error(http.StatusBadRequest, "missing file field 'file'")
+		ctx.Fail(Errorf(http.StatusBadRequest, CodeUploadInvalid, "missing file field 'file'"))
 		return
 	}
 	defer f.Close()
 	ext := strings.ToLower(filepath.Ext(fh.Filename))
 	allowedMIMEs, ok := uploadMIMEs[ext]
 	if !ok {
-		ctx.Error(http.StatusBadRequest, "file type not allowed: "+ext)
+		ctx.Fail(Errorf(http.StatusUnprocessableEntity, CodeUploadInvalid, "file type not allowed: %s", ext))
 		return
 	}
 	header := make([]byte, 512)
 	n, readErr := io.ReadFull(f, header)
 	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
-		ctx.Error(http.StatusBadRequest, "cannot read uploaded file")
+		ctx.Fail(BadRequest("cannot read uploaded file"))
 		return
 	}
 	contentType := http.DetectContentType(header[:n])
 	if !allowedMIMEs[contentType] {
-		ctx.Error(http.StatusBadRequest, "file content does not match extension")
+		ctx.Fail(Errorf(http.StatusUnprocessableEntity, CodeUploadInvalid, "file content does not match extension"))
 		return
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		ctx.Error(http.StatusBadRequest, "cannot read uploaded file")
+		ctx.Fail(BadRequest("cannot read uploaded file"))
 		return
 	}
 	base := strings.TrimSuffix(filepath.Base(fh.Filename), filepath.Ext(fh.Filename))
 	base = pathologize.Clean(base)
 	rand4 := make([]byte, 4)
 	if _, err := rand.Read(rand4); err != nil {
-		ctx.Error(http.StatusInternalServerError, "upload failed")
+		ctx.Fail(Internal("upload failed"))
 		return
 	}
 	name := fmt.Sprintf("%d-%s-%s%s", time.Now().Unix(), hex.EncodeToString(rand4), base, ext)
 	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
-		ctx.Error(http.StatusInternalServerError, "upload failed")
+		ctx.Fail(Internal("upload failed"))
 		return
 	}
 	dst, err := os.OpenFile(filepath.Join(uploadDir, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
-		ctx.Error(http.StatusInternalServerError, "upload failed")
+		ctx.Fail(Internal("upload failed"))
 		return
 	}
 	if _, err := io.Copy(dst, f); err != nil {
 		_ = dst.Close()
 		_ = os.Remove(dst.Name())
-		ctx.Error(http.StatusInternalServerError, "upload failed")
+		ctx.Fail(Internal("upload failed"))
 		return
 	}
 	if err := dst.Close(); err != nil {
 		_ = os.Remove(dst.Name())
-		ctx.Error(http.StatusInternalServerError, "upload failed")
+		ctx.Fail(Internal("upload failed"))
 		return
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{"name": name, "path": "/uploads/" + name})
@@ -417,11 +418,11 @@ func (b *backend) login(ctx *CmsCtx) {
 		Password string `json:"password"`
 	}
 	if err := ctx.BindJson(&in); err != nil {
-		b.bad(ctx, err)
+		b.fail(ctx, err)
 		return
 	}
 	if !b.acct.VerifyPassword(in.Username, in.Password) {
-		ctx.Error(http.StatusUnauthorized, "invalid credentials")
+		ctx.Fail(Unauthorized("invalid credentials"))
 		return
 	}
 	key, err := b.acct.NewSession()
@@ -463,7 +464,7 @@ func (b *backend) listPanels(ctx *CmsCtx) {
 func (b *backend) requireAuth(ctx *CmsCtx, next func()) {
 	cookie, err := ctx.R.Cookie(cookieName)
 	if err != nil || !b.acct.ValidSession(cookie.Value) {
-		ctx.Error(http.StatusUnauthorized, "unauthorized")
+		ctx.Fail(Unauthorized("unauthorized"))
 		return
 	}
 	ctx.SetActor(Actor{Kind: ActorAdmin, Scopes: []string{"admin"}})
@@ -493,7 +494,7 @@ func (b *backend) listNodes(ctx *CmsCtx) {
 		size = 100
 	}
 	if typ == "" {
-		ctx.Error(http.StatusBadRequest, "type required")
+		ctx.Fail(BadRequest("type required"))
 		return
 	}
 	var where gquery.Expr
@@ -501,7 +502,7 @@ func (b *backend) listNodes(ctx *CmsCtx) {
 	if filter != "" {
 		parsed, err := gquery.ParseLisp(filter, nil)
 		if err != nil {
-			b.bad(ctx, err)
+			b.fail(ctx, err)
 			return
 		}
 		where = parsed
@@ -512,7 +513,7 @@ func (b *backend) listNodes(ctx *CmsCtx) {
 	// 默认 id 降序（新节点在前）; sort 参数可选覆盖。
 	sortFields, sortErr := parseSort(ctx.Query("sort"))
 	if sortErr != nil {
-		b.bad(ctx, sortErr)
+		b.fail(ctx, sortErr)
 		return
 	}
 	if len(sortFields) == 0 {
@@ -523,11 +524,7 @@ func (b *backend) listNodes(ctx *CmsCtx) {
 		Page: gquery.Page{Number: page, Size: size},
 	})
 	if err != nil {
-		if isQueryError(err) {
-			b.bad(ctx, err)
-		} else {
-			b.internal(ctx, err)
-		}
+		b.fail(ctx, err) // 查询错误 → 422 invalid_query / query_too_complex
 		return
 	}
 	// 列表默认展开全部出边 ref 字段（一层, 批量 — 查询次数=字段数, 与页大小无关）
@@ -545,12 +542,12 @@ func (b *backend) listNodes(ctx *CmsCtx) {
 func (b *backend) queryNodes(ctx *CmsCtx) {
 	typeName := ctx.PathValue("type")
 	if _, ok := b.eng.Types().Type(typeName); !ok {
-		ctx.Error(http.StatusBadRequest, "type not found")
+		ctx.Fail(NotFound("type not found"))
 		return
 	}
 	where, sortFields, page, err := gquery.DecodeSpec(ctx.R.Body)
 	if err != nil {
-		b.bad(ctx, err)
+		b.fail(ctx, err)
 		return
 	}
 	if page.Number <= 0 {
@@ -564,7 +561,7 @@ func (b *backend) queryNodes(ctx *CmsCtx) {
 		Type: typeName, Where: where, Scope: core.BypassPolicy(), Sort: sortFields, Page: page,
 	})
 	if err != nil {
-		b.bad(ctx, err)
+		b.fail(ctx, err)
 		return
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{
@@ -595,7 +592,7 @@ func (b *backend) expandMany(ctx context.Context, nodes []core.Node) ([]core.Nod
 func (b *backend) createNode(ctx *CmsCtx) {
 	typ := ctx.Query("type")
 	if typ == "" {
-		ctx.Error(http.StatusBadRequest, "type required")
+		ctx.Fail(BadRequest("type required"))
 		return
 	}
 	var input struct {
@@ -604,17 +601,17 @@ func (b *backend) createNode(ctx *CmsCtx) {
 	}
 	err := decodeStrictJSON(ctx.R.Body, &input)
 	if err != nil {
-		b.bad(ctx, err)
+		b.fail(ctx, err)
 		return
 	}
 	node := core.Node{Type: typ, Display: input.Display, Fields: input.Fields}
 	if node.Display == "" {
-		b.bad(ctx, errors.New("display required"))
+		ctx.Fail(InvalidValue("display required"))
 		return
 	}
 	id, err := b.eng.CreateNode(ctx.R.Context(), &node)
 	if err != nil {
-		b.bad(ctx, err)
+		b.fail(ctx, err)
 		return
 	}
 	_ = ctx.Json(http.StatusCreated, map[string]any{"id": id})
@@ -623,12 +620,12 @@ func (b *backend) createNode(ctx *CmsCtx) {
 func (b *backend) getNode(ctx *CmsCtx) {
 	id := ctx.PathNum("id", 0)
 	if id == 0 {
-		ctx.Error(http.StatusBadRequest, "invalid id")
+		ctx.Fail(BadRequest("invalid id"))
 		return
 	}
 	editable, err := b.eng.FullNode(ctx.R.Context(), id)
 	if errors.Is(err, core.ErrNotFound) {
-		ctx.Error(http.StatusNotFound, "not found")
+		ctx.Fail(NotFound("not found"))
 		return
 	}
 	if err != nil {
@@ -643,7 +640,7 @@ func (b *backend) getNode(ctx *CmsCtx) {
 func (b *backend) updateNode(ctx *CmsCtx) {
 	id := ctx.PathNum("id", 0)
 	if id == 0 {
-		ctx.Error(http.StatusBadRequest, "invalid id")
+		ctx.Fail(BadRequest("invalid id"))
 		return
 	}
 	existing, err := b.eng.GetNodeById(ctx.R.Context(), id)
@@ -652,7 +649,7 @@ func (b *backend) updateNode(ctx *CmsCtx) {
 		return
 	}
 	if existing == nil {
-		ctx.Error(http.StatusNotFound, "not found")
+		ctx.Fail(NotFound("not found"))
 		return
 	}
 	// admin 与 API 统一: 直接用 NodePatch（差量 — nil=不改）。
@@ -660,16 +657,16 @@ func (b *backend) updateNode(ctx *CmsCtx) {
 	var patch core.NodePatch
 	err = decodeStrictJSON(ctx.R.Body, &patch)
 	if err != nil {
-		b.bad(ctx, err)
+		b.fail(ctx, err)
 		return
 	}
 	err = b.eng.PatchNode(ctx.R.Context(), id, &patch)
 	if errors.Is(err, core.ErrRevisionConflict) {
-		ctx.Error(http.StatusConflict, err.Error())
+		ctx.Fail(err)
 		return
 	}
 	if err != nil {
-		b.bad(ctx, err)
+		b.fail(ctx, err)
 		return
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
@@ -686,7 +683,7 @@ func (b *backend) restoreNode(ctx *CmsCtx) {
 func (b *backend) setNodeArchived(ctx *CmsCtx, archived bool) {
 	id := ctx.PathNum("id", 0)
 	if id <= 0 {
-		ctx.Error(http.StatusBadRequest, "invalid id")
+		ctx.Fail(BadRequest("invalid id"))
 		return
 	}
 	var input struct {
@@ -694,7 +691,7 @@ func (b *backend) setNodeArchived(ctx *CmsCtx, archived bool) {
 	}
 	err := decodeStrictJSON(ctx.R.Body, &input)
 	if err != nil {
-		b.bad(ctx, err)
+		b.fail(ctx, err)
 		return
 	}
 	if archived {
@@ -703,11 +700,11 @@ func (b *backend) setNodeArchived(ctx *CmsCtx, archived bool) {
 		err = b.eng.RestoreNode(ctx.R.Context(), id, input.Revision)
 	}
 	if errors.Is(err, core.ErrRevisionConflict) {
-		ctx.Error(http.StatusConflict, err.Error())
+		ctx.Fail(err)
 		return
 	}
 	if err != nil {
-		b.bad(ctx, err)
+		b.fail(ctx, err)
 		return
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
@@ -716,16 +713,16 @@ func (b *backend) setNodeArchived(ctx *CmsCtx, archived bool) {
 func (b *backend) deleteNode(ctx *CmsCtx) {
 	id := ctx.PathNum("id", 0)
 	if id == 0 {
-		ctx.Error(http.StatusBadRequest, "invalid id")
+		ctx.Fail(BadRequest("invalid id"))
 		return
 	}
 	err := b.eng.DeleteNode(ctx.R.Context(), id)
 	if errors.Is(err, core.ErrDeleteRestricted) {
-		ctx.Error(http.StatusConflict, err.Error())
+		ctx.Fail(err)
 		return
 	}
 	if err != nil {
-		ctx.Error(http.StatusNotFound, err.Error())
+		ctx.Fail(err)
 		return
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
@@ -738,15 +735,15 @@ func (b *backend) changePassword(ctx *CmsCtx) {
 		NewPassword string `json:"new_password"`
 	}
 	if err := ctx.BindJson(&in); err != nil {
-		b.bad(ctx, err)
+		b.fail(ctx, err)
 		return
 	}
 	if !b.acct.VerifyPassword("admin", in.OldPassword) {
-		ctx.Error(http.StatusUnauthorized, "old password incorrect")
+		ctx.Fail(Unauthorized("old password incorrect"))
 		return
 	}
 	if err := b.acct.SetPassword(in.NewPassword); err != nil {
-		b.bad(ctx, err)
+		b.fail(ctx, err)
 		return
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
@@ -757,7 +754,7 @@ func (b *backend) changePassword(ctx *CmsCtx) {
 func (b *backend) tree(ctx *CmsCtx) {
 	typ := ctx.Query("type")
 	if typ == "" {
-		ctx.Error(http.StatusBadRequest, "type required")
+		ctx.Fail(BadRequest("type required"))
 		return
 	}
 	list, err := b.eng.Query(ctx.R.Context(), core.ListQuery{
@@ -801,7 +798,7 @@ func toAny(ids []int64) []any {
 func (b *backend) inbound(ctx *CmsCtx) {
 	nodeID := ctx.QueryNum("node", 0)
 	if nodeID == 0 {
-		ctx.Error(http.StatusBadRequest, "node required")
+		ctx.Fail(BadRequest("node required"))
 		return
 	}
 	page := int(ctx.QueryNum("page", 1))
@@ -811,12 +808,12 @@ func (b *backend) inbound(ctx *CmsCtx) {
 		// 分支节点类型 → Subtree（图原语）
 		n, err := b.eng.GetNodeById(ctx.R.Context(), nodeID)
 		if err != nil || n == nil {
-			ctx.Error(http.StatusBadRequest, "node not found")
+			ctx.Fail(NotFound("node not found"))
 			return
 		}
 		treeCapability, ok := b.eng.Types().Tree(n.Type)
 		if !ok {
-			ctx.Error(http.StatusBadRequest, "node type is not a tree")
+			ctx.Fail(BadRequest("node type is not a tree"))
 			return
 		}
 		tree, err := b.eng.Subtree(ctx.R.Context(), n.Type, nodeID, treeCapability.Parent, 20)
@@ -871,7 +868,7 @@ func (b *backend) expand(ctx *CmsCtx) {
 	nodeID := ctx.QueryNum("node", 0)
 	expr := ctx.Query("expr")
 	if nodeID <= 0 {
-		ctx.Error(http.StatusBadRequest, "node required")
+		ctx.Fail(BadRequest("node required"))
 		return
 	}
 	node, err := b.eng.GetNodeById(ctx.R.Context(), nodeID)
@@ -880,7 +877,7 @@ func (b *backend) expand(ctx *CmsCtx) {
 		return
 	}
 	if node == nil {
-		ctx.Error(http.StatusNotFound, "not found")
+		ctx.Fail(NotFound("not found"))
 		return
 	}
 	var paths []gquery.ExpandPath
@@ -889,13 +886,13 @@ func (b *backend) expand(ctx *CmsCtx) {
 	} else {
 		paths, err = gquery.ParseExpand(expr)
 		if err != nil {
-			b.bad(ctx, err)
+			b.fail(ctx, err)
 			return
 		}
 	}
 	root, err := b.eng.Expand(ctx.R.Context(), nodeID, paths...)
 	if err != nil {
-		b.bad(ctx, err)
+		b.fail(ctx, err)
 		return
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{"node": root})
@@ -923,11 +920,11 @@ func (b *backend) setSetting(ctx *CmsCtx) {
 		Value any    `json:"value"`
 	}
 	if err := ctx.BindJson(&in); err != nil {
-		b.bad(ctx, err)
+		b.fail(ctx, err)
 		return
 	}
 	if err := b.eng.SetSetting(ctx.R.Context(), in.Key, in.Group, in.Type, in.Value); err != nil {
-		b.bad(ctx, err)
+		b.fail(ctx, err)
 		return
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
@@ -935,7 +932,7 @@ func (b *backend) setSetting(ctx *CmsCtx) {
 
 func (b *backend) deleteSetting(ctx *CmsCtx) {
 	if err := b.eng.DeleteSetting(ctx.R.Context(), ctx.PathValue("key")); err != nil {
-		ctx.Error(http.StatusNotFound, err.Error())
+		ctx.Fail(err)
 		return
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
@@ -946,12 +943,12 @@ func (b *backend) mergePreview(ctx *CmsCtx) {
 	sourceID := ctx.QueryNum("source", 0)
 	targetID := ctx.QueryNum("target", 0)
 	if sourceID <= 0 || targetID <= 0 {
-		ctx.Error(http.StatusBadRequest, "source and target required")
+		ctx.Fail(BadRequest("source and target required"))
 		return
 	}
 	preview, err := b.eng.PreviewMerge(ctx.R.Context(), sourceID, targetID)
 	if err != nil {
-		b.bad(ctx, err)
+		b.fail(ctx, err)
 		return
 	}
 	_ = ctx.Json(http.StatusOK, preview)
@@ -977,14 +974,6 @@ func (b *backend) rebuildSearch(ctx *CmsCtx) {
 // ── 实体搜索（引用编辑器用）──────────────────────
 
 // search 按 display 模糊搜索节点（type 可选过滤）。
-func isQueryError(err error) bool {
-	return errors.Is(err, core.ErrInvalidQuery) ||
-		errors.Is(err, core.ErrInvalidField) ||
-		errors.Is(err, core.ErrInvalidOperator) ||
-		errors.Is(err, core.ErrInvalidValue) ||
-		errors.Is(err, core.ErrQueryTooComplex)
-}
-
 func (b *backend) search(ctx *CmsCtx) {
 	q := strings.TrimSpace(ctx.Query("q"))
 	typ := ctx.Query("type")

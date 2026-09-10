@@ -117,6 +117,29 @@ Render.Render(w, candidates, data)       -> Render(ctx, w, candidates, data)
 `Open` so startup failures are logged instead of crashing with a stack trace. `Site.Close`
 is idempotent.
 
+## Error contract
+
+Error responses now include a stable code:
+
+```json
+{"error":"invalid fields: types: \"article\".body: expects string","code":"invalid_value"}
+```
+
+`ctx.Error(status, message)` keeps working and derives `code` from the status. Prefer the
+explicit exits:
+
+```go
+ctx.Fail(err)        // API 出口: *web.Error 原样, core/types 已知错误映射, 其他 → 500 + 日志
+ctx.Reject(err)      // Hook 拒绝: *web.Error 原样, 其他 → 403 + 原始信息
+ctx.Fail(web.Conflict("版本冲突，请刷新后重试"))
+ctx.Fail(web.InvalidFields(map[string]string{"title": "必填"}))
+```
+
+Sites should return `*web.Error` from hooks for anything other than a plain permission
+rejection, and clients should branch on `code`, never on message text. Two statuses changed:
+an unknown Node type is now 404 instead of 400, and an invalid upload is 413/422
+(`upload_invalid`) instead of 400.
+
 `LoadTree` accepts an explicit `core.QueryScope`; pass the Policy scope on public routes and `core.BypassPolicy()` for internal or administrative trees. Trees no longer require a publication capability.
 
 Core migration `00010_auth_realms.sql` replaces plaintext Session tokens with SHA-256 hashes and adds the Realm column. Existing frontend Sessions are intentionally invalidated, so users must sign in again after upgrading. `auth_methods.type` remains the authenticated NodeType; Realm-to-NodeType mapping is server configuration and is not duplicated there.

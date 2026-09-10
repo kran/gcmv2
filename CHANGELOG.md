@@ -37,6 +37,9 @@
 - Every database or external I/O entry point now takes a `context.Context`: `CreateNode`, `PatchNode`, `DeleteNode`, `AddEdge`, `RemoveEdge`, `GetNodeById`, `GetNodeByAddress`, `Traverse`, `Subtree`, `Ancestors`, `EquivalenceClass`, `OutEdges`, `InEdges`, `RegisterAuth`, `FindAuth`, `AddAuthMethod`, `RemoveAuthMethod`, `CreateSession`, `ValidSession`, `DeleteSession`, `DeleteNodeSessions`, `GetSetting`, `SetSetting`, `ListSettings`, `DeleteSetting`, `RebuildSearch`, `Migrator.Up/UpDir` and `Render.Render`.
 - `SearchIndex.Rebuild` takes a `context.Context`.
 - `web.New`/`core.New` keep the panic convenience path; `web.Open`/`core.Open` return the initialization error instead.
+- Error responses now carry a stable `code` next to `error`; clients must branch on `code` instead of matching message text.
+- Unknown Node types now answer 404 (`not_found`) instead of 400, and rejected uploads answer 413/422 (`upload_invalid`) instead of 400.
+- `core.ErrInvalidFields` marks Schema validation failures so the Web edge can return 422 `invalid_value`.
 - `InEdges` now filters the requested field and, like `OutEdges`, returns logical two-way results for symmetric/equivalence relations.
 
 ### Added
@@ -71,6 +74,9 @@
 - Archive/restore operations that preserve Edges and revoke sessions for archived authentication Nodes.
 - `Site.Close() error` releases the database pool idempotently, and `GET /healthz` / `GET /readyz` provide liveness and readiness probes.
 - Context cancellation is honored on write, graph, session, settings and search-rebuild paths, covered by a cancellation test.
+- `web.Error` with a stable `Code`, `Details` for field-level errors, and the constructor helpers `BadRequest`/`InvalidValue`/`InvalidFields`/`Unauthorized`/`Forbidden`/`NotFound`/`Conflict`/`Unavailable`/`Internal`.
+- `CmsCtx.Fail` (API exit) and `CmsCtx.Reject` (hook rejection) map `*web.Error` and core sentinel errors onto the HTTP contract; unknown errors are logged and returned as a generic 500.
+- `CmsCtx.Error(status, message)` keeps the cho call shape but always emits a derived `code`.
 
 ### Migration
 

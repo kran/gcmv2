@@ -218,7 +218,7 @@ types:
 	_, err := s.CreateNode(t.Context(), &Node{Type: "article", Display: "duplicate", Fields: Fields{
 		"title": "duplicate", "reviewers": []any{first, first},
 	}})
-	if !errors.Is(err, ErrRelationCardinality) {
+	if !errors.Is(err, ErrInvalidFields) {
 		t.Fatalf("ref[] duplicate error = %v", err)
 	}
 	if _, err := s.AddEdge(t.Context(), second, third, "partner", 0); err != nil {

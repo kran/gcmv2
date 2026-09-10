@@ -88,6 +88,9 @@ func TestAuthCreateRule(t *testing.T) {
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("no hook create = %d", w.Code)
 	}
+	if code := errorCode(t, w); code != string(CodeForbidden) {
+		t.Fatalf("no hook create code = %q", code)
+	}
 	// AddHook 放行（站点深度权限 — 按类型）
 	s.Engine().Hooks().AddHook(HookBeforeCreate, func(ctx *CmsCtx, node *core.Node) error {
 		if node.Type == "article" {

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -95,12 +96,15 @@ func TestApiNodesSort(t *testing.T) {
 	}
 }
 
-// TestApiNodesUnknownType 未知类型 → 400。
+// TestApiNodesUnknownType 未知类型 → 404 not_found。
 func TestApiNodesUnknownType(t *testing.T) {
 	s := testSite(t)
 	w := do(s, "GET", "/api/nodes/nonexistent", nil)
-	if w.Code != http.StatusBadRequest {
+	if w.Code != http.StatusNotFound {
 		t.Fatalf("unknown type = %d", w.Code)
+	}
+	if code := errorCode(t, w); code != string(CodeNotFound) {
+		t.Fatalf("code = %q", code)
 	}
 }
 
@@ -166,8 +170,11 @@ func TestAPIUploadRequiresLoginAndValidContent(t *testing.T) {
 	}
 
 	w = uploadRequest(t, s, token, "fake.png", []byte("not a png"))
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("mismatched upload = %d, want 400", w.Code)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("mismatched upload = %d, want 422", w.Code)
+	}
+	if code := errorCode(t, w); code != string(CodeUploadInvalid) {
+		t.Fatalf("upload code = %q", code)
 	}
 }
 
@@ -251,8 +258,8 @@ func TestApiTree(t *testing.T) {
 		t.Fatalf("draft node leaked into tree: %+v", out.Items[0].Children[0].Children)
 	}
 
-	if w := do(s, "GET", "/api/tree/ghost", nil); w.Code != http.StatusBadRequest {
-		t.Fatalf("unknown tree type = %d, want 400", w.Code)
+	if w := do(s, "GET", "/api/tree/ghost", nil); w.Code != http.StatusNotFound {
+		t.Fatalf("unknown tree type = %d, want 404", w.Code)
 	}
 }
 
@@ -277,5 +284,103 @@ func TestHealthEndpoints(t *testing.T) {
 	// Close 幂等
 	if err := s.Close(); err != nil {
 		t.Fatalf("second close = %v", err)
+	}
+}
+
+// errorCode 取结构化错误响应里的稳定 Code。
+func errorCode(t *testing.T, w *httptest.ResponseRecorder) string {
+	t.Helper()
+	var body struct {
+		Error string `json:"error"`
+		Code  string `json:"code"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("error body %q: %v", w.Body.String(), err)
+	}
+	if body.Error == "" {
+		t.Fatalf("error body missing message: %q", w.Body.String())
+	}
+	return body.Code
+}
+
+// TestErrorContract 固定 401/403/404/409/422 的语义与稳定 Code。
+func TestErrorContract(t *testing.T) {
+	s := testSiteConfigured(t, func(site *Site) {
+		// 放行写入, 让后续断言落在数据契约上而不是默认拒绝上。
+		site.Hook(HookBeforeCreate, func(*CmsCtx, *core.Node) error { return nil })
+		site.Hook(HookBeforeUpdate, func(*CmsCtx, int64, *core.NodePatch) error { return nil })
+	})
+	// 401: 未认证
+	w := do(s, "GET", "/api/auth/me", nil)
+	if w.Code != http.StatusUnauthorized || errorCode(t, w) != string(CodeUnauthorized) {
+		t.Fatalf("unauthorized = %d %s", w.Code, w.Body.String())
+	}
+	// 404: 未知类型
+	w = do(s, "GET", "/api/nodes/ghost/1", nil)
+	if w.Code != http.StatusNotFound || errorCode(t, w) != string(CodeNotFound) {
+		t.Fatalf("not found = %d %s", w.Code, w.Body.String())
+	}
+	// 400: 请求体格式错误
+	w = do(s, "POST", "/api/nodes/article", "not json")
+	if w.Code != http.StatusBadRequest || errorCode(t, w) != string(CodeInvalidRequest) {
+		t.Fatalf("invalid request = %d %s", w.Code, w.Body.String())
+	}
+	// 422: display 缺失
+	w = do(s, "POST", "/api/nodes/article", map[string]any{"display": ""})
+	if w.Code != http.StatusUnprocessableEntity || errorCode(t, w) != string(CodeInvalidValue) {
+		t.Fatalf("invalid value = %d %s", w.Code, w.Body.String())
+	}
+	// 422: Schema 校验失败（select 值不在 options 内）
+	w = do(s, "POST", "/api/nodes/article", map[string]any{
+		"display": "草稿", "fields": map[string]any{"publication_state": "ghost"},
+	})
+	if w.Code != http.StatusUnprocessableEntity || errorCode(t, w) != string(CodeInvalidValue) {
+		t.Fatalf("schema violation = %d %s", w.Code, w.Body.String())
+	}
+	// 409: 版本冲突
+	w = do(s, "POST", "/api/nodes/article", map[string]any{
+		"display": "文章", "fields": map[string]any{"body": "x"},
+	})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create = %d %s", w.Code, w.Body.String())
+	}
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	decodeBody(t, w, &created)
+	w = do(s, "PUT", "/api/nodes/article/"+strconv.FormatInt(created.ID, 10), map[string]any{
+		"revision": 99, "fields": map[string]any{"body": "y"},
+	})
+	if w.Code != http.StatusConflict || errorCode(t, w) != string(CodeConflict) {
+		t.Fatalf("conflict = %d %s", w.Code, w.Body.String())
+	}
+}
+
+// TestHookRejectionCarriesStructuredCode Hook 可以用 *web.Error 精确表达语义。
+func TestHookRejectionCarriesStructuredCode(t *testing.T) {
+	s := testSiteConfigured(t, func(site *Site) {
+		site.Hook(HookBeforeCreate, func(*CmsCtx, *core.Node) error {
+			return InvalidFields(map[string]string{"title": "标题已存在"})
+		})
+	})
+	w := do(s, "POST", "/api/nodes/article", map[string]any{"display": "文章"})
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("hook rejection = %d %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Code    string            `json:"code"`
+		Details map[string]string `json:"details"`
+	}
+	decodeBody(t, w, &body)
+	if body.Code != string(CodeInvalidValue) || body.Details["title"] != "标题已存在" {
+		t.Fatalf("hook payload = %#v", body)
+	}
+}
+
+// decodeBody 解析响应体（失败即测试失败）。
+func decodeBody(t *testing.T, w *httptest.ResponseRecorder, dst any) {
+	t.Helper()
+	if err := json.Unmarshal(w.Body.Bytes(), dst); err != nil {
+		t.Fatalf("body %q: %v", w.Body.String(), err)
 	}
 }

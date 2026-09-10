@@ -577,10 +577,10 @@ password.Mount(site, password.Options{Realm: "member"})
 
 ### Error Contract
 
-- [ ] 定义 Status/Code/Message 错误。
-- [ ] 401/403/404/409/422 语义稳定。
-- [ ] Hook 可以返回结构化错误。
-- [ ] 客户端不依赖中文错误字符串。
+- [x] 定义 Status/Code/Message 错误（`web.Error` + 稳定 `Code` + 可选 `details`）。
+- [x] 401/403/404/409/422 语义稳定，并有 `TestErrorContract` 固定。
+- [x] Hook 可以返回结构化错误（`Fail`/`Reject` + `*web.Error`）。
+- [x] 客户端按 `code` 分支，不解析中文错误字符串（前端 `HTTPError.code`）。
 
 ### Ref API
 
@@ -779,10 +779,13 @@ v0.8.4 批次已全部完成（见 Phase 0）。当前批次是 **v0.9.0 收口*
 
 本批剩余：
 
-1. 结构化错误契约（Status/Code/Message、401/403/404/409/422、Hook 结构化错误）
-2. 写入侧授权：Create/Update/Delete/Transition 统一 Policy 与字段写入白名单
-3. 最小非 CMS 示例（account/contact/employment/opportunity/activity，不声明 user/article/page）
-4. 关闭 v0.9.0：跑完验收条件并把核心 API 标记为冻结候选
+- [x] 结构化错误契约（Status/Code/Message、401/403/404/409/422、Hook 结构化错误）
+
+本批剩余：
+
+1. 写入侧授权：Create/Update/Delete/Transition 统一 Policy 与字段写入白名单（当前仍是安全缺口：注册一个写 Hook 就等于放行所有类型）
+2. 最小非 CMS 示例（account/contact/employment/opportunity/activity，不声明 user/article/page）
+3. 关闭 v0.9.0：跑完验收条件并把核心 API 标记为冻结候选
 
 完成后再开始 v0.10.0（审计、Workflow、关系 Node 后台视图）与 v0.11.0（聚合、导入导出、CRM 视图）。
 

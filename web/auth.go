@@ -117,12 +117,12 @@ func (b *authBackend) logout(ctx *CmsCtx) {
 func (b *authBackend) me(ctx *CmsCtx) {
 	actor := ctx.Actor()
 	if actor.Kind != ActorNode {
-		ctx.Error(http.StatusUnauthorized, "not logged in")
+		ctx.Fail(Unauthorized("not logged in"))
 		return
 	}
 	principal, err := ctx.Principal()
 	if err != nil {
-		ctx.Error(http.StatusUnauthorized, "not logged in")
+		ctx.Fail(Unauthorized("not logged in"))
 		return
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{"actor": actor, "user": principal})

@@ -111,28 +111,28 @@ func nodeCandidates(ts *types.Types, n *core.Node) []string {
 func (s *Site) apiNodes(ctx *CmsCtx) {
 	typ := ctx.PathValue("type")
 	if _, ok := s.engine.Types().Type(typ); !ok {
-		ctx.Error(http.StatusBadRequest, "type not found")
+		ctx.Fail(NotFound("type not found"))
 		return
 	}
 	_, publicationEnabled := s.engine.Types().Publication(typ)
 	if !publicationEnabled && !s.policy.Has(typ, PolicyList) {
-		ctx.Error(http.StatusNotFound, "type is not public")
+		ctx.Fail(NotFound("type is not public"))
 		return
 	}
 	page := max(int(ctx.QueryNum("page", 1)), 1)
 	size := min(max(int(ctx.QueryNum("size", 20)), 1), 100)
 	if strings.TrimSpace(ctx.Query("filter")) != "" || strings.TrimSpace(ctx.Query("expand")) != "" {
-		ctx.Error(http.StatusBadRequest, "public filter and expand are not supported")
+		ctx.Fail(BadRequest("public filter and expand are not supported"))
 		return
 	}
 	sort, err := parseSort(ctx.Query("sort"))
 	if err != nil {
-		ctx.Error(http.StatusBadRequest, err.Error())
+		ctx.Fail(BadRequest("%s", err.Error()))
 		return
 	}
 	scope, err := s.policy.Scope(ctx, PolicyList, typ)
 	if err != nil {
-		ctx.String(http.StatusInternalServerError, "api: policy resolution failed")
+		ctx.Fail(err)
 		return
 	}
 	q := core.ListQuery{

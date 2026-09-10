@@ -49,7 +49,7 @@ func addEdges(tx *dba.SQL, ts *types.Types, td types.TypeDef, from int64, refs m
 		seen := make(map[int64]bool, len(ids))
 		for position, targetID := range ids {
 			if seen[targetID] {
-				return fmt.Errorf("%w: %q.%s contains duplicate target %d", ErrRelationCardinality, td.Name, fieldName, targetID)
+				return invalidFields(fmt.Errorf("%q.%s contains duplicate target %d", td.Name, fieldName, targetID))
 			}
 			seen[targetID] = true
 			_, err = insertEdge(tx, ts, td, field, from, targetID, position)
