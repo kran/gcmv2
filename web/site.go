@@ -139,6 +139,10 @@ func (s *Site) Start() http.Handler { return s.Setup() }
 
 // CmsCtxMaker cho 工厂（建请求 ctx）。
 func (s *Site) CmsCtxMaker(w http.ResponseWriter, r *http.Request) *CmsCtx {
+	// 请求体硬上限（写在一个地方，插件路由也覆盖到）；JSON 解码在 BindStrictJSON 里再收紧。
+	if r.Body != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	}
 	return &CmsCtx{BaseContext: cho.MakeBaseContext(w, r), site: s}
 }
 
@@ -194,8 +198,13 @@ func openDB(path string) (*dba.SQL, error) {
 			return nil, fmt.Errorf("web: mkdir db dir: %w", err)
 		}
 	}
-	// SQLite 外键默认关 — 每连接开启（级联删除 auth 等依赖 FK 生效）
-	db, err := dba.Open("sqlite", path+"?_pragma=foreign_keys(1)")
+	// SQLite 连接档位（每连接生效 / WAL 是持久设置）:
+	//   foreign_keys  必须开 — 级联删除等依赖外键
+	//   journal_mode  WAL — 读者不阻塞写者、写者不阻塞读者；非 WAL 下并发读写直接撞锁
+	//   busy_timeout  撞锁等待而不是立即 SQLITE_BUSY（dba 不做重试）
+	// 档位不满足时 core.Open 会拒绝启动（见 core.verifySQLiteProfile）。
+	dsn := path + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
+	db, err := dba.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("web: open db: %w", err)
 	}

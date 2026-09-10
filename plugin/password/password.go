@@ -62,12 +62,11 @@ func (b *backend) register(ctx *web.CmsCtx) {
 		return
 	}
 	var input web.RegisterInput
-	err := ctx.BindStrictJSON(&input)
-	if err != nil {
-		ctx.Error(http.StatusBadRequest, err.Error())
+	if err := ctx.BindStrictJSON(&input); err != nil {
+		ctx.Fail(err)
 		return
 	}
-	err = b.validateCredential(input.Method, input.Identifier, input.Secret)
+	err := b.validateCredential(input.Method, input.Identifier, input.Secret)
 	if err != nil {
 		ctx.Error(http.StatusBadRequest, err.Error())
 		return
@@ -103,9 +102,8 @@ func (b *backend) register(ctx *web.CmsCtx) {
 
 func (b *backend) login(ctx *web.CmsCtx) {
 	var input web.LoginInput
-	err := ctx.BindStrictJSON(&input)
-	if err != nil {
-		ctx.Error(http.StatusBadRequest, err.Error())
+	if err := ctx.BindStrictJSON(&input); err != nil {
+		ctx.Fail(err)
 		return
 	}
 	if !b.methods[input.Method] {
@@ -151,12 +149,11 @@ func (b *backend) bind(ctx *web.CmsCtx) {
 		return
 	}
 	var input web.LoginInput
-	err := ctx.BindStrictJSON(&input)
-	if err != nil {
-		ctx.Error(http.StatusBadRequest, err.Error())
+	if err := ctx.BindStrictJSON(&input); err != nil {
+		ctx.Fail(err)
 		return
 	}
-	err = b.validateCredential(input.Method, input.Identifier, input.Secret)
+	err := b.validateCredential(input.Method, input.Identifier, input.Secret)
 	if err != nil {
 		ctx.Error(http.StatusBadRequest, err.Error())
 		return

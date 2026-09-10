@@ -66,6 +66,8 @@
 - Realm-isolated password register/login/bind endpoints and cross-Realm bind rejection.
 - SHA-256 Session token storage and bulk Node session revocation.
 - Site-defined read actions, so a site can scope a read surface no system action describes.
+- Every request body is capped (8MB hard cap in `CmsCtxMaker`, 1MB for JSON decoding in `BindStrictJSON`, which answers 413 `invalid_request`), so a single request cannot allocate unbounded memory.
+- SQLite runs with `journal_mode=WAL`, `busy_timeout=5000`, and `foreign_keys=1`; `core.Open` verifies those and refuses to start otherwise.
 - Per-Type authorization events for every read and write action, so one `(action, Type)` can resolve per request: a member and an editor can be allowed different fields, and several handlers compose (reads narrow by AND, write grants union).
 - A write rule that allows no field at all denies the request (403), and an unregistered site read action or a read rule that produced no scope is an error instead of a silent empty result.
 - Mandatory AST-level Policy merging for list, count, view, search, and sitemap export paths.

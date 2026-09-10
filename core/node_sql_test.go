@@ -53,7 +53,7 @@ types:
 
 func testDB(t testing.TB) *dba.SQL {
 	t.Helper()
-	db, err := dba.Open("sqlite", filepath.Join(t.TempDir(), "test.db")+"?_pragma=foreign_keys(1)")
+	db, err := dba.Open("sqlite", filepath.Join(t.TempDir(), "test.db")+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatal(err)
 	}

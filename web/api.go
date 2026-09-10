@@ -37,9 +37,9 @@ func (s *Site) apiCreateNode(ctx *CmsCtx) {
 		Display string      `json:"display"`
 		Fields  core.Fields `json:"fields"`
 	}
-	err := decodeStrictJSON(ctx.R.Body, &input)
+	err := ctx.BindStrictJSON(&input)
 	if err != nil {
-		ctx.Fail(BadRequest("%s", err.Error()))
+		ctx.Fail(err)
 		return
 	}
 	if input.Display == "" {
@@ -93,10 +93,10 @@ func (s *Site) apiViewNode(ctx *CmsCtx) {
 		return
 	}
 	items, err := s.engine.Query(ctx.R.Context(), core.ListQuery{
-		Type: typ,
+		Type:  typ,
 		Where: gquery.EQ(gquery.System("id"), id),
 		Scope: scope,
-		Page: gquery.Page{Size: 1},
+		Page:  gquery.Page{Size: 1},
 	})
 	if err != nil {
 		ctx.Fail(err)
@@ -138,9 +138,9 @@ func (s *Site) apiUpdateNode(ctx *CmsCtx) {
 	}
 	// 差量语义: client 提交 NodePatch（全指针 — nil = 不改字段; PATCH）
 	var patch core.NodePatch
-	err = decodeStrictJSON(ctx.R.Body, &patch)
+	err = ctx.BindStrictJSON(&patch)
 	if err != nil {
-		ctx.Fail(BadRequest("%s", err.Error()))
+		ctx.Fail(err)
 		return
 	}
 	submitted := fieldNames(patch.Fields)

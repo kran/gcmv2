@@ -417,7 +417,7 @@ func (b *backend) login(ctx *CmsCtx) {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := ctx.BindJson(&in); err != nil {
+	if err := ctx.BindStrictJSON(&in); err != nil {
 		b.fail(ctx, err)
 		return
 	}
@@ -599,7 +599,7 @@ func (b *backend) createNode(ctx *CmsCtx) {
 		Display string      `json:"display"`
 		Fields  core.Fields `json:"fields"`
 	}
-	err := decodeStrictJSON(ctx.R.Body, &input)
+	err := ctx.BindStrictJSON(&input)
 	if err != nil {
 		b.fail(ctx, err)
 		return
@@ -655,7 +655,7 @@ func (b *backend) updateNode(ctx *CmsCtx) {
 	// admin 与 API 统一: 直接用 NodePatch（差量 — nil=不改）。
 	// fields 清洗由 core 丢弃未知字段 — admin 无需特殊处理。
 	var patch core.NodePatch
-	err = decodeStrictJSON(ctx.R.Body, &patch)
+	err = ctx.BindStrictJSON(&patch)
 	if err != nil {
 		b.fail(ctx, err)
 		return
@@ -689,7 +689,7 @@ func (b *backend) setNodeArchived(ctx *CmsCtx, archived bool) {
 	var input struct {
 		Revision int64 `json:"revision"`
 	}
-	err := decodeStrictJSON(ctx.R.Body, &input)
+	err := ctx.BindStrictJSON(&input)
 	if err != nil {
 		b.fail(ctx, err)
 		return
@@ -734,7 +734,7 @@ func (b *backend) changePassword(ctx *CmsCtx) {
 		OldPassword string `json:"old_password"`
 		NewPassword string `json:"new_password"`
 	}
-	if err := ctx.BindJson(&in); err != nil {
+	if err := ctx.BindStrictJSON(&in); err != nil {
 		b.fail(ctx, err)
 		return
 	}
@@ -919,7 +919,7 @@ func (b *backend) setSetting(ctx *CmsCtx) {
 		Type  string `json:"type"`
 		Value any    `json:"value"`
 	}
-	if err := ctx.BindJson(&in); err != nil {
+	if err := ctx.BindStrictJSON(&in); err != nil {
 		b.fail(ctx, err)
 		return
 	}

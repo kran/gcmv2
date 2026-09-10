@@ -375,7 +375,7 @@ Lisp 不再作为公共业务契约。
 - [x] expand 表达式限制为 1024 bytes、32 条路径、每批 1000 条引用。
 - [x] 公开 page size 上限为 100。
 - [x] Query/QueryPage 接收 request context，并有取消测试。
-- [ ] SQLite 查询超时/中断策略。
+- [ ] SQLite 查询超时/中断策略（WAL + busy_timeout 已消除撞锁失败；statement timeout 未做）。
 - [ ] 仅管理员可使用 explain/debug。
 
 ## 4.10 Policy 合并

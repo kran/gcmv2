@@ -784,10 +784,31 @@ Core 与 Admin API 已支持 archive/restore，但当前通用后台列表默认
 10. 所有列表、详情、搜索和导出必须具有显式 Scope。
 11. 管理旁路必须写出 `BypassPolicy()`，不能依赖空值。
 12. 数据完整性修复必须显式执行，检查器不得静默改数据。
+13. 任何请求体都有硬上限（`maxBodyBytes` 8MB，`CmsCtxMaker` 里兜住，插件路由也覆盖）。
+14. JSON 解码额外收紧到 `maxJSONBytes` 1MB，并由 `BindStrictJSON` 统一映射成 413/400。
+15. SQLite 连接档位必须满足 `journal_mode=wal`、`busy_timeout>0`、`foreign_keys=1`；
+    不满足时 `core.Open` 拒绝启动（`verifySQLiteProfile`）。
 
 ---
 
 ## 9. 迁移和运行要求
+
+数据库连接档位（`web.Open` 已按此拼 DSN；自己开库的站点必须照抄）：
+
+```text
+_pragma=foreign_keys(1)      引用完整性/级联删除依赖
+_pragma=journal_mode(WAL)    读者不阻塞写者、写者不阻塞读者（非 WAL 下并发读写直接撞锁）
+_pragma=busy_timeout(5000)   撞锁等待而不是立即 SQLITE_BUSY（dba 不做重试）
+```
+
+`core.Open` 启动时校验这三项，不满足直接报错（fail-loud），避免在并发下静默退化。
+
+WAL 的运维含义：数据库旁边会多出 `gcm.sqlite-wal` / `gcm.sqlite-shm`；
+在线备份继续用 `VACUUM INTO`（一致快照）；**离线恢复时必须在停服状态下同时删除旧库的
+`-wal` / `-shm`**，否则旧日志会被重放到新库上。
+
+请求体上限：`maxBodyBytes` 8MB（所有路由，`CmsCtxMaker`），`maxJSONBytes` 1MB（JSON 解码，
+`BindStrictJSON` → 413 `invalid_request`）。上传沿用 8MB（`saveUpload` 自带 `MaxBytesReader`）。
 
 v0.9 当前包含三项核心迁移：
 

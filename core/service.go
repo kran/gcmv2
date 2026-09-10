@@ -43,6 +43,9 @@ func Open(db *dba.SQL, ts *types.Types) (*Service, error) {
 		return nil, fmt.Errorf("core: define standard hooks: %w", err)
 	}
 
+	if err := verifySQLiteProfile(db); err != nil {
+		return nil, err
+	}
 	if _, err = s.MigrateUp(); err != nil {
 		return nil, fmt.Errorf("core: migrate: %w", err)
 	}
