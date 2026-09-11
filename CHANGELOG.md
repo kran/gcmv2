@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased — v0.9.1
+
+### Behaviour changes
+
+- `ListQuery.CountLimit` and `SearchQuery.CountLimit` bound what `total` costs. `0` uses the default (10000 for lists, 1000 for search) and saturates `total` at that limit, `core.CountExact` keeps the exact count, and a positive value sets an explicit cap. Callers that page treat `total` as "at least this many"; callers that need an exact total on a large table must ask for it.
+- Search ranks matches with bm25 over the whole match set, so a term matching most of a large table still costs proportionally to the match count. The count limit does not bound that.
+
+### Fixed
+
+- `GetNodeByAddress` resolves addresses through a per-type index instead of scanning every node of every addressable type. The JSON path was bound as a parameter, which no index expression can match, so the global address index was unusable as a lookup. At 100k nodes: 1.7s → 129µs.
+- Relation membership (`in` on a ref/ref[] path) compiles to an uncorrelated subquery instead of a correlated `EXISTS`, so the edge set is built once instead of once per candidate row. At 100k nodes: 1.25s → 35ms.
+
+### Changed
+
+- The full-text index is contentless (`content=''`, `contentless_delete=1`): it no longer stores a second copy of the bigram-expanded text, which for Chinese is several times the original. At 100k nodes: 15.5KB → 6.8KB per node.
+- `core.Open` rebuilds the search index whenever migrations were applied, so an index-affecting migration can never leave search stale.
+
+### Migration
+
+- Core migration `00012_contentless_fts.sql` recreates `nodes_fts` without its content table; `core.Open` rebuilds it once (2.7s at 10k nodes, ~60s at 100k).
+- The migration frees pages inside the existing file; reclaiming them needs `VACUUM` (`VACUUM INTO` — what the backup plugin uses — produces a compact copy).
+
 ## Unreleased — v0.9.0
 
 ### Breaking changes

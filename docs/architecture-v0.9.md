@@ -635,6 +635,11 @@ Admin/Core permanent delete
 已实现：
 
 - `ListQuery` 必须显式使用 PolicyScope 或 BypassPolicy。
+- `total` 是截断计数（`CountLimit`）：精确计数要扫过整个匹配集（10 万行约 17ms、
+  百万行约 170ms），而列表页本身不到 1ms。默认上限 10 万以下精确、
+  超过即饱和（列表 10000 / 检索 1000），需要精确总量的调用方显式传 `core.CountExact`。
+- 地址查询走 `addressable` capability 的单类型地址索引（`(type, address)`）；
+  全局 CASE 唯一索引只负责跨类型唯一性，查询无法把它当点查用。
 - Web 读授权支持 list/view/search/export 四个读动作。
 - 公共列表、详情、搜索和 sitemap 应用服务端范围。
 - SearchQuery 为每个 Type 使用独立 Scope。
