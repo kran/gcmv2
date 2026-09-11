@@ -56,7 +56,7 @@ types:
 	fires := &atomic.Int32{}
 	rule := func(ctx *CmsCtx, _ string, expr *gquery.Expr, hide *core.List[string]) error {
 		fires.Add(1)
-		*expr = gquery.True()
+		*expr = gquery.And(*expr, gquery.True())
 		if ctx.Actor().Kind == ActorAnonymous {
 			hide.Append("phone", "contact")
 		}

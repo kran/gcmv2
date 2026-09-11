@@ -261,7 +261,9 @@ ErrInvalidQuery · ErrInvalidField · ErrInvalidOperator · ErrInvalidValue · E
 | 授权事件 | `web.read.<action>.<type>` / `web.write.<action>.<type>` —— schema 加载后按类型定义，授权就是注册这些事件的 handler |
 | `ReadRule` | `func(*CmsCtx, string, *gquery.Expr, *core.List[string]) error` —— AND 收窄行范围 + 声明不可见字段（`Site.ReadRule` 注册） |
 | `CmsCtx.ReadRule` | 一次解析（范围 + 字段掩码），按 `(action, type)` 缓存在请求上下文上（生命周期 = Actor） |
-| `MaskNode` / `MaskNodes` / `MaskTree` | 应用字段掩码（拷贝后删键、递归进 `Expand`）；站点自建 JSON 出口调用 |
+| `MaskNode` / `MaskNodes` / `MaskTree` | 应用字段掩码（拷贝后删键、递归进 `Expand`）；读入口内部使用，手工组装节点的代码可自行调用 |
+| `CmsCtx.Read*` | 策略层读入口（`ReadPage`/`ReadOne`/`ReadAddress`/`ReadFull`/`ReadSearch`/`ReadTree`）：解析规则 + 取数 + 裁字段一步到位 |
+| `CmsCtx.Write*` | 策略层写入口（`CreateNode`/`UpdateNode`/`DeleteNode`）：客户端发起的写走规则，返回裁剪过的节点 |
 | 写规则 | create/update: `func(*CmsCtx, …, *core.List[string]) error`；delete: `func(*CmsCtx, int64) error`（`Site.WriteRule` 注册） |
 | `Site.ReadScope` | 解析读范围：有 handler → 用规则；无 → 系统读动作走 publication 默认，站点读动作报错 |
 | `Site.Exposes` | `Has(web.read.<action>.<type>)` —— 该类型是否被站点显式暴露 |

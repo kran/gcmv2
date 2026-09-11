@@ -81,51 +81,25 @@ func fail(err error) {
 // （tpl.go）合并 sprig + 内置函数后整体注入。
 func (e *Render) queryFuncs(c *CmsCtx) template.FuncMap {
 	eng := e.eng
-	// 读规则（行范围 + 字段掩码）按 (action, type) 在 CmsCtx 上缓存：模板里
-	// get/list 会被多次调用，同一请求只触发一次规则。
-	scopeFor := func(action ReadAction, typeName string) core.QueryScope {
-		scope, _, err := c.ReadRule(action, typeName)
-		fail(err)
-		return scope
-	}
-	// maskList 模板 helper 的裁剪出口（失败→ panic，与其它查询错误一致）。
-	maskList := func(action ReadAction, nodes []core.Node) []core.Node {
-		fail(MaskNodes(c, action, nodes))
-		return nodes
-	}
 	return template.FuncMap{
 		// ── 查询原语 ─────────────────────────
 		// get: 单节点（id 兼容 JSON float64 / int64）。
-		// 可见性按 ReadView 读规则解析：不可见 → nil（与 API 的 view 路径同语义），
-		// 隐藏字段按同一条规则裁掉。
+		// 走 CmsCtx.ReadOne（与 API 的 view 路径同一条规则）：不可见 → nil，
+		// 隐藏字段已被裁掉。
 		"get": func(id any) *core.Node {
 			nid, err := types.ToID(id)
 			fail(err)
-			n, err := eng.GetNodeById(c.R.Context(), nid)
-			fail(err)
-			if n == nil {
-				return nil
-			}
-			visible, err := eng.Query(c.R.Context(), core.ListQuery{
-				Type: n.Type, Where: gquery.EQ(gquery.System("id"), nid),
-				Scope: scopeFor(ReadView, n.Type), Page: gquery.Page{Size: 1},
-			})
-			fail(err)
-			if len(visible) == 0 {
-				return nil
-			}
-			node, err := MaskNode(c, ReadView, &visible[0])
+			node, err := c.ReadOne(ReadView, nid)
 			fail(err)
 			return node
 		},
 		// list: 公开类型列表 —— 行范围与字段掩码与 API 共用同一条读规则（ReadList）。
 		"list": func(typ string, page, size int) []core.Node {
-			list, err := eng.Query(c.R.Context(), core.ListQuery{
-				Type: typ, Scope: scopeFor(ReadList, typ),
-				Page: gquery.Page{Number: page, Size: size},
+			list, _, err := c.ReadPage(ReadList, core.ListQuery{
+				Type: typ, Page: gquery.Page{Number: page, Size: size},
 			})
 			fail(err)
-			return maskList(ReadList, list)
+			return list
 		},
 		// setting: 站点配置值（按 key 取; 缺失 → nil; 值按 JSON 形态,
 		// richtext 模板自行 safeHTML）
@@ -139,12 +113,11 @@ func (e *Render) queryFuncs(c *CmsCtx) template.FuncMap {
 		},
 		// search: 全文检索（每个目标类型各自解析 ReadSearch 读规则）。
 		"search": func(q, typ string, page, size int) []core.Node {
-			targets := searchTargets(c, eng, typ)
-			list, _, err := eng.Search(c.R.Context(), core.SearchQuery{
-				Text: q, Targets: targets, Page: gquery.Page{Number: page, Size: size},
-			})
+			list, _, err := c.SearchPage(core.SearchQuery{
+				Text: q, Page: gquery.Page{Number: page, Size: size},
+			}, typ)
 			fail(err)
-			return maskList(ReadSearch, list)
+			return list
 		},
 		// outRefs: 出边目标节点列表（symmetric 双向）。行范围 trusted（按边直接取），
 		// 字段掩码按各节点自己的类型套用（与 get 同源）。
@@ -180,12 +153,11 @@ func (e *Render) queryFuncs(c *CmsCtx) template.FuncMap {
 		"filterList": func(typ, expr string, params map[string]any, page, size int) []core.Node {
 			where, err := gquery.ParseLisp(expr, params)
 			fail(err)
-			list, err := e.eng.Query(c.R.Context(), core.ListQuery{
-				Type: typ, Where: where, Scope: scopeFor(ReadList, typ),
-				Page: gquery.Page{Number: page, Size: size},
+			list, _, err := c.ReadPage(ReadList, core.ListQuery{
+				Type: typ, Where: where, Page: gquery.Page{Number: page, Size: size},
 			})
 			fail(err)
-			return maskList(ReadList, list)
+			return list
 		},
 		// expand: 统一路径展开 — 输入任意形态（单值或列表）, 返回 any。
 		// 用法（管道: 数据是末参）:
@@ -240,24 +212,6 @@ func (e *Render) queryFuncs(c *CmsCtx) template.FuncMap {
 			return t.Format(layout)
 		},
 	}
-}
-
-// searchTargets 每个可搜索类型的搜索范围都解析 ReadSearch 读规则（与站点搜索 API 一致）。
-func searchTargets(c *CmsCtx, eng core.Engine, typeName string) []core.SearchTarget {
-	names := eng.Types().Names()
-	if typeName != "" {
-		names = []string{typeName}
-	}
-	targets := make([]core.SearchTarget, 0, len(names))
-	for _, name := range names {
-		if _, ok := eng.Types().Searchable(name); !ok {
-			continue
-		}
-		scope, _, err := c.ReadRule(ReadSearch, name)
-		fail(err)
-		targets = append(targets, core.SearchTarget{Type: name, Scope: scope})
-	}
-	return targets
 }
 
 func expandTemplateNodes(c *CmsCtx, eng core.Engine, expression string, ids []int64, many bool) any {

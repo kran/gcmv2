@@ -34,26 +34,18 @@ func (s *Site) nodeHandler(ctx *CmsCtx) {
 		s.render404(ctx)
 		return
 	}
-	scope, err := s.ReadScope(ctx, ReadView, n.Type)
+	// 行范围按 ReadView 规则确认（同一份解析与 API 共用）；字段掩码放在 enrich 之后 ——
+	// 站点 hook 仍能拿到完整数据（如隐藏字段参与算 url）。
+	ok, err := ctx.visible(ReadView, n)
 	if err != nil {
 		slog.Error("node policy failed", "path", raw, "err", err)
 		ctx.String(http.StatusInternalServerError, "500 internal server error")
 		return
 	}
-	visible, err := s.engine.Query(ctx.R.Context(), core.ListQuery{
-		Type: n.Type, Where: gquery.EQ(gquery.System("id"), n.ID),
-		Scope: scope, Page: gquery.Page{Size: 1},
-	})
-	if err != nil {
-		slog.Error("node policy query failed", "path", raw, "err", err)
-		ctx.String(http.StatusInternalServerError, "500 internal server error")
-		return
-	}
-	if len(visible) == 0 {
+	if !ok {
 		s.render404(ctx)
 		return
 	}
-	n = &visible[0]
 	// 节点数据增强（站点 hook — url 注入等）
 	if err := s.engine.Hooks().Fire(HookNodeEnrich, ctx, n); err != nil {
 		slog.Error("node enrich hook failed", "path", raw, "err", err)
@@ -156,9 +148,7 @@ func (s *Site) apiNodes(ctx *CmsCtx) {
 		ctx.Fail(err)
 		return
 	}
-	out := map[string]any{
-		"items": list, "total": total, "page": page, "size": size,
-	}
+	out := map[string]any{"items": list, "total": total, "page": page, "size": size}
 	b, _ := json.Marshal(out)
 	ctx.W.Header().Set("Content-Type", "application/json")
 	_, _ = ctx.W.Write(b)

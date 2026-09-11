@@ -360,6 +360,39 @@ Schema / DB    写进去的行必须合法（取值、唯一、引用基数）�
 值加工          客户端不可设置的值（author、publication_state、HTML 清洗）也在同一个规则里
 ```
 
+**读写入口：ctx 层是策略层，engine 是可信层。**
+
+站点的业务端点自己拼响应，框架看不到它的输出 —— 所以策略必须在**数据跨出进程之前**
+由入口本身保证，而不是留给调用方补最后一步：
+
+```go
+// 读（解析读规则 → 填 Scope → 引擎 → 裁字段，一步到位）
+page, total, err := ctx.ReadPage(web.ReadList, core.ListQuery{Type: "article", Page: ...})
+node, err := ctx.ReadOne(web.ReadView, id)          // 不可见 → (nil, nil)
+node, err := ctx.ReadAddress(web.ReadView, slug)
+full, err := ctx.ReadFull(web.ReadView, id)         // 带 ref 值（编辑表单）
+nodes, total, err := ctx.ReadSearch(query, typeName)
+nodes, err := ctx.ReadTree(web.ReadList, "category")
+page, total, err := ctx.ReadPage(actionMyContent, q) // 站点自定义读动作
+
+// 写（"客户端发起的写"：Fire 写规则 → 引擎 → 返回裁剪过的节点）
+node, err := ctx.CreateNode(&core.Node{...})
+node, err := ctx.UpdateNode(id, &core.NodePatch{...})
+err := ctx.DeleteNode(id)
+```
+
+两条硬规则：
+
+- 行范围只能由规则算：`ReadPage`/`ReadOne`/... 收到非零 `QueryScope` 直接报错
+  （`QueryScope.IsZero()`），不会静默覆盖成"更宽的范围"。
+- `engine.Query / GetNodeById / FullNode / PatchNode / ...` 是显式的可信调用：后台、插件、
+  迁移、"系统自己要看/要改"的代码走这里。**"客户端发起的写"没被入口覆盖时（多节点事务），
+  自己 Fire 写规则再用引擎落库，而不是把身份判断在 handler 里手写一遍。**
+
+字段白名单（`allow.Append`）约束的是"客户端提交了哪些字段"，那个集合只在框架自己解码时
+存在（`apiCreateNode` 里加工前快照）。站点用自建 DTO 时 DTO 就是白名单；空 `allow` 仍视为
+"没有授权这个动作"（403）。
+
 组合语义（无单例限制，多个 handler 叠加）：读按 AND 收窄、字段掩码取并集；写按并集放宽 ——
 后者是显式选择，代价归注册者（多加一条 `allow.Append` 就等于多放开一个字段）。
 
@@ -378,7 +411,12 @@ Schema / DB    写进去的行必须合法（取值、唯一、引用基数）�
 `/api/auth/login|me`）已经自动套用；**站点自建 JSON 出口要自己调一次**（association 的
 `queryPage`/`content`）—— 后台与插件（`BypassPolicy` 路径）不做字段裁剪。
 模板里的 `outRefs` / `inRefs` / `expand` 行范围仍直接使用 Core 原语、不做可见性过滤（边目标逐条
-解析规则的收益不划算）；**字段掩码仍然按目标类型套用**。
+解析规则的收益不划算）；**字段掩码仍然按目标类型套用**（与 `get` 同源）。
+
+框架自己的出口（通用 `/api/nodes/*`、内置 `/node/{id}` 路由、模板 helper、`/api/auth/login|me`）
+都走上面这套入口；站点自建端点用 `ctx.Read*` / `ctx.Write*` 即可，不需要自己拼 Scope 或调
+`MaskNode`。`MaskNode` / `MaskNodes` / `MaskTree` 仍然导出，留给"自己组装节点"的代码
+（例如拿 `FullNode` 的 ref 值手工拼 Fields —— 那是可信层，自己负责裁）。
 
 `core.CreateNode/PatchNode/DeleteNode` 是内核原语，不做写授权：后台管理路径与站点自建端点
 都是受信调用方，自己负责校验（例如 association 的 `/api/me/profile` 手建 patch）。
@@ -818,9 +856,12 @@ Core 与 Admin API 已支持 archive/restore，但当前通用后台列表默认
 16. HTML 渲染与 JSON API 必须共用同一套读授权（模板 helper 不得自带一份可见性规则）。
 17. 渲染失败必须返回 500 并写日志；不得以 200 + 注释的形式藏起来。
 18. 字段掩码只由读规则声明（不在 types.yaml 里定义等级），只影响输出、不改变行集；
-    站点自建 JSON 出口必须显式调 `MaskNode`/`MaskNodes`/`MaskTree`。
+    业务端点的读必须走 `CmsCtx.Read*`（直接调引擎属于显式可信路径，自己负责）。
 19. 读规则解析结果只能缓存在 `CmsCtx` 上（生命周期 = Actor）。禁止缓存到 `Site`/`Engine`/
     `BaseContext`：跨请求复用会把一个角色的字段掩码给另一个角色。
+20. `CmsCtx.Read*` 不接受调用方自带的 `QueryScope`（非零即报错）；行范围只能来自读规则。
+21. 业务端点里"客户端发起的写"走 `CmsCtx.CreateNode/UpdateNode/DeleteNode`；直接调
+    `engine.PatchNode` 等属于系统写（或者必须自己 Fire 规则），不能两者都不做。
 
 ---
 

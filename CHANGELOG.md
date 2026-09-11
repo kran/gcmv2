@@ -8,6 +8,7 @@
 
 ### Added
 
+- `CmsCtx.ReadPage` / `ReadOne` / `ReadAddress` / `ReadFull` / `ReadSearch` / `ReadTree` and `CmsCtx.CreateNode` / `UpdateNode` / `DeleteNode`: the identity-bound entry points. A read entry resolves the read rule, fills the scope, calls the engine and masks the fields in one step, so a site endpoint cannot forget either half; the write entries fire the write rule (identity, processing), call the engine and return the masked node. Callers must not supply their own `QueryScope` (`QueryScope.IsZero()` makes that an error instead of a silent overwrite). Sites that need the raw engine — administrative paths, plugins, migrations, system writes — keep using it, explicitly.
 - Field-level visibility. A read rule appends field names to `hide` (`hide.Append("phone")`) and the field disappears from the output — API responses, template helpers, trees and expanded nodes alike. An empty `hide` means every field is visible, so unregistered rules and sites that never touch it behave exactly as before; a name that is not a declared field is an error instead of a silent leak. `web.MaskNode` / `MaskNodes` / `MaskTree` apply it where a site builds its own JSON; the framework's own output paths already do.
 - `CmsCtx.ReadRule` resolves a rule once per request per `(action, type)` and caches the result on the request context — the same lifetime as the actor it depends on, invalidated by `SetActor`, never shared across requests.
 

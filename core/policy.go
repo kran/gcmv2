@@ -37,6 +37,11 @@ func BypassPolicy() QueryScope {
 	return QueryScope{mode: scopeBypass}
 }
 
+// IsZero reports whether the scope was left unset. Callers that must not accept
+// a scope built elsewhere (the Web layer computes its own from the read rules)
+// use it to reject that input instead of silently overwriting it.
+func (s QueryScope) IsZero() bool { return s.mode == scopeUnset }
+
 func (s QueryScope) apply(userWhere gquery.Expr) (gquery.Expr, error) {
 	switch s.mode {
 	case scopeRestricted:
