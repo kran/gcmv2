@@ -32,7 +32,14 @@ type SearchQuery struct {
 	Text    string
 	Targets []SearchTarget
 	Page    gquery.Page
+	// CountLimit 同 ListQuery, 但默认更小（DefaultSearchCountLimit）:
+	// 检索命中可能命中全库, 且每个命中的统计成本远高于列表（FTS 扫描 + 节点 JOIN）。
+	CountLimit int
 }
+
+// DefaultSearchCountLimit 检索默认统计上限: 热门词命中可能占满全库,
+// 精确统计要扫完整个命中集（10 万命中约 7s）, 而首页只要 ~50µs。
+const DefaultSearchCountLimit = 1_000
 
 // SearchPlanTarget contains a Type and its already policy-merged filter.
 type SearchPlanTarget struct {
@@ -43,9 +50,10 @@ type SearchPlanTarget struct {
 // SearchPlan is passed to SearchIndex implementations only after Service has
 // checked target Types and merged every mandatory Policy scope.
 type SearchPlan struct {
-	Text    string
-	Targets []SearchPlanTarget
-	Page    gquery.Page
+	Text       string
+	Targets    []SearchPlanTarget
+	Page       gquery.Page
+	CountLimit int
 }
 
 // SearchIndex 全文检索引擎契约。
@@ -188,15 +196,29 @@ func (f *ftsIndex) Search(ctx context.Context, search SearchPlan) ([]Node, int64
 	match := `"` + bq + `"`
 	where := dba.Expr(`nodes_fts MATCH #{1} AND n.archived_at IS NULL AND #{2}`, match, scope)
 
-	totalPtr, err := f.svc.db.WithCtx(ctx).Add(
-		`SELECT COUNT(1) FROM nodes_fts JOIN nodes n ON n.id = nodes_fts.rowid WHERE #{1}`,
-		where).FetchOne[int64]()
+	limit := search.CountLimit
+	if limit == 0 {
+		limit = DefaultSearchCountLimit
+	}
+	var totalPtr *int64
+	if limit > 0 {
+		totalPtr, err = f.svc.db.WithCtx(ctx).Add(`SELECT COUNT(1) FROM (SELECT n.id FROM nodes_fts
+			JOIN nodes n ON n.id = nodes_fts.rowid WHERE #{1} LIMIT #{2})`,
+			where, limit+1).FetchOne[int64]()
+	} else {
+		totalPtr, err = f.svc.db.WithCtx(ctx).Add(
+			`SELECT COUNT(1) FROM nodes_fts JOIN nodes n ON n.id = nodes_fts.rowid WHERE #{1}`,
+			where).FetchOne[int64]()
+	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("core: search: %w", err)
 	}
 	var total int64
 	if totalPtr != nil {
 		total = *totalPtr
+	}
+	if limit > 0 && total > int64(limit) {
+		total = int64(limit) // 截断: 调用方按"至少这么多"渲染
 	}
 
 	rows, err := f.svc.db.WithCtx(ctx).Add(
@@ -298,7 +320,7 @@ func (s *Service) Search(ctx context.Context, search SearchQuery) ([]Node, int64
 		}
 		targets[i] = SearchPlanTarget{Type: target.Type, Where: effective}
 	}
-	plan := SearchPlan{Text: search.Text, Targets: targets, Page: normalizePage(search.Page)}
+	plan := SearchPlan{Text: search.Text, Targets: targets, Page: normalizePage(search.Page), CountLimit: search.CountLimit}
 	return s.search.Search(ctx, plan)
 }
 
