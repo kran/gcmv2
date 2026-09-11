@@ -2,6 +2,15 @@
 
 ## Unreleased — v0.9.1
 
+### Breaking changes
+
+- `web.ReadRule` takes a fourth parameter, `*core.List[string]`: a read rule now declares both the row range and the fields the actor must not see. Existing rules add one ignored parameter.
+
+### Added
+
+- Field-level visibility. A read rule appends field names to `hide` (`hide.Append("phone")`) and the field disappears from the output — API responses, template helpers, trees and expanded nodes alike. An empty `hide` means every field is visible, so unregistered rules and sites that never touch it behave exactly as before; a name that is not a declared field is an error instead of a silent leak. `web.MaskNode` / `MaskNodes` / `MaskTree` apply it where a site builds its own JSON; the framework's own output paths already do.
+- `CmsCtx.ReadRule` resolves a rule once per request per `(action, type)` and caches the result on the request context — the same lifetime as the actor it depends on, invalidated by `SetActor`, never shared across requests.
+
 ### Behaviour changes
 
 - `ListQuery.CountLimit` and `SearchQuery.CountLimit` bound what `total` costs. `0` uses the default (10000 for lists, 1000 for search) and saturates `total` at that limit, `core.CountExact` keeps the exact count, and a positive value sets an explicit cap. Callers that page treat `total` as "at least this many"; callers that need an exact total on a large table must ask for it.

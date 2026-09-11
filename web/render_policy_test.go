@@ -53,7 +53,7 @@ types:
 
 	site := New(dir)
 	// 站点规则：guestbook 只放行 title=visible 的行（列表与单节点都注册）。
-	visibleOnly := func(_ *CmsCtx, _ string, expr *gquery.Expr) error {
+	visibleOnly := func(_ *CmsCtx, _ string, expr *gquery.Expr, _ *core.List[string]) error {
 		*expr = gquery.And(*expr, gquery.EQ(gquery.Field("title"), "visible"))
 		return nil
 	}

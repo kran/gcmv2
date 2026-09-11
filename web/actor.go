@@ -53,6 +53,7 @@ func (c *CmsCtx) SetActor(actor Actor) {
 	}
 	c.actor = actor
 	c.actorLoaded = true
+	c.readRules = nil // 换身份 → 读规则（范围 + 字段掩码）作废
 }
 
 // Actor resolves the current request identity. Missing, invalid, expired, or

@@ -99,7 +99,12 @@ func AuthSession(ctx *CmsCtx, realm AuthRealm, nodeID int64) (string, error) {
 	ctx.SetActor(actor)
 	ctx.principal = node
 	ctx.principalLoaded = true
-	_ = ctx.Json(http.StatusOK, map[string]any{"token": token, "actor": actor, "user": node})
+	// 登录响应里的节点同样按 ReadView 字段规则裁（SetActor 已作废读规则缓存）
+	masked, err := MaskNode(ctx, ReadView, node)
+	if err != nil {
+		return "", err
+	}
+	_ = ctx.Json(http.StatusOK, map[string]any{"token": token, "actor": actor, "user": masked})
 	return token, nil
 }
 
@@ -125,7 +130,12 @@ func (b *authBackend) me(ctx *CmsCtx) {
 		ctx.Fail(Unauthorized("not logged in"))
 		return
 	}
-	_ = ctx.Json(http.StatusOK, map[string]any{"actor": actor, "user": principal})
+	masked, err := MaskNode(ctx, ReadView, principal)
+	if err != nil {
+		ctx.Fail(err)
+		return
+	}
+	_ = ctx.Json(http.StatusOK, map[string]any{"actor": actor, "user": masked})
 }
 
 // RequireLogin allows any authenticated Actor. Handlers that need business

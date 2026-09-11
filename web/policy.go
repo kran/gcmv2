@@ -56,13 +56,22 @@ var systemWriteActions = map[WriteAction]struct{}{
 	WriteDelete: {},
 }
 
-// ReadRule 收窄一次读取的行范围。必须把过滤 AND 进 *expr（nil = 尚未收窄）：
+// ReadRule 描述一次读取对这个角色开放什么：行范围（*expr）+ 字段可见性（*hide）。
+//
+// 行范围：必须把过滤 AND 进 *expr（nil = 尚未收窄）：
 //
 //	*expr = gquery.And(*expr, gquery.EQ(gquery.Field("author"), member.ID))
 //
-// 多个 handler 依次收窄（AND 组合）。返回错误即拒绝这次读取（可直接返回 *Error）。
-// Fire 之后 *expr 仍为 nil 视为配置错误（要“谁都看不到”就显式写 gquery.False()）。
-type ReadRule func(*CmsCtx, string, *gquery.Expr) error
+// 字段可见性：把“这个角色看不到的字段”Append 进 *hide（不碰 = 全部字段可见）。
+// 只影响输出，不影响行范围/排序/筛选能力。名字必须是该类型声明的顶层字段，
+// 拼错会在解析时报错（该藏的没藏 = 泄漏，不能静默放行）。
+//
+//	if !verified(ctx) { hide.Append("phone", "contact") }
+//
+// 多个 handler 依次收窄（范围 AND 组合；hide 取并集）。返回错误即拒绝这次读取
+// （可直接返回 *Error）。Fire 之后 *expr 仍为 nil 视为配置错误（要“谁都看不到”
+// 就显式写 gquery.False()）。
+type ReadRule func(*CmsCtx, string, *gquery.Expr, *core.List[string]) error
 
 // ReadEvent 读事件名：web.read.<action>.<type>。
 func ReadEvent(action ReadAction, typeName string) string {
@@ -83,7 +92,7 @@ func WriteEvent(action WriteAction, typeName string) string {
 // definePolicyEvents 为每个类型定义读/写授权事件（schema 加载后、站点注册前）。
 func (s *Site) definePolicyEvents() {
 	hooks := s.engine.Hooks()
-	readProto := func(*CmsCtx, string, *gquery.Expr) error { return nil }
+	readProto := func(*CmsCtx, string, *gquery.Expr, *core.List[string]) error { return nil }
 	writeProtos := map[WriteAction]any{
 		WriteCreate: func(*CmsCtx, *core.Node, *core.List[string]) error { return nil },
 		WriteUpdate: func(*CmsCtx, int64, *core.NodePatch, *core.List[string]) error { return nil },
@@ -116,7 +125,7 @@ func (s *Site) ReadRule(action ReadAction, typeName string, rule ReadRule) {
 		panic(fmt.Sprintf("web: policy type %q not defined", typeName))
 	}
 	event := ReadEvent(action, typeName)
-	s.defineEvent(event, func(*CmsCtx, string, *gquery.Expr) error { return nil })
+	s.defineEvent(event, func(*CmsCtx, string, *gquery.Expr, *core.List[string]) error { return nil })
 	s.Hook(event, rule)
 }
 
@@ -152,32 +161,67 @@ func (s *Site) defineEvent(name string, proto any) {
 	}
 }
 
-// ReadScope 解析一次读取的行范围：注册了规则就用规则；否则系统读动作走 publication
-// 默认，站点读动作未注册则报错（拼错动作名不会静默回退到公开默认）。
-func (s *Site) ReadScope(ctx *CmsCtx, action ReadAction, typeName string) (core.QueryScope, error) {
-	return readScope(s.engine, ctx, action, typeName)
+// readRule 一次读规则的解析结果（范围 + 不可见字段 + 错误）。
+type readRule struct {
+	scope core.QueryScope
+	hide  []string
+	err   error
 }
 
-// readScope 与 Site.ReadScope 同一份解析逻辑（渲染层只有 engine，也要按同一规则取范围）。
-func readScope(eng core.Engine, ctx *CmsCtx, action ReadAction, typeName string) (core.QueryScope, error) {
+// ReadRule 解析 (action, type) 的读规则：行范围 + 不可见字段。
+//
+// 同一请求内按 (action, type) 只触发一次规则 —— 结果是当前 Actor 的函数，
+// 而 CmsCtx 与 Actor 同生命周期（actor/principal 也是缓存在这里的）。
+// 因此换身份（SetActor）时必须清空：CmsCtx 不并发安全，也不跨请求复用。
+func (c *CmsCtx) ReadRule(action ReadAction, typeName string) (core.QueryScope, []string, error) {
+	key := string(action) + "\x00" + typeName
+	if got, ok := c.readRules[key]; ok {
+		return got.scope, got.hide, got.err
+	}
+	scope, hide, err := resolveReadRule(c.site.engine, c, action, typeName)
+	if c.readRules == nil {
+		c.readRules = make(map[string]readRule, 4)
+	}
+	c.readRules[key] = readRule{scope: scope, hide: hide, err: err}
+	return scope, hide, err
+}
+
+// ReadScope 解析一次读取的行范围（字段掩码见 CmsCtx.ReadRule / MaskNode）：
+// 注册了规则就用规则；否则系统读动作走 publication 默认，站点读动作未注册则报错
+// （拼错动作名不会静默回退到公开默认）。
+func (s *Site) ReadScope(ctx *CmsCtx, action ReadAction, typeName string) (core.QueryScope, error) {
+	scope, _, err := ctx.ReadRule(action, typeName)
+	return scope, err
+}
+
+// resolveReadRule 读规则的一次真实解析（模板层、API 层、站点 handler 共用）。
+func resolveReadRule(eng core.Engine, ctx *CmsCtx, action ReadAction, typeName string) (core.QueryScope, []string, error) {
 	if _, ok := eng.Types().Type(typeName); !ok {
-		return core.QueryScope{}, fmt.Errorf("web: policy type %q not defined", typeName)
+		return core.QueryScope{}, nil, fmt.Errorf("web: policy type %q not defined", typeName)
 	}
 	event := ReadEvent(action, typeName)
 	if eng.Hooks().Has(event) {
 		var expr gquery.Expr
-		if err := eng.Hooks().Fire(event, ctx, typeName, &expr); err != nil {
-			return core.QueryScope{}, err
+		var hide core.List[string]
+		if err := eng.Hooks().Fire(event, ctx, typeName, &expr, &hide); err != nil {
+			return core.QueryScope{}, nil, err
 		}
 		if expr == nil {
-			return core.QueryScope{}, fmt.Errorf("web: read rule %s produced no scope", event)
+			return core.QueryScope{}, nil, fmt.Errorf("web: read rule %s produced no scope", event)
 		}
-		return core.PolicyScope(expr), nil
+		names := hide.Items()
+		for _, name := range names {
+			if _, ok := eng.Types().Field(typeName, name); !ok {
+				return core.QueryScope{}, nil,
+					fmt.Errorf("web: read rule %s hides undeclared field %q", event, name)
+			}
+		}
+		return core.PolicyScope(expr), names, nil
 	}
 	if _, ok := systemReadActions[action]; !ok {
-		return core.QueryScope{}, fmt.Errorf("web: no read rule registered for action %q on type %q", action, typeName)
+		return core.QueryScope{}, nil, fmt.Errorf("web: no read rule registered for action %q on type %q", action, typeName)
 	}
-	return defaultScope(eng, typeName), nil
+	return defaultScope(eng, typeName), nil, nil
 }
 
 // Exposes 该类型的这个读动作是否被站点显式注册了规则。公开路由与 sitemap 用它

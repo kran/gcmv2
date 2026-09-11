@@ -72,6 +72,12 @@ func (s *Site) apiCreateNode(ctx *CmsCtx) {
 		ctx.Fail(err)
 		return
 	}
+	// 响应里的节点按 ReadView 字段规则裁（与读接口同源）
+	created, err = MaskNode(ctx, ReadView, created)
+	if err != nil {
+		ctx.Fail(err)
+		return
+	}
 	_ = ctx.Json(http.StatusCreated, map[string]any{"id": id, "node": created})
 }
 
@@ -106,7 +112,12 @@ func (s *Site) apiViewNode(ctx *CmsCtx) {
 		ctx.Fail(NotFound("not found"))
 		return
 	}
-	_ = ctx.Json(http.StatusOK, map[string]any{"node": &items[0]})
+	node, err := MaskNode(ctx, ReadView, &items[0])
+	if err != nil {
+		ctx.Fail(err)
+		return
+	}
+	_ = ctx.Json(http.StatusOK, map[string]any{"node": node})
 }
 
 // apiUpdateNode PUT /api/nodes/{type}/{id} — 写规则（身份 + 字段 + 加工）→ PatchNode。
@@ -229,7 +240,12 @@ func (s *Site) apiTree(ctx *CmsCtx) {
 		ctx.Fail(err)
 		return
 	}
-	_ = ctx.Json(http.StatusOK, map[string]any{"items": tree.JsonNodes()})
+	nodes, err := MaskTree(ctx, ReadList, tree.JsonNodes())
+	if err != nil {
+		ctx.Fail(err)
+		return
+	}
+	_ = ctx.Json(http.StatusOK, map[string]any{"items": nodes})
 }
 
 // ── mount（route 注册 — 单独 mountNodeAPI） ──

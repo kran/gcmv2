@@ -44,7 +44,7 @@ func TestPolicyEventsDefinedPerType(t *testing.T) {
 		t.Fatal("site read action is predefined")
 	}
 	configured := testSiteConfigured(t, func(site *Site) {
-		site.ReadRule("my_content", "article", func(*CmsCtx, string, *gquery.Expr) error { return nil })
+		site.ReadRule("my_content", "article", func(*CmsCtx, string, *gquery.Expr, *core.List[string]) error { return nil })
 	})
 	if !configured.Exposes("article", "my_content") {
 		t.Fatal("site read action was not registered")
@@ -132,7 +132,7 @@ func TestDefaultReadScopePerReadAction(t *testing.T) {
 // 读规则收窄行范围；多个侧的条件在 AST 层合并（客户端不能削弱）。
 func TestReadRuleNarrowsScope(t *testing.T) {
 	site := testSiteConfigured(t, func(site *Site) {
-		site.ReadRule(ReadList, "article", func(ctx *CmsCtx, _ string, expr *gquery.Expr) error {
+		site.ReadRule(ReadList, "article", func(ctx *CmsCtx, _ string, expr *gquery.Expr, _ *core.List[string]) error {
 			if ctx.Actor().Kind == ActorAPIKey {
 				*expr = gquery.And(*expr, gquery.EQ(gquery.Field("publication_state"), "draft"))
 				return nil
@@ -187,7 +187,7 @@ func TestReadRuleNarrowsScope(t *testing.T) {
 
 func TestReadRuleCanExposeNonPublicationType(t *testing.T) {
 	site := testSiteConfigured(t, func(site *Site) {
-		site.ReadRule(ReadList, "guestbook", func(_ *CmsCtx, _ string, expr *gquery.Expr) error {
+		site.ReadRule(ReadList, "guestbook", func(_ *CmsCtx, _ string, expr *gquery.Expr, _ *core.List[string]) error {
 			*expr = gquery.And(*expr, gquery.True())
 			return nil
 		})
@@ -205,10 +205,10 @@ func TestReadRuleCanExposeNonPublicationType(t *testing.T) {
 
 func TestReadScopeErrors(t *testing.T) {
 	site := testSiteConfigured(t, func(site *Site) {
-		site.ReadRule("my_content", "article", func(*CmsCtx, string, *gquery.Expr) error {
+		site.ReadRule("my_content", "article", func(*CmsCtx, string, *gquery.Expr, *core.List[string]) error {
 			return Unauthorized("authentication required")
 		})
-		site.ReadRule(ReadView, "guestbook", func(*CmsCtx, string, *gquery.Expr) error { return nil })
+		site.ReadRule(ReadView, "guestbook", func(*CmsCtx, string, *gquery.Expr, *core.List[string]) error { return nil })
 	})
 	ctx := site.CmsCtxMaker(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
 	// 未注册的站点动作不静默回退到公开默认。
@@ -232,7 +232,7 @@ func TestReadScopeErrors(t *testing.T) {
 func TestReadRuleRegistrationPanics(t *testing.T) {
 	assertPanics(t, func() {
 		testSiteConfigured(t, func(site *Site) {
-			site.ReadRule(ReadList, "ghost", func(*CmsCtx, string, *gquery.Expr) error { return nil })
+			site.ReadRule(ReadList, "ghost", func(*CmsCtx, string, *gquery.Expr, *core.List[string]) error { return nil })
 		})
 	})
 	assertPanics(t, func() {
@@ -240,7 +240,7 @@ func TestReadRuleRegistrationPanics(t *testing.T) {
 	})
 	site := testSite(t)
 	assertPanics(t, func() {
-		site.ReadRule(ReadList, "article", func(*CmsCtx, string, *gquery.Expr) error { return nil })
+		site.ReadRule(ReadList, "article", func(*CmsCtx, string, *gquery.Expr, *core.List[string]) error { return nil })
 	})
 }
 

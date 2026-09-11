@@ -294,21 +294,26 @@ type EditableNode struct {
 由 hook 总线承载（schema 加载后、站点注册前定义）：
 
 ```text
-web.read.list|view|search|export.<type>     读规则：收窄行范围
+web.read.list|view|search|export.<type>     读规则：收窄行范围 + 声明不可见字段
 web.write.create|update|delete.<type>       写规则：身份 + 可写字段 + 值加工
 ```
 
+读规则的两个出参与写规则的 `allow` 对称：**行范围**回答“这个角色能看到哪些行”，
+**字段掩码**回答“这个角色能看到哪些字段”。
+
 ```go
-// 读规则：必须把过滤 AND 进 *expr（nil = 尚未收窄）。多个 handler 依次收窄（AND — 只会更窄）。
-site.ReadRule(web.ReadList, "article", func(ctx *web.CmsCtx, _ string, expr *gquery.Expr) error {
-	member, err := ctx.Principal()
-	if err != nil {
-		return web.Unauthorized("请先登录")
+// 读规则：范围必须把过滤 AND 进 *expr（nil = 尚未收窄）。多个 handler 依次收窄（AND — 只会更窄）。
+// 字段掩码把“看不到的字段”Append 进 *hide（不碰 = 全部可见）；多个 handler 取并集。
+site.ReadRule(web.ReadView, "member", func(ctx *web.CmsCtx, _ string, expr *gquery.Expr, hide *core.List[string]) error {
+	if !isVerifiedMember(ctx) {
+		hide.Append("phone", "contact") // 只影响输出，不影响排序/筛选能力
 	}
-	*expr = gquery.And(*expr, gquery.OneOf(gquery.Ref("author"), member.ID))
+	*expr = gquery.And(*expr, gquery.EQ(gquery.Field("approval_state"), "approved"))
 	return nil
 })
+```
 
+```go
 // 写规则：签名由 action 决定，不匹配在注册期就报错。
 site.WriteRule(web.WriteCreate, "article", func(ctx *web.CmsCtx, node *core.Node, allow *core.List[string]) error {
 	member, err := publishingMember(ctx)   // 身份/归属判断：返回错误即拒绝
@@ -355,15 +360,25 @@ Schema / DB    写进去的行必须合法（取值、唯一、引用基数）�
 值加工          客户端不可设置的值（author、publication_state、HTML 清洗）也在同一个规则里
 ```
 
-组合语义（无单例限制，多个 handler 叠加）：读按 AND 收窄；写按并集放宽 —— 后者是显式选择，
-代价归注册者（多加一条 `allow.Append` 就等于多放开一个字段）。
+组合语义（无单例限制，多个 handler 叠加）：读按 AND 收窄、字段掩码取并集；写按并集放宽 ——
+后者是显式选择，代价归注册者（多加一条 `allow.Append` 就等于多放开一个字段）。
 
 渲染层（HTML 模板 helper）与 JSON API 共用同一套读规则：`list` / `filterList` 用 `ReadList`，
 `search` 对每个目标类型用 `ReadSearch`，`get` 用 `ReadView`（不可见即返回 nil）。
 所以模板里没有"框架私有的一份 publication 规则"，站点注册的读规则在 HTML 与 API 上结果一致；
 非 publication 类型也不再让模板 helper 直接 panic（未注册规则 = 全拒 = 空列表）。
-模板里的 `outRefs` / `inRefs` / `expand` 仍直接使用 Core 原语、不做可见性过滤（边目标逐条解析
-规则的收益不划算）：要按规则过滤就用上面三个 helper，或在站点 Go 里查。
+**字段掩码同样在渲染层生效**（模板拿不到被隐藏的字段）。
+
+解析只有一处：`CmsCtx.ReadRule(action, type)` —— 同一请求内按 (action, type) 只触发一次规则，
+范围与掩码一起出来。缓存放在 `CmsCtx` 上：它的生命周期正好等于 Actor（`actor`/`principal`
+也是缓存在这里的），换身份（`SetActor`）时作废，不跨请求复用、不并发共享。
+
+应用只有一个原语：`web.MaskNode` / `MaskNodes` / `MaskTree`（拷贝后删键，递归进 `Expand`，
+按子节点自己的类型解析规则）。框架的出口（`/api/nodes/*`、内置 `/node/{id}` 路由、模板 helper、
+`/api/auth/login|me`）已经自动套用；**站点自建 JSON 出口要自己调一次**（association 的
+`queryPage`/`content`）—— 后台与插件（`BypassPolicy` 路径）不做字段裁剪。
+模板里的 `outRefs` / `inRefs` / `expand` 行范围仍直接使用 Core 原语、不做可见性过滤（边目标逐条
+解析规则的收益不划算）；**字段掩码仍然按目标类型套用**。
 
 `core.CreateNode/PatchNode/DeleteNode` 是内核原语，不做写授权：后台管理路径与站点自建端点
 都是受信调用方，自己负责校验（例如 association 的 `/api/me/profile` 手建 patch）。
@@ -802,6 +817,10 @@ Core 与 Admin API 已支持 archive/restore，但当前通用后台列表默认
     不满足时 `core.Open` 拒绝启动（`verifySQLiteProfile`）。
 16. HTML 渲染与 JSON API 必须共用同一套读授权（模板 helper 不得自带一份可见性规则）。
 17. 渲染失败必须返回 500 并写日志；不得以 200 + 注释的形式藏起来。
+18. 字段掩码只由读规则声明（不在 types.yaml 里定义等级），只影响输出、不改变行集；
+    站点自建 JSON 出口必须显式调 `MaskNode`/`MaskNodes`/`MaskTree`。
+19. 读规则解析结果只能缓存在 `CmsCtx` 上（生命周期 = Actor）。禁止缓存到 `Site`/`Engine`/
+    `BaseContext`：跨请求复用会把一个角色的字段掩码给另一个角色。
 
 ---
 

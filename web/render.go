@@ -81,22 +81,23 @@ func fail(err error) {
 // （tpl.go）合并 sprig + 内置函数后整体注入。
 func (e *Render) queryFuncs(c *CmsCtx) template.FuncMap {
 	eng := e.eng
-	// 同一请求内按 (action, type) 缓存读范围：模板里 get/list 会被调用多次。
-	scopes := make(map[string]core.QueryScope)
+	// 读规则（行范围 + 字段掩码）按 (action, type) 在 CmsCtx 上缓存：模板里
+	// get/list 会被多次调用，同一请求只触发一次规则。
 	scopeFor := func(action ReadAction, typeName string) core.QueryScope {
-		key := string(action) + "\x00" + typeName
-		if scope, ok := scopes[key]; ok {
-			return scope
-		}
-		scope, err := readScope(eng, c, action, typeName)
+		scope, _, err := c.ReadRule(action, typeName)
 		fail(err)
-		scopes[key] = scope
 		return scope
+	}
+	// maskList 模板 helper 的裁剪出口（失败→ panic，与其它查询错误一致）。
+	maskList := func(action ReadAction, nodes []core.Node) []core.Node {
+		fail(MaskNodes(c, action, nodes))
+		return nodes
 	}
 	return template.FuncMap{
 		// ── 查询原语 ─────────────────────────
 		// get: 单节点（id 兼容 JSON float64 / int64）。
-		// 可见性按 ReadView 读规则解析：不可见 → nil（与 API 的 view 路径同语义）。
+		// 可见性按 ReadView 读规则解析：不可见 → nil（与 API 的 view 路径同语义），
+		// 隐藏字段按同一条规则裁掉。
 		"get": func(id any) *core.Node {
 			nid, err := types.ToID(id)
 			fail(err)
@@ -113,16 +114,18 @@ func (e *Render) queryFuncs(c *CmsCtx) template.FuncMap {
 			if len(visible) == 0 {
 				return nil
 			}
-			return &visible[0]
+			node, err := MaskNode(c, ReadView, &visible[0])
+			fail(err)
+			return node
 		},
-		// list: 公开类型列表 —— 行范围与 API 共用同一条读规则（ReadList）。
+		// list: 公开类型列表 —— 行范围与字段掩码与 API 共用同一条读规则（ReadList）。
 		"list": func(typ string, page, size int) []core.Node {
 			list, err := eng.Query(c.R.Context(), core.ListQuery{
 				Type: typ, Scope: scopeFor(ReadList, typ),
 				Page: gquery.Page{Number: page, Size: size},
 			})
 			fail(err)
-			return list
+			return maskList(ReadList, list)
 		},
 		// setting: 站点配置值（按 key 取; 缺失 → nil; 值按 JSON 形态,
 		// richtext 模板自行 safeHTML）
@@ -141,9 +144,10 @@ func (e *Render) queryFuncs(c *CmsCtx) template.FuncMap {
 				Text: q, Targets: targets, Page: gquery.Page{Number: page, Size: size},
 			})
 			fail(err)
-			return list
+			return maskList(ReadSearch, list)
 		},
-		// outRefs: 出边目标节点列表（symmetric 双向）
+		// outRefs: 出边目标节点列表（symmetric 双向）。行范围 trusted（按边直接取），
+		// 字段掩码按各节点自己的类型套用（与 get 同源）。
 		"outRefs": func(from int64, field string, page, size int) []core.Node {
 			return e.targets(c, true, func() ([]core.Edge, int64, error) {
 				n, err := eng.GetNodeById(c.R.Context(), from)
@@ -153,7 +157,7 @@ func (e *Render) queryFuncs(c *CmsCtx) template.FuncMap {
 				return eng.OutEdges(c.R.Context(), n.Type, from, field, page, size)
 			})
 		},
-		// inRefs: 入边来源节点列表（inverse 反向 — 取 from_node 端）
+		// inRefs: 入边来源节点列表（inverse 反向 — 取 from_node 端）。行范围 trusted。
 		"inRefs": func(to int64, field string, page, size int) []core.Node {
 			return e.targets(c, false, func() ([]core.Edge, int64, error) {
 				return eng.InEdges(c.R.Context(), to, field, page, size)
@@ -181,7 +185,7 @@ func (e *Render) queryFuncs(c *CmsCtx) template.FuncMap {
 				Page: gquery.Page{Number: page, Size: size},
 			})
 			fail(err)
-			return list
+			return maskList(ReadList, list)
 		},
 		// expand: 统一路径展开 — 输入任意形态（单值或列表）, 返回 any。
 		// 用法（管道: 数据是末参）:
@@ -249,7 +253,7 @@ func searchTargets(c *CmsCtx, eng core.Engine, typeName string) []core.SearchTar
 		if _, ok := eng.Types().Searchable(name); !ok {
 			continue
 		}
-		scope, err := readScope(eng, c, ReadSearch, name)
+		scope, _, err := c.ReadRule(ReadSearch, name)
 		fail(err)
 		targets = append(targets, core.SearchTarget{Type: name, Scope: scope})
 	}
@@ -277,6 +281,10 @@ func expandTemplateNodes(c *CmsCtx, eng core.Engine, expression string, ids []in
 		fail(err)
 	}
 	expanded, err := eng.ExpandMany(c.R.Context(), ids, paths...)
+	fail(err)
+	// 展开出来的节点可能属于不同（甚至不可见）类型：行范围 trusted，但字段按
+	// 各自类型读规则裁（ReadView —— 与单独取该节点同源）。
+	expanded, err = maskNodesPtr(c, ReadView, expanded)
 	fail(err)
 	if many {
 		return expanded
@@ -321,9 +329,12 @@ func (e *Render) targets(c *CmsCtx, wantTo bool, q func() ([]core.Edge, int64, e
 		}
 		n, err := e.eng.GetNodeById(c.R.Context(), id)
 		fail(err)
-		if n != nil {
-			nodes = append(nodes, *n)
+		if n == nil {
+			continue
 		}
+		masked, err := MaskNode(c, ReadView, n)
+		fail(err)
+		nodes = append(nodes, *masked)
 	}
 	return nodes
 }

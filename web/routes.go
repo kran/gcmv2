@@ -60,6 +60,13 @@ func (s *Site) nodeHandler(ctx *CmsCtx) {
 		ctx.String(http.StatusInternalServerError, "500 internal server error")
 		return
 	}
+	// 字段级可见性在输出前最后一步套用（hook 看到的是完整数据）
+	n, err = MaskNode(ctx, ReadView, n)
+	if err != nil {
+		slog.Error("node field policy failed", "path", raw, "err", err)
+		ctx.String(http.StatusInternalServerError, "500 internal server error")
+		return
+	}
 	data := map[string]any{"Node": n, "ID": n.ID}
 	// 渲染候选（节点级联 + 站点 hook 追加）
 	cands := core.NewList[string]()
@@ -143,6 +150,10 @@ func (s *Site) apiNodes(ctx *CmsCtx) {
 	if err != nil {
 		// filter 编译错误 → 400（客户端参数）
 		ctx.String(http.StatusBadRequest, "api: "+err.Error())
+		return
+	}
+	if err := MaskNodes(ctx, ReadList, list); err != nil {
+		ctx.Fail(err)
 		return
 	}
 	out := map[string]any{

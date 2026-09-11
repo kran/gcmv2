@@ -9,6 +9,9 @@ import (
 )
 
 // CmsCtx 请求上下文（渲染 + 响应方法 + 引擎访问 + 当前 Actor）。
+//
+// 一个请求一个 CmsCtx，不跨请求复用，也不可跨 goroutine 共享（actor/principal
+// 与读规则都是懒加载无锁缓存）。
 type CmsCtx struct {
 	*cho.BaseContext
 	site            *Site
@@ -16,6 +19,10 @@ type CmsCtx struct {
 	actorLoaded     bool
 	principal       *core.Node
 	principalLoaded bool
+
+	// readRules 读规则解析结果（范围 + 字段掩码），key = action\x00type。
+	// 生命周期与 actor 一致：SetActor 时作废。
+	readRules map[string]readRule
 }
 
 // Engine 引擎访问（handler 里查数据）。
