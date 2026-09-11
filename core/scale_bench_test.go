@@ -545,7 +545,7 @@ func (f *scaleFixture) reportCandidates(t *testing.T) {
 
 	// ②b 检索取首页: 区分"bm25 排名（要给全部命中打分）"与"计数"两类成本
 	searchFilter := `nodes_fts MATCH ? AND n.archived_at IS NULL AND n.type = 'article'
-		AND json_extract(n.fields,'$.publication_state') = 'published'" + "`
+		AND json_extract(n.fields,'$.publication_state') = 'published'`
 	measurePool(t, f, iterations, "候选: 检索页(bm25 排名)", func() {
 		rows, err := f.db.Pool().Query(`SELECT n.id FROM nodes_fts JOIN nodes n ON n.id = nodes_fts.rowid
 			WHERE `+searchFilter+` ORDER BY bm25(nodes_fts, 0.0, 10.0, 1.0), n.id DESC LIMIT 10`, match)
