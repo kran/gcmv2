@@ -395,6 +395,16 @@ func (f *scaleFixture) reportReads(t *testing.T, ctx context.Context) {
 	for i, id := range f.subtree {
 		ids[i] = id
 	}
+	measure(t, "子树过滤(只取页, CountLimit 10)", slow, func() {
+		_, _, err := f.service.QueryPage(ctx, ListQuery{
+			Type: "article", Scope: published, Where: gquery.OneOf(gquery.Ref("categories"), ids...),
+			Sort: listSort, Page: gquery.Page{Number: 1, Size: 25}, CountLimit: 10,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+
 	measure(t, fmt.Sprintf("分类子树过滤(%d 个分类)+排序", len(f.subtree)), slow, func() {
 		_, _, err := f.service.QueryPage(ctx, ListQuery{
 			Type: "article", Scope: published,
@@ -426,7 +436,7 @@ func (f *scaleFixture) reportReads(t *testing.T, ctx context.Context) {
 		}
 	})
 
-	measure(t, "检索: 常见词(计数上限 10, 只看取页)", min(iterations, 20), func() {
+	measure(t, "检索: 常见词(计数上限 10, 只看取页)", slow, func() {
 		_, _, err := f.service.Search(ctx, SearchQuery{
 			Text: "产业政策", Targets: []SearchTarget{{Type: "article", Scope: published}},
 			Page: gquery.Page{Number: 1, Size: 10}, CountLimit: 10,
@@ -498,7 +508,7 @@ func (f *scaleFixture) reportCandidates(t *testing.T) {
 	slug := func() string { return fmt.Sprintf("article-%d", rand.Intn(f.size)) }
 
 	// 候选 A: 显式带上 type IN (...) — 部分索引（WHERE type IN ...）必须能推出条件才可用
-	measurePool(t, f, iterations, "候选A: 地址走全局表达式索引(+type IN)", func() {
+	measurePool(t, f, slow, "候选A: 地址走全局表达式索引(+type IN)", func() {
 		var id int64
 		row := f.db.Pool().QueryRow(`SELECT id FROM nodes WHERE archived_at IS NULL
 			AND type IN ('article','category') AND `+caseExpr+` = ? LIMIT 1`, slug())
@@ -524,7 +534,7 @@ func (f *scaleFixture) reportCandidates(t *testing.T) {
 
 	// ② 检索: 现状是精确 count（扫全部命中）+ bm25 排序
 	match := `"` + bigram("产业政策") + `"`
-	measurePool(t, f, iterations, "候选: 检索截断计数(上限 1000)", func() {
+	measurePool(t, f, slow, "候选: 检索截断计数(上限 1000)", func() {
 		var total int64
 		row := f.db.Pool().QueryRow(
 			`SELECT COUNT(*) FROM (SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ? LIMIT 1001)`, match)
@@ -532,7 +542,7 @@ func (f *scaleFixture) reportCandidates(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	measurePool(t, f, iterations, "候选: 检索只取首页(不算总数)", func() {
+	measurePool(t, f, slow, "候选: 检索只取首页(不算总数)", func() {
 		rows, err := f.db.Pool().Query(`SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ?
 			ORDER BY bm25(nodes_fts, 0.0, 10.0, 1.0) LIMIT 10`, match)
 		if err != nil {
@@ -546,7 +556,7 @@ func (f *scaleFixture) reportCandidates(t *testing.T) {
 	// ②b 检索取首页: 区分"bm25 排名（要给全部命中打分）"与"计数"两类成本
 	searchFilter := `nodes_fts MATCH ? AND n.archived_at IS NULL AND n.type = 'article'
 		AND json_extract(n.fields,'$.publication_state') = 'published'`
-	measurePool(t, f, iterations, "候选: 检索页(bm25 排名)", func() {
+	measurePool(t, f, slow, "候选: 检索页(bm25 排名)", func() {
 		rows, err := f.db.Pool().Query(`SELECT n.id FROM nodes_fts JOIN nodes n ON n.id = nodes_fts.rowid
 			WHERE `+searchFilter+` ORDER BY bm25(nodes_fts, 0.0, 10.0, 1.0), n.id DESC LIMIT 10`, match)
 		if err != nil {
@@ -556,7 +566,7 @@ func (f *scaleFixture) reportCandidates(t *testing.T) {
 		for rows.Next() {
 		}
 	})
-	measurePool(t, f, iterations, "候选: 检索页(改按时间序, 不算 total)", func() {
+	measurePool(t, f, slow, "候选: 检索页(改按时间序, 不算 total)", func() {
 		rows, err := f.db.Pool().Query(`SELECT n.id FROM nodes_fts JOIN nodes n ON n.id = nodes_fts.rowid
 			WHERE `+searchFilter+` ORDER BY n.id DESC LIMIT 10`, match)
 		if err != nil {
@@ -568,7 +578,7 @@ func (f *scaleFixture) reportCandidates(t *testing.T) {
 	})
 
 	// ③ 列表页: 现状是精确 count（扫全部匹配行）
-	measurePool(t, f, iterations, "候选: 列表页截断计数(上限 1000)", func() {
+	measurePool(t, f, slow, "候选: 列表页截断计数(上限 1000)", func() {
 		var total int64
 		row := f.db.Pool().QueryRow(`SELECT COUNT(*) FROM (SELECT 1 FROM nodes
 			WHERE archived_at IS NULL AND type = 'article'
