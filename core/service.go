@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/kran/dba"
@@ -46,7 +47,8 @@ func Open(db *dba.SQL, ts *types.Types) (*Service, error) {
 	if err := verifySQLiteProfile(db); err != nil {
 		return nil, err
 	}
-	if _, err = s.MigrateUp(); err != nil {
+	applied, err := s.MigrateUp()
+	if err != nil {
 		return nil, fmt.Errorf("core: migrate: %w", err)
 	}
 	if err = s.syncEdgeMetadata(); err != nil {
@@ -57,6 +59,14 @@ func Open(db *dba.SQL, ts *types.Types) (*Service, error) {
 	}
 
 	s.initSearch()
+	// 本次有迁移 → 全文索引可能与数据不一致（例如索引表被重建）: 重建一次。
+	// 只在真正升级时发生（不是每次启动）, 百万节点约十几分钟, 属于一次性升级成本。
+	if applied > 0 {
+		err = s.RebuildSearch(context.Background())
+		if err != nil {
+			return nil, fmt.Errorf("core: rebuild search after migration: %w", err)
+		}
+	}
 	return s, nil
 }
 
