@@ -21,6 +21,10 @@
 - `GetNodeByAddress` resolves addresses through a per-type index instead of scanning every node of every addressable type. The JSON path was bound as a parameter, which no index expression can match, so the global address index was unusable as a lookup. At 100k nodes: 1.7s → 129µs.
 - Relation membership (`in` on a ref/ref[] path) compiles to an uncorrelated subquery instead of a correlated `EXISTS`, so the edge set is built once instead of once per candidate row. At 100k nodes: 1.25s → 35ms.
 
+### Fixed
+
+- The render error for a missing template named the templates directory instead of the candidates it looked for.
+
 ### Changed
 
 - The full-text index is contentless (`content=''`, `contentless_delete=1`): it no longer stores a second copy of the bigram-expanded text, which for Chinese is several times the original. At 100k nodes: 15.5KB → 6.8KB per node.

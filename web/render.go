@@ -66,7 +66,7 @@ func (e *Render) Render(c *CmsCtx, w io.Writer, candidates []string, data any) e
 		}
 		return nil
 	}
-	return fmt.Errorf("render: no template for %q (candidates: %s)", e.root, strings.Join(candidates, ", "))
+	return fmt.Errorf("render: no template matched (candidates: %s)", strings.Join(candidates, ", "))
 }
 
 // fail 查询错误 → panic（html/template 捕获为 Execute 错误, fail-loud）。
