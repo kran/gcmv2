@@ -426,6 +426,16 @@ func (f *scaleFixture) reportReads(t *testing.T, ctx context.Context) {
 		}
 	})
 
+	measure(t, "检索: 常见词(计数上限 10, 只看取页)", min(iterations, 20), func() {
+		_, _, err := f.service.Search(ctx, SearchQuery{
+			Text: "产业政策", Targets: []SearchTarget{{Type: "article", Scope: published}},
+			Page: gquery.Page{Number: 1, Size: 10}, CountLimit: 10,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+
 	measure(t, "检索: 稀有词(命中 1/1000)", iterations, func() {
 		idx := rand.Intn(f.size/1000+1) * 1000
 		_, _, err := f.service.Search(ctx, SearchQuery{
@@ -512,18 +522,43 @@ func (f *scaleFixture) reportCandidates(t *testing.T) {
 		}
 	})
 
-	// ② 检索: 现状是精确 count（扫全部命中）+ bm25 临时排序
+	// ② 检索: 现状是精确 count（扫全部命中）+ bm25 排序
+	match := `"` + bigram("产业政策") + `"`
 	measurePool(t, f, iterations, "候选: 检索截断计数(上限 1000)", func() {
 		var total int64
 		row := f.db.Pool().QueryRow(
-			`SELECT COUNT(*) FROM (SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ? LIMIT 1001)`, "产业政策")
+			`SELECT COUNT(*) FROM (SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ? LIMIT 1001)`, match)
 		if err := row.Scan(&total); err != nil {
 			t.Fatal(err)
 		}
 	})
 	measurePool(t, f, iterations, "候选: 检索只取首页(不算总数)", func() {
 		rows, err := f.db.Pool().Query(`SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ?
-			ORDER BY bm25(nodes_fts, 0.0, 10.0, 1.0) LIMIT 10`, "产业政策")
+			ORDER BY bm25(nodes_fts, 0.0, 10.0, 1.0) LIMIT 10`, match)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+		}
+	})
+
+	// ②b 检索取首页: 区分"bm25 排名（要给全部命中打分）"与"计数"两类成本
+	searchFilter := `nodes_fts MATCH ? AND n.archived_at IS NULL AND n.type = 'article'
+		AND json_extract(n.fields,'$.publication_state') = 'published'" + "`
+	measurePool(t, f, iterations, "候选: 检索页(bm25 排名)", func() {
+		rows, err := f.db.Pool().Query(`SELECT n.id FROM nodes_fts JOIN nodes n ON n.id = nodes_fts.rowid
+			WHERE `+searchFilter+` ORDER BY bm25(nodes_fts, 0.0, 10.0, 1.0), n.id DESC LIMIT 10`, match)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+		}
+	})
+	measurePool(t, f, iterations, "候选: 检索页(改按时间序, 不算 total)", func() {
+		rows, err := f.db.Pool().Query(`SELECT n.id FROM nodes_fts JOIN nodes n ON n.id = nodes_fts.rowid
+			WHERE `+searchFilter+` ORDER BY n.id DESC LIMIT 10`, match)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -594,6 +629,16 @@ func (f *scaleFixture) reportPlans(t *testing.T, ctx context.Context) {
 		}},
 		{"地址查询(slug)", func() {
 			_, _ = f.service.GetNodeByAddress(ctx, "article-1")
+		}},
+		{"分类子树过滤+排序", func() {
+			ids := make([]any, 0, len(f.subtree))
+			for _, id := range f.subtree {
+				ids = append(ids, id)
+			}
+			_, _, _ = f.service.QueryPage(ctx, ListQuery{
+				Type: "article", Scope: published, Where: gquery.OneOf(gquery.Ref("categories"), ids...),
+				Sort: listSort, Page: gquery.Page{Number: 1, Size: 25},
+			})
 		}},
 		{"全文检索", func() {
 			_, _, _ = f.service.Search(ctx, SearchQuery{
