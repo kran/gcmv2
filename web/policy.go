@@ -138,6 +138,14 @@ func (s *Site) ReadRule(action ReadAction, typeName string, rule ReadRule) {
 // 规则负责三件事：身份/归属判断（返回错误即拒绝）、allow.Append 声明客户端可写字段、
 // 就地加工客户端不可设置的值（如 author、publication_state）。
 // create/update 若一个字段都没声明，等于没有授权这个动作（403）。
+//
+// allow 的强制力取决于"谁解码请求体"，两种模式别混：
+//
+//	框架解码（POST/PUT /api/nodes/{type}）→ 硬拦：客户端提交了未放行的字段 → 422 + details
+//	                          （提交字段名在规则加工前快照，规则自己加的字段不参与判断）
+//	站点自建 DTO（CmsCtx.CreateNode/UpdateNode、自建端点）→ 只表示"这个动作被授权"
+//	                          （+ 当字段文档）；字段范围由 DTO 决定，schema 仍拒未声明字段。
+//	                          规则想收窄就在规则里删 node.Fields 里没放行的键（它有指针）。
 func (s *Site) WriteRule(action WriteAction, typeName string, rule any) {
 	if s.started {
 		panic("web: register write rule after Start")
