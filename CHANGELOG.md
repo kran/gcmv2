@@ -19,7 +19,10 @@
 
 ### Migration
 
-- Core migration `00012_contentless_fts.sql` recreates `nodes_fts` without its content table; `core.Open` rebuilds it once (2.7s at 10k nodes, ~60s at 100k).
+- Core migration `00012_contentless_fts.sql` recreates `nodes_fts` without its content table; `core.Open` rebuilds it once (2.7s at 10k nodes, 29s at 100k, 13m37s at 1M).
+- Changing `constraints.indexes` / `constraints.unique` / `addressable` only needs a restart: `core.Open` drops and recreates every `gcm_schema_%` index from the current Schema (a test pins this). The cost is the startup cost: 2.2s for four indexes at 100k nodes.
+
+See `docs/scaling.md` for measured throughput, latency and storage from 1k to 1M nodes.
 - The migration frees pages inside the existing file; reclaiming them needs `VACUUM` (`VACUUM INTO` — what the backup plugin uses — produces a compact copy).
 
 ## Unreleased — v0.9.0

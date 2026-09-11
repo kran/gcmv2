@@ -100,6 +100,7 @@ func runScale(t *testing.T, size int, bulk bool) {
 	f.reportCandidates(t)
 	f.reportRebuild(t, ctx)
 	f.reportConcurrent(t, ctx)
+	f.reportIndexRebuild(t)
 }
 
 func bulkSuffix(bulk bool) string {
@@ -770,6 +771,36 @@ func (f *scaleFixture) reportConcurrent(t *testing.T, ctx context.Context) {
 		t.Fatalf("并发读写失败: write=%v read=%v", writeErr, readErr)
 	}
 	t.Logf("并发(1 写 + 4 读, 3s): 读延迟 p50=%s p95=%s 样本=%d", p50(readSamples), p95(readSamples), len(readSamples))
+}
+
+// reportIndexRebuild 声明式索引的重建成本 — core.Open 每次启动都会
+// syncSchemaIndexes（先删光 gcm_schema_% 再按 Schema 建），量一下这个代价。
+func (f *scaleFixture) reportIndexRebuild(t *testing.T) {
+	t.Helper()
+	rows, err := f.db.Add(`SELECT name, sql FROM sqlite_master
+		WHERE type = 'index' AND name LIKE 'gcm_schema_%' ORDER BY name`).FetchMaps()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var total time.Duration
+	parts := make([]string, 0, len(rows))
+	for _, row := range rows {
+		name := fmt.Sprint(row["name"])
+		statement := fmt.Sprint(row["sql"])
+		start := time.Now()
+		_, err = f.db.Pool().Exec(`DROP INDEX ` + quoteIdentifier(name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = f.db.Pool().Exec(statement)
+		if err != nil {
+			t.Fatal(err)
+		}
+		spent := time.Since(start)
+		total += spent
+		parts = append(parts, fmt.Sprintf("%s=%s", strings.TrimPrefix(name, "gcm_schema_"), spent.Round(time.Millisecond)))
+	}
+	t.Logf("启动索引重建（%d 个, 每次启动都做）: 合计 %s | %s", len(rows), total.Round(time.Millisecond), strings.Join(parts, " "))
 }
 
 // ── 小工具 ──────────────────────────────────────────────────────────
