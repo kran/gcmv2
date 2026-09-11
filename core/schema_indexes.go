@@ -71,6 +71,13 @@ func (s *Service) createAddressIndex(tx *dba.SQL) error {
 		if !ok {
 			continue
 		}
+		// 单类型地址索引: 全局唯一索引是 CASE 表达式（跨类型唯一用）, 查询很难命中;
+		// 单类型 (type, address) 索引才是点查路径（GetNodeByAddress 按类型展开成 OR）。
+		name := "gcm_schema_address_" + typeName
+		err := createSchemaIndex(tx, name, typeName, []string{capability.Field}, false)
+		if err != nil {
+			return err
+		}
 		branches = append(branches, `WHEN `+quoteLiteral(typeName)+` THEN NULLIF(json_extract(fields, '$.`+capability.Field+`'), '')`)
 		types = append(types, quoteLiteral(typeName))
 	}

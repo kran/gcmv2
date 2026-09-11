@@ -59,11 +59,13 @@ func (s *Service) GetNodeByAddress(ctx context.Context, address string) (*Node, 
 		if !ok {
 			continue
 		}
+		// JSON 路径写成字面量: 绑参数时 SQLite 无法把它与索引表达式对上 → 退化成全类型扫描
+		// （GetNodeByAddress 的 type= AND json_extract(...) 两条条件正好命中上面的单类型地址索引）
 		start := len(args) + 1
 		conditions = append(conditions, fmt.Sprintf(
-			`(type = #{%d} AND json_extract(fields, #{%d}) = #{%d})`,
-			start, start+1, start+2))
-		args = append(args, typeName, "$."+capability.Field, address)
+			`(type = #{%d} AND json_extract(fields, %s) = #{%d})`,
+			start, quoteLiteral("$."+capability.Field), start+1))
+		args = append(args, typeName, address)
 	}
 	if len(conditions) == 0 {
 		return nil, nil
