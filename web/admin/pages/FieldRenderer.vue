@@ -1,18 +1,5 @@
 <template>
     <div class="fr">
-        <!-- 节点显示名: 与下面字段同结构（label + kind + 必填）— 由构建器统一渲染,
-             不另写一份 el-form-item, 否则两处样式迟早走偏。
-             仅顶层显示（show-display）: 本组件会递归渲染嵌套 object/array,
-             只有节点本身有 display。 -->
-        <div v-if="showDisplay" class="fr-item">
-            <div class="fr-label">
-                <span>显示</span>
-                <span class="fr-kind">display</span>
-                <span class="fr-req">*</span>
-            </div>
-            <el-input :model-value="display" placeholder="公共显示文本（列表/搜索/导航显示）"
-                @update:model-value="$emit('update:display', $event)" />
-        </div>
         <template v-for="f in fields" :key="f.name">
             <div class="fr-item" :class="{ 'fr-readonly': editing && f.immutable }">
                 <div class="fr-label">
@@ -140,17 +127,13 @@ export default {
     props: {
         fields: { type: Array, default: () => [] },
         modelValue: { type: Object, default: () => ({}) },
-        // 节点显示名（display）— 不属于 fields, 但表单结构与字段一致
-        display: { type: String, default: '' },
-        // 只有顶层表单渲染 display 行（嵌套 object/array 递归时不渲染）
-        showDisplay: { type: Boolean, default: false },
         // 引用预置: {fieldName: [{id, label}]} — 编辑回显已选值（expand 结果）
         refPreset: { type: Object, default: () => ({}) },
         // 类型定义表（refLabel 显示兜底用）: {typeName: TypeDef}
         defs: { type: Object, default: () => ({}) },
         editing: { type: Boolean, default: false },
     },
-    emits: ['update:modelValue', 'update:display'],
+    emits: ['update:modelValue'],
     data() {
         return { refOptions: {}, refLoading: {}, extraWidgets: {} }
     },

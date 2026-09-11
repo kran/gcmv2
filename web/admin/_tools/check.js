@@ -118,8 +118,8 @@ function makeRenderer(Vue) {
         cloneNode: (n) => n,
     }
     return {
-        root: node('#root'),
         renderer: Vue.createRenderer(ops),
+        node,
         // el-* / 扩展控件桩件：保留 tag 便于断言结构
         stub: (name) => ({
             name,
@@ -137,31 +137,14 @@ function walk(n, out = []) { out.push(n); (n.children || []).forEach(c => walk(c
 
 async function checkRender() {
     const { Vue, loadComponent } = loadRuntime()
-    const { root, renderer, stub, stubs } = makeRenderer(Vue)
+    const { renderer, node, stub, stubs } = makeRenderer(Vue)
     let failed = 0
     const fail = (msg) => { failed++; console.log('  FAIL ' + msg) }
     const pass = (msg) => console.log('  ok   ' + msg)
 
-    // ① FieldRenderer: display 行必须与字段行同构, 且嵌套层级不重复出现
-    const FieldRenderer = await loadComponent('/pages/FieldRenderer.vue')
-    const fields = [
-        { name: 'title', kind: 'text', label: '标题', required: true },
-        { name: 'position', kind: 'number', label: '排序' },
-        { name: 'meta', kind: 'object', label: '元信息', fields: [{ name: 'note', kind: 'text', label: '备注' }] },
-    ]
-    const app = renderer.createApp(FieldRenderer.default || FieldRenderer, {
-        fields,
-        modelValue: { title: 'T', position: 1, meta: { note: 'N' } },
-        display: '显示名',
-        showDisplay: true,
-    })
-    stubs.forEach(name => app.component(name, stub(name)))
-    app.mount(root)
-
-    const rows = walk(root).filter(n => n.tag === 'div' && n.props.class === 'fr-item')
-    const labelOf = (row) => (row.children || []).find(c => c.props && c.props.class === 'fr-label')
-    const shape = (row) => {
-        const label = labelOf(row) || { children: [] }
+    // 行结构（.fr-item > .fr-label + 控件）— 字段行与节点表单里手写的 display 行必须一致
+    const shapeOf = (row) => {
+        const label = (row.children || []).find(c => c.props && c.props.class === 'fr-label') || { children: [] }
         return {
             classes: row.props.class,
             spanClasses: label.children.filter(c => c.tag === 'span').map(c => c.props.class || ''),
@@ -169,20 +152,48 @@ async function checkRender() {
             control: ((row.children || []).find(c => c.tag && c.tag.indexOf('el-') === 0) || {}).tag,
         }
     }
-    const shapes = rows.map(shape)
-    shapes.forEach((s, i) => console.log('       行' + i + ': ' + JSON.stringify(s)))
-
-    const display = shapes[0]
+    const mount = (comp, props, components) => {
+        const host = node('#root')
+        const app = renderer.createApp(comp, props)
+        components.forEach(name => app.component(name, stub(name)))
+        app.mount(host)
+        return host
+    }
     const noReq = (s) => JSON.stringify(s.spanClasses.filter(c => c !== 'fr-req'))
-    const sameRow = shapes.every(s => s.classes === 'fr-item' && noReq(s) === noReq(display))
-    if (display.texts[0] !== '显示' || display.control !== 'el-input') fail('第一行不是 display 标量行')
-    else if (!sameRow) fail('display 行与字段行结构不一致')
-    else if (display.spanClasses.indexOf('fr-req') < 0) fail('display 行为必填, 应带 * 标记')
-    else pass('display 行与字段行同构（label/kind/必填 + 同一控件）')
+    const printRow = (tag, s) => console.log('       ' + tag + ': ' + JSON.stringify(s))
 
-    const displayRows = walk(root).filter(n => n.tag === 'span' && n.text === '显示').length
-    if (displayRows !== 1) fail('“显示”行出现 ' + displayRows + ' 次（嵌套 object/array 不应重复渲染 display）')
-    else pass('嵌套 object 内不重复渲染 display')
+    // ① FieldRenderer 渲染字段行（含嵌套 object，不应多出行来）
+    const FieldRenderer = await loadComponent('/pages/FieldRenderer.vue')
+    const fields = [
+        { name: 'title', kind: 'text', label: '标题', required: true },
+        { name: 'position', kind: 'number', label: '排序' },
+        { name: 'meta', kind: 'object', label: '元信息', fields: [{ name: 'note', kind: 'text', label: '备注' }] },
+    ]
+    const fieldHost = mount(FieldRenderer.default || FieldRenderer,
+        { fields, modelValue: { title: 'T', position: 1, meta: { note: 'N' } } }, stubs)
+    const fieldRows = walk(fieldHost).filter(n => n.tag === 'div' && n.props.class === 'fr-item').map(shapeOf)
+    fieldRows.forEach((s, i) => printRow('字段行' + i, s))
+    if (fieldRows.length !== 4) fail('字段行数 = ' + fieldRows.length + '（期望 3 字段 + 1 嵌套）')
+    else pass('字段行按 schema 渲染（含嵌套 object）')
+
+    // ② NodeEditDialog 里的 display 行（手写）必须与字段行同构
+    const NodeEditDialog = await loadComponent('/pages/NodeEditDialog.vue')
+    const dialogHost = mount(NodeEditDialog.default || NodeEditDialog, {
+        visible: true, isEdit: false, typeName: 'article',
+        defs: { article: { fields } },
+    }, stubs.concat(['el-drawer']))
+    const dialogRows = walk(dialogHost).filter(n => n.tag === 'div' && n.props.class === 'fr-item')
+    if (dialogRows.length !== 1) fail('节点表单里 .fr-item 行数 = ' + dialogRows.length + '（display 行应恰好 1 行）')
+    else {
+        const display = shapeOf(dialogRows[0])
+        printRow('display', display)
+        const ref = fieldRows.find(r => r.control === 'el-input' && r.texts[1] === 'text')
+        if (display.texts[0] !== '显示' || display.texts[1] !== 'display') fail('display 行 label/kind 不对')
+        else if (display.classes !== ref.classes || display.control !== ref.control || noReq(display) !== noReq(ref)) {
+            fail('display 行结构与字段行不一致（应与 ' + JSON.stringify(ref) + ' 同构）')
+        } else if (display.spanClasses.indexOf('fr-req') < 0) fail('display 为必填, 应带 * 标记')
+        else pass('节点表单 display 行与字段行同构（label/kind/必填 + 同一控件）')
+    }
 
     // ② nodes.vue 分类过滤: 选中/清除都要显式 setCurrentKey（el-tree 只在初始化读 current-node-key）
     const NodesPage = await loadComponent('/pages/nodes.vue')

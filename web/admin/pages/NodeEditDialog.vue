@@ -2,10 +2,18 @@
     <el-drawer append-to-body v-model="visibleModel" :title="isEdit ? '编辑 #' + node.id : '新建 ' + (typeName || '')"
                size="60%" :close-on-click-modal="false" :close-on-press-escape="false">
         <el-form>
-            <!-- display 也走构建器: 字段行结构（label/kind/必填）与下面字段完全一致 -->
+            <!-- 显示名是节点列, 不是类型字段（不由 schema 渲染），所以这里手写一份行结构 —
+                 必须与 FieldRenderer 的字段行一致（.fr-item > .fr-label + 控件）;
+                 _tools/check.js render 会比对两者, 改行结构时两边一起改。 -->
+            <div class="fr-item">
+                <div class="fr-label">
+                    <span>显示</span>
+                    <span class="fr-kind">display</span>
+                    <span class="fr-req">*</span>
+                </div>
+                <el-input v-model="form.display" placeholder="公共显示文本（列表/搜索/导航显示）" />
+            </div>
             <field-renderer v-if="def" :fields="def.fields" v-model="form.fields"
-                            :display="form.display" show-display
-                            @update:display="form.display = $event"
                             :ref-preset="form.refPreset || {}" :defs="defs" :editing="isEdit" />
         </el-form>
         <template #footer>
