@@ -141,3 +141,33 @@ func TestUpdateAndDeleteEntry(t *testing.T) {
 		t.Fatalf("归档后不该再读到: %#v, %v", deleted, err)
 	}
 }
+
+// 站点自建写入可以补客户端提交不了的默认字段：写入口不做字段白名单比对
+// （那个集合只在框架自己解码时才存在）。规则只负责身份 + 加工。
+func TestWriteEntryKeepsSiteDefaults(t *testing.T) {
+	site, _ := maskTestSite(t, func(site *Site, _ *atomic.Int32) {
+		site.WriteRule(WriteCreate, "article", func(ctx *CmsCtx, node *core.Node, allow *core.List[string]) error {
+			if ctx.Actor().Kind != ActorAPIKey {
+				return Unauthorized("请先登录")
+			}
+			allow.Append("title") // 只放行客户端字段 title
+			return nil
+		})
+	})
+	ctx := maskCtx(site)
+	ctx.SetActor(Actor{Kind: ActorAPIKey})
+
+	created, err := ctx.CreateNode(&core.Node{
+		Type: "article", Display: "站点补的标题",
+		Fields: core.Fields{
+			"title": "客户端标题", // 客户端提交的
+			"state": "draft", // 站点补的默认值（规则没放行、客户端不许提交）
+		},
+	})
+	if err != nil {
+		t.Fatalf("站点补的默认字段不该被规则拒绝: %v", err)
+	}
+	if created.Fields["title"] != "客户端标题" || created.Fields["state"] != "draft" {
+		t.Fatalf("字段被改动: %#v", created.Fields)
+	}
+}

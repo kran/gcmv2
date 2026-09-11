@@ -42,6 +42,7 @@ types:
   article:
     fields:
       - { name: title, kind: text }
+      - { name: state, kind: select, options: [draft, published] }
 `
 	if err := os.WriteFile(filepath.Join(dir, "types.yaml"), []byte(typesYAML), 0o644); err != nil {
 		t.Fatal(err)
