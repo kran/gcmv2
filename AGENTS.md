@@ -31,3 +31,6 @@ if err != nil {
 - 简单直接、最低魔法（fail-loud 哲学）
 - 新类型同类放一起、独立文件（每 kind 一个文件）
 - 用 cast 容错取值（字段类型多变——不裸断言）
+- 改了 `web/admin/*.vue` 后跑 `node web/admin/_tools/check.js`（编译）与
+  `node web/admin/_tools/check.js render`（渲染/交互回归）——后台无构建步骤，
+  只有这里能拦住模板与结构性回归
