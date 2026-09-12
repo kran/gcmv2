@@ -16,7 +16,7 @@ const testTypesYAML = `
 types:
   category:
     capabilities:
-      searchable: { fields: [display, name] }
+      searchable: { fields: [name] }
       addressable: { field: slug, unique: global }
       publication: { field: publication_state, draft: draft, published: published }
       tree: { parent: parent, order: position }
@@ -30,14 +30,14 @@ types:
       - { name: children, kind: "ref[]", to: category }
   person:
     capabilities:
-      searchable: { fields: [display, name] }
+      searchable: { fields: [name] }
       publication: { field: publication_state, draft: draft, published: published }
     fields:
       - { name: name, kind: text }
       - { name: publication_state, kind: select, options: [draft, published], default: draft }
   article:
     capabilities:
-      searchable: { fields: [display, title, body] }
+      searchable: { fields: [title, body] }
       addressable: { field: slug, unique: global }
       publication: { field: publication_state, draft: draft, published: published }
     fields:

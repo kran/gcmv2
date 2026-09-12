@@ -4,6 +4,7 @@
 
 ### Breaking changes
 
+- `searchable.fields` takes type fields only. `display` is a node column that is always indexed (its own FTS column, highest bm25 weight), so listing it was a no-op that mostly taught the wrong thing; it is now rejected by the usual "field is not defined" check. Remove it from every `types.yaml`.
 - `web.ReadRule` takes a fourth parameter, `*core.List[string]`: a read rule now declares both the row range and the fields the actor must not see. Existing rules add one ignored parameter.
 
 ### Added
@@ -24,6 +25,7 @@
 
 ### Fixed
 
+- A node whose declared searchable fields were all empty was left out of the index entirely, so it could not be found by its own `display`. The display column is now written whenever there is a label, which is what the column is for (a member with only a name is searchable again).
 - The render error for a missing template named the templates directory instead of the candidates it looked for.
 
 ### Changed

@@ -109,10 +109,9 @@ func (t *Types) validateTypeConfig(typeName string, td TypeDef) error {
 		if len(searchable.Fields) == 0 {
 			return fmt.Errorf("types: type %q: searchable.fields required", typeName)
 		}
+		// display 不在这里: 它是节点列(保留字段名, 不可声明为类型字段), 总是可搜;
+		// 列进来会走通用校验 "field not defined"。
 		for _, name := range searchable.Fields {
-			if name == "display" {
-				continue
-			}
 			f, err := field(name)
 			if err != nil {
 				return err

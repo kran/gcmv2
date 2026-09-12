@@ -28,7 +28,7 @@ types:
       - { name: title, kind: text }
   guestbook:
     capabilities:
-      searchable: { fields: [display, title] }
+      searchable: { fields: [title] }
     fields:
       - { name: title, kind: text }
 `

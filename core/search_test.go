@@ -173,7 +173,35 @@ func TestSearchableText(t *testing.T) {
 	service := newFilterSvc(t)
 	node := &Node{Type: "article", Display: "标题", Fields: Fields{"body": "正文", "authors": []any{5}}}
 	text := service.searchableText(node)
-	if !strings.Contains(text, "标题") || !strings.Contains(text, "正文") || strings.Contains(text, "5") {
+	if !strings.Contains(text, "正文") || strings.Contains(text, "5") {
 		t.Fatalf("searchableText: %q", text)
+	}
+	// display 不进 body_text: 它由 nodes_fts 的 display 列承载（bm25 权重最高），
+	// 所以既不需要也不允许写进 searchable.fields。
+	if strings.Contains(text, "标题") {
+		t.Fatalf("display 不该进 body_text: %q", text)
+	}
+}
+
+// display 是节点列, 索引时无条件进 FTS 的 display 列 —— 不必声明, 也搜得到。
+func TestSearchFindsDisplayWithoutDeclaring(t *testing.T) {
+	const label = "商会观察"
+	service := newFilterSvc(t)
+	if _, err := service.CreateNode(t.Context(), &Node{
+		Type: "article", Display: label, Fields: Fields{"publication_state": "published"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// display 只在 display 列里（searchable.fields 是 [title, body], 都没填）
+	_, total, err := searchOneType(t, service, label, "article", PolicyScope(gquery.EQ(
+		gquery.Field("publication_state"), "published")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 {
+		t.Fatalf("按 display 搜不到（display 列应默认进索引）: total=%d", total)
+	}
+	if text := service.searchableText(&Node{Type: "article", Display: label}); text != "" {
+		t.Fatalf("display 不该进 body_text: %q", text)
 	}
 }

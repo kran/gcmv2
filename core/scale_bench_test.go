@@ -41,7 +41,7 @@ types:
       - { name: parent, kind: ref, to: category }
   article:
     capabilities:
-      searchable: { fields: [display, title, body] }
+      searchable: { fields: [title, body] }
       addressable: { field: slug, unique: global }
       publication: { field: publication_state, draft: draft, published: published }
     constraints:

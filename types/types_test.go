@@ -12,7 +12,7 @@ const validYAML = `
 types:
   article:
     capabilities:
-      searchable: { fields: [display, body] }
+      searchable: { fields: [body] }
     fields:
       - { name: body, kind: richtext, required: true }
       - { name: cover, kind: upload-image }
@@ -525,7 +525,7 @@ func TestCapabilitiesDefaultsAndImmutable(t *testing.T) {
 types:
   article:
     capabilities:
-      searchable: { fields: [display, title] }
+      searchable: { fields: [title] }
       addressable: { field: slug, unique: global }
       publication: { field: state, draft: draft, published: published }
     constraints:

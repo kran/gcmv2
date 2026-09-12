@@ -16,7 +16,7 @@ GCM_SCALE=1000000 GCM_SCALE_BULK=1 go test -run TestScale -v -timeout 90m ./core
 
 CMS 形态，避免误读数字：分类 1/200 比例（最多 2000 个，含三层 parent 树）、文章为 主体，
 每篇 ~1.5KB 中文正文 + title/excerpt/position/publish_time/views + 一个 `ref[]` 分类，
-`searchable: [display, title, body]`、`addressable: {field: slug}`、`publication` 齐全，
+`searchable: [title, body]`（display 天生可搜，不必声明）、`addressable: {field: slug}`、`publication` 齐全，
 并声明 `indexes: [[publication_state, publish_time]]`。写入走真实 `CreateNode`（含边与 FTS 同步）。
 
 ## 结果（p50，本机 macOS + SSD）

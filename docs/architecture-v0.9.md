@@ -211,7 +211,8 @@ Compiler 不根据 `number`、`timestamp`、`select` 等具体名字推断能力
 
 Type 选择启用的通用行为：
 
-- `searchable`：哪些字段进入全文索引。
+- `searchable`：哪些**类型字段**进入全文索引的正文列。`display` 不在这里 —— 它是节点列，
+  索引时总是写进 `nodes_fts` 的 display 列（bm25 权重最高），列进来会走通用校验报错。
 - `addressable`：哪个 slug 字段提供全局地址。
 - `publication`：哪个字段及哪些值表达草稿/发布。
 - `authentication`：该 Type 是否可以成为认证 Principal。

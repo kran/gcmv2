@@ -135,7 +135,8 @@ type ftsIndex struct {
 // NewFTSIndex 建默认检索引擎（FTS5 表由迁移 00002 创建）。
 func NewFTSIndex(svc *Service) SearchIndex { return &ftsIndex{svc: svc} }
 
-// searchableText 只拼接 searchable.fields 显式声明的值。
+// searchableText 只拼接 searchable.fields 声明的类型字段值。
+// display 不在这里: 它是节点列, 索引时总是写进 nodes_fts 的 display 列（权重最高）。
 func (s *Service) searchableText(n *Node) string {
 	capability, ok := s.types.Searchable(n.Type)
 	if !ok {
@@ -143,10 +144,6 @@ func (s *Service) searchableText(n *Node) string {
 	}
 	parts := make([]string, 0, len(capability.Fields))
 	for _, field := range capability.Fields {
-		if field == "display" {
-			parts = append(parts, n.Display)
-			continue
-		}
 		value, ok := n.Fields[field].(string)
 		if ok && value != "" {
 			parts = append(parts, value)
@@ -157,9 +154,10 @@ func (s *Service) searchableText(n *Node) string {
 
 // Sync upsert 索引（rowid = node id）。
 func (f *ftsIndex) Sync(tx *dba.SQL, n *Node) error {
+	display := bigram(n.Display)
 	body := bigram(f.svc.searchableText(n))
-	if body == "" {
-		// 无可搜文本: 不索引（也清残留）
+	if display == "" && body == "" {
+		// 连标签都没有: 不索引（也清残留）
 		return f.Delete(tx, n.ID)
 	}
 	// FTS5 虚拟表不支持 UPSERT: 先删后插（同事务, 原子）
@@ -168,7 +166,7 @@ func (f *ftsIndex) Sync(tx *dba.SQL, n *Node) error {
 	}
 	if _, err := tx.Add(
 		`INSERT INTO nodes_fts (rowid, type, display, body_text) VALUES (#{1}, #{2}, #{3}, #{4})`,
-		n.ID, n.Type, bigram(n.Display), body).Exec(); err != nil {
+		n.ID, n.Type, display, body).Exec(); err != nil {
 		return fmt.Errorf("core: fts sync: %w", err)
 	}
 	return nil

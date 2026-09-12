@@ -34,7 +34,7 @@ types:
       - { name: name, kind: text }
   member:
     capabilities:
-      searchable: { fields: [display, name] }
+      searchable: { fields: [name] }
     fields:
       - { name: name, kind: text }
       - { name: phone, kind: text }

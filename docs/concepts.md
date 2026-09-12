@@ -85,7 +85,7 @@ upload-image    upload-file     gallery
 
 | 能力 | 声明内容 | 影响 |
 |---|---|---|
-| `searchable` | fields 列表 | 进 FTS 索引（可见性由查询时 Policy 决定） |
+| `searchable` | fields 列表（类型字段） | 进 FTS 的正文列；`display` 是节点列，永远在 display 列里（不必列、不许列） |
 | `addressable` | field（必须 slug kind）+ unique | `GetNodeByAddress`、`/node/{address}`、树 byAddress |
 | `publication` | field + draft/published 取值 | `IsPublished`、**公网读默认策略**、published_only 过滤 |
 | `authentication` | 布尔 | 该 Type 可成为认证主体（Realm 指向它） |
