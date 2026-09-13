@@ -2,13 +2,13 @@
   <div class="nodes-page">
     <!-- 左侧 type 列表（类型定义驱动, 动态） -->
     <div class="nodes-tree">
-      <div class="nodes-tree-header">
+      <!--<div class="nodes-tree-header">
         <span style="font-size:14px;">类型</span>
         <el-button link type="primary" size="small" @click="loadTypes">刷新</el-button>
-      </div>
+      </div>-->
       <div class="type-list">
-        <template v-for="g in typeGroups" :key="g.name || '__ungrouped'">
-          <div v-if="g.name" class="type-group">{{ g.name }}</div>
+        <template v-for="(g, gi) in typeGroups" :key="gi">
+          <div class="type-group">{{ g.name }}</div>
           <div v-for="item in g.items" :key="item.name"
                class="type-item" :class="{ active: query.type === item.name }"
                @click="selectType(item.name)">
@@ -154,7 +154,8 @@ export default {
             const admin = (this.typeDefs[name] || {}).admin || {}
             return admin.label || name
         },
-        // 分组只作用于左侧类型列表；没填 group 的排在最前
+        // 分组只作用于左侧类型列表：没填 group 的归到最前面的"未分组"，
+        // 顺序一律按类型键（typeNames 已是键序），组按首次出现。
         buildTypeGroups() {
             const ungrouped = []
             const groups = []
@@ -172,10 +173,7 @@ export default {
                 }
                 byName[admin.group].items.push(item)
             })
-            const byLabel = (a, b) => a.label.localeCompare(b.label, 'zh')
-            ungrouped.sort(byLabel)
-            groups.forEach(g => g.items.sort(byLabel))
-            return ungrouped.length ? [{ name: '', items: ungrouped }].concat(groups) : groups
+            return ungrouped.length ? [{ name: '未分组', items: ungrouped }].concat(groups) : groups
         },
         // 标题链接 → 编辑对话框
         openEdit(node) {
@@ -363,7 +361,7 @@ export default {
 }
 .type-list { display: flex; flex-direction: column; gap: 0; }
 /* 分组标题：文字后面接一条贯穿线（legend 的感觉），左对齐、不画方框 */
-.type-group { display: flex; align-items: center; gap: 8px; margin: 14px 0 4px; padding: 0 16px; font-size: 11px; color: #a19f9d; }
+.type-group { display: flex; align-items: center; gap: 8px; margin: 14px 0 4px; font-size: 11px; color: #a19f9d; }
 .type-group::after { content: ''; flex: 1; height: 1px; background: #edebe9; }
 .type-group:first-child { margin-top: 2px; }
 .type-item {
