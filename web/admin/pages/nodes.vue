@@ -14,6 +14,7 @@
                @click="selectType(item.name)">
             <el-icon :size="15"><component :is="typeIcon(item.name)" /></el-icon>
             <span>{{ item.label }}</span>
+            <span v-if="item.label !== item.name" class="type-key">{{ item.name }}</span>
           </div>
         </template>
       </div>
@@ -371,6 +372,7 @@ export default {
 .type-item:hover { background: #f3f2f1; }
 .type-item.active { background: #edebe9; border-left: 2px solid #0277d4; color: #242424; font-weight: 600; }
 .type-item.active:hover { background: #e1dfdd; }
+.type-key { margin-left: 6px; font-size: 11px; font-weight: 400; color: #a19f9d; }
 
 /* 树过滤按钮: link 下划线样式（非按钮框 — 看着轻） */
 .filter-link {

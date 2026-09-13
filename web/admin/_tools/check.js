@@ -242,6 +242,8 @@ async function checkRender() {
         fail('admin.label 没有生效')
     } else if (!grouped[0].items.some(i => i.name === 'member' && i.label === 'member')) {
         fail('admin.label 缺省没有回退类型名')
+    } else if (!grouped[1].items.every(i => i.name && i.label)) {
+        fail('列表项要同时带上类型键与显示名（模板在名字后附英文键）')
     } else {
         pass('类型列表: 未分组在最前 + 分组顺序 + label 回退')
     }
