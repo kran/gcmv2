@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased — v0.9.1
+## Unreleased — v0.9.3
+
+> 本节从 v0.9.0 之后一直累积，其中大部分已随 v0.9.1 / v0.9.2 发布；分节留待正式发布时整理。
 
 ### Breaking changes
 
