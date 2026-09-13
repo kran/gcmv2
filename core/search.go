@@ -219,33 +219,62 @@ func (f *ftsIndex) presentTokens(ctx context.Context, bq string) ([]string, erro
 	return kept, nil
 }
 
-// countMatches 统计命中数（按 limit 截断, 调用方按"至少这么多"渲染）。
-func (f *ftsIndex) countMatches(ctx context.Context, match string, scope dba.Node, limit int) (int64, error) {
-	where := dba.Expr(`nodes_fts MATCH #{1} AND n.archived_at IS NULL AND #{2}`, match, scope)
-	var (
-		totalPtr *int64
-		err      error
-	)
-	if limit > 0 {
-		totalPtr, err = f.svc.db.WithCtx(ctx).Add(`SELECT COUNT(1) FROM (SELECT n.id FROM nodes_fts
-			JOIN nodes n ON n.id = nodes_fts.rowid WHERE #{1} LIMIT #{2})`,
-			where, limit+1).FetchOne[int64]()
-	} else {
-		totalPtr, err = f.svc.db.WithCtx(ctx).Add(
-			`SELECT COUNT(1) FROM nodes_fts JOIN nodes n ON n.id = nodes_fts.rowid WHERE #{1}`,
-			where).FetchOne[int64]()
-	}
+// ftsWhere 一次检索的行范围片段: 命中集合 ∩ 调用方给的目标范围。
+// 片段自带的 #{1}/#{2} 在拼进外层语句时整体变成一个占位符。
+func ftsWhere(match string, scope dba.Node) dba.Node {
+	return dba.Expr(`nodes_fts MATCH #{1} AND n.archived_at IS NULL AND #{2}`, match, scope)
+}
+
+// countMatches 统计命中数。limit > 0 时截断（子查询里的 LIMIT 让扫描提前结束,
+// 调用方按"至少这么多"渲染）; limit == 0 精确计数。
+// 注意 dba 的 #{n} 按片段各自编号: 每个 Add/AddIf 都从 #{1} 起算。
+func (f *ftsIndex) countMatches(ctx context.Context, where dba.Node, limit int) (int64, error) {
+	total, err := f.svc.db.WithCtx(ctx).
+		Add(`SELECT COUNT(1) FROM (SELECT n.id FROM nodes_fts
+			JOIN nodes n ON n.id = nodes_fts.rowid WHERE #{1}`, where).
+		AddIf(limit > 0, ` LIMIT #{1}`, limit+1).
+		Add(`)`).
+		FetchOne[int64]()
 	if err != nil {
 		return 0, fmt.Errorf("core: search: %w", err)
 	}
-	var total int64
-	if totalPtr != nil {
-		total = *totalPtr
+	if total == nil {
+		return 0, nil
 	}
-	if limit > 0 && total > int64(limit) {
-		total = int64(limit)
+	if limit > 0 && *total > int64(limit) {
+		return int64(limit), nil
 	}
-	return total, nil
+	return *total, nil
+}
+
+// resolveMatch 决定这次检索用哪个 MATCH 表达式, 并连同行范围一起返回。
+// 三级, 逐级放宽, 命中数随 match 一起变:
+//  1. 精确子串 —— 整个查询是一个 phrase（连续 bigram = 原文子串）
+//  2. 丢掉语料里不存在的 bigram 后 AND —— "农业著名" → 农业 AND 著名
+//  3. OR —— 接缝 bigram 恰好存在时 AND 会太严, 宁可多给, 不要空手
+func (f *ftsIndex) resolveMatch(ctx context.Context, bq string, scope dba.Node, limit int) (dba.Node, int64, error) {
+	where := ftsWhere(ftsPhrase(bq), scope)
+	total, err := f.countMatches(ctx, where, limit)
+	if err != nil || total > 0 {
+		return where, total, err
+	}
+	kept, err := f.presentTokens(ctx, bq)
+	if err != nil {
+		return where, 0, err
+	}
+	if len(kept) > 0 {
+		where = ftsWhere(strings.Join(kept, " AND "), scope)
+		if total, err = f.countMatches(ctx, where, limit); err != nil || total > 0 {
+			return where, total, err
+		}
+	}
+	if alt := ftsOr(bq); alt != "" {
+		where = ftsWhere(alt, scope)
+		if total, err = f.countMatches(ctx, where, limit); err != nil {
+			return where, 0, err
+		}
+	}
+	return where, total, nil
 }
 
 // Search performs bm25 ranking after applying every target's mandatory scope.
@@ -263,37 +292,11 @@ func (f *ftsIndex) Search(ctx context.Context, search SearchPlan) ([]Node, int64
 	if limit == 0 {
 		limit = DefaultSearchCountLimit
 	}
-	// 先按精确子串查: 整个查询作为一个 phrase（连续 bigram = 原文子串）。
-	match := ftsPhrase(bq)
-	total, err := f.countMatches(ctx, match, scope, limit)
+	// 命中数决定放宽到哪一级（见 resolveMatch）; where 与它配套, 直接给下面的取行用。
+	where, total, err := f.resolveMatch(ctx, bq, scope, limit)
 	if err != nil {
 		return nil, 0, err
 	}
-	// 子串没命中就放宽到"同时含有这几个词": 查询切出来的 bigram 会跨词边界
-	// （"农业著名" → 农业/业著/著名）, 而"业著"这种接缝不是词 —— 它在语料里根本不存在,
-	// 让它参与匹配只会把结果清零。先丢掉语料里不存在的 bigram, 剩下的按 AND 查。
-	if total == 0 {
-		kept, err := f.presentTokens(ctx, bq)
-		if err != nil {
-			return nil, 0, err
-		}
-		if len(kept) > 0 {
-			match = strings.Join(kept, " AND ")
-			if total, err = f.countMatches(ctx, match, scope, limit); err != nil {
-				return nil, 0, err
-			}
-		}
-		// 接缝 bigram 确实存在时 AND 会太严（它只是恰好出现过）—— 宁可多给, 不要空手。
-		if total == 0 {
-			if alt := ftsOr(bq); alt != "" {
-				match = alt
-				if total, err = f.countMatches(ctx, match, scope, limit); err != nil {
-					return nil, 0, err
-				}
-			}
-		}
-	}
-	where := dba.Expr(`nodes_fts MATCH #{1} AND n.archived_at IS NULL AND #{2}`, match, scope)
 
 	rows, err := f.svc.db.WithCtx(ctx).Add(
 		`SELECT n.* FROM nodes_fts JOIN nodes n ON n.id = nodes_fts.rowid

@@ -268,3 +268,19 @@ func TestSearchTreatsQuotesAsLiteral(t *testing.T) {
 		t.Fatalf(`quoted query: total=%d err=%v`, total, err)
 	}
 }
+
+// CountExact 走的是不带 LIMIT 的计数分支（countMatches 里 AddIf 的 false 一侧）。
+func TestSearchExactCount(t *testing.T) {
+	service := newFilterSvc(t)
+	service.CreateNode(t.Context(), &Node{Type: "article", Display: "t",
+		Fields: Fields{"title": "人工智能", "body": "产业路径", "publication_state": "published"}})
+	rows, total, err := service.Search(t.Context(), SearchQuery{
+		Text:       "人工智能",
+		Targets:    []SearchTarget{{Type: "article", Scope: BypassPolicy()}},
+		CountLimit: CountExact,
+		Page:       gquery.Page{Number: 1, Size: 10},
+	})
+	if err != nil || total != 1 || len(rows) != 1 {
+		t.Fatalf("exact count: rows=%d total=%d err=%v", len(rows), total, err)
+	}
+}
