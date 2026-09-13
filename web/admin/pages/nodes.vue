@@ -362,8 +362,8 @@ export default {
     padding: 16px 0 16px 16px;
 }
 .type-list { display: flex; flex-direction: column; gap: 0; }
-.type-group { padding: 12px 16px 4px; font-size: 12px; color: #8a8886; }
-.type-group:first-child { padding-top: 0; }
+.type-group { margin-top: 10px; padding: 9px 16px 4px; font-size: 11px; color: #a19f9d; border-top: 1px solid #f3f2f1; }
+.type-group:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
 .type-item {
     display: flex; align-items: center; gap: 8px;
     padding: 7px 16px; border-radius: 0; cursor: pointer;
@@ -372,7 +372,7 @@ export default {
 .type-item:hover { background: #f3f2f1; }
 .type-item.active { background: #edebe9; border-left: 2px solid #0277d4; color: #242424; font-weight: 600; }
 .type-item.active:hover { background: #e1dfdd; }
-.type-key { margin-left: 6px; font-size: 11px; font-weight: 400; color: #a19f9d; }
+.type-key { font-size: 11px; font-weight: 400; color: #a19f9d; }
 
 /* 树过滤按钮: link 下划线样式（非按钮框 — 看着轻） */
 .filter-link {
