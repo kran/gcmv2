@@ -79,7 +79,10 @@ func (s *Service) SetSearchIndex(idx SearchIndex) {
 
 // bigram CJK 连续段 → 2 字符滑窗, 其余（英文/数字）保留原词:
 //
-//	"人工智能与AI" → "人工 工智 智能 与AI"（"与AI" 含 CJK+拉丁混合, 整段不切）
+//	"人工智能与AI" → "人工 工智 智能 能与 AI"
+//
+// 与 也在 CJK 区内, 所以它跟前面的"能"组成跨边界 bigram（这类噪音是 bigram 方案的固有代价）;
+// 拉丁段自成词元, "AI" 能单独命中。非 CJK 段原样保留: "-AI" → "-AI"。
 //
 // 查询侧同样处理; 多字查询用 phrase（连续 bigram = 原文子串, 精确）。
 func bigram(s string) string {
