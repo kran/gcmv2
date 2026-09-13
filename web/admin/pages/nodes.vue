@@ -7,12 +7,15 @@
         <el-button link type="primary" size="small" @click="loadTypes">刷新</el-button>
       </div>
       <div class="type-list">
-        <div v-for="t in typeNames" :key="t"
-             class="type-item" :class="{ active: query.type === t }"
-             @click="selectType(t)">
-          <el-icon :size="15"><component :is="typeIcon(t)" /></el-icon>
-          <span>{{ t }}</span>
-        </div>
+        <template v-for="g in typeGroups" :key="g.name || '__ungrouped'">
+          <div v-if="g.name" class="type-group">{{ g.name }}</div>
+          <div v-for="item in g.items" :key="item.name"
+               class="type-item" :class="{ active: query.type === item.name }"
+               @click="selectType(item.name)">
+            <el-icon :size="15"><component :is="typeIcon(item.name)" /></el-icon>
+            <span>{{ item.label }}</span>
+          </div>
+        </template>
       </div>
     </div>
 
@@ -48,7 +51,7 @@
         <div style="flex:1;"></div> <!-- 右侧靠拢 -->
         <el-button size="small" :loading="rebuilding" @click="rebuildSearch"><el-icon><Refresh /></el-icon>重建索引</el-button>
         <el-button type="primary" size="small" :disabled="!query.type" @click="createVisible = true">
-          <el-icon><Plus /></el-icon>新建 {{ query.type || '' }}
+          <el-icon><Plus /></el-icon>新建 {{ query.type ? typeLabel(query.type) : '' }}
         </el-button>
       </div>
 
@@ -134,6 +137,10 @@ export default {
         }
     },
     computed: {
+        // 左侧类型列表：没填 admin.group 的排最前（不归入"其他"），其余按首次出现的顺序
+        typeGroups() {
+            return this.buildTypeGroups()
+        },
         adminColumns() {
             const def = this.typeDefs[this.query.type] || {}
             return ((def.admin && def.admin.columns) || []).filter(c => !['id', 'display', 'updated_at'].includes(c))
@@ -141,6 +148,34 @@ export default {
     },
     async mounted() { await this.loadTypes() },
     methods: {
+        // 类型的中文名：admin.label 缺省回退类型名（配置键），没填的 types.yaml 照常工作
+        typeLabel(name) {
+            const admin = (this.typeDefs[name] || {}).admin || {}
+            return admin.label || name
+        },
+        // 分组只作用于左侧类型列表；没填 group 的排在最前
+        buildTypeGroups() {
+            const ungrouped = []
+            const groups = []
+            const byName = {}
+            this.typeNames.forEach(name => {
+                const admin = (this.typeDefs[name] || {}).admin || {}
+                const item = { name, label: admin.label || name }
+                if (!admin.group) {
+                    ungrouped.push(item)
+                    return
+                }
+                if (!byName[admin.group]) {
+                    byName[admin.group] = { name: admin.group, items: [] }
+                    groups.push(byName[admin.group])
+                }
+                byName[admin.group].items.push(item)
+            })
+            const byLabel = (a, b) => a.label.localeCompare(b.label, 'zh')
+            ungrouped.sort(byLabel)
+            groups.forEach(g => g.items.sort(byLabel))
+            return ungrouped.length ? [{ name: '', items: ungrouped }].concat(groups) : groups
+        },
         // 标题链接 → 编辑对话框
         openEdit(node) {
             this.editNode = node
@@ -326,6 +361,8 @@ export default {
     padding: 16px 0 16px 16px;
 }
 .type-list { display: flex; flex-direction: column; gap: 0; }
+.type-group { padding: 12px 16px 4px; font-size: 12px; color: #8a8886; }
+.type-group:first-child { padding-top: 0; }
 .type-item {
     display: flex; align-items: center; gap: 8px;
     padding: 7px 16px; border-radius: 0; cursor: pointer;

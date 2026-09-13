@@ -218,6 +218,33 @@ async function checkRender() {
     if (selected.key !== 9 || selected.filter !== '(in ->category [9 10])') fail('选中分类没有同步 el-tree 高亮/过滤串')
     else if (cleared.keys[1] !== null || cleared.filter !== '' || cleared.active !== 0 || cleared.ids !== null) fail('点“全部”后旧分类高亮未重置')
     else pass('分类过滤: 选中与清除都重置了 el-tree 高亮')
+
+    // ③ 左侧类型列表: 没填 admin.group 的排最前（不归入"其他"），组按首次出现，label 缺省回退类型名
+    const grouped = methods.buildTypeGroups.call({
+        typeNames: ['article', 'industry', 'event', 'member', 'category'],
+        typeDefs: {
+            article: { admin: { label: '文章', group: '内容' } },
+            industry: { admin: { label: '行业', group: '分类字典' } },
+            event: { admin: { label: '活动' } },        // 没填 group
+            member: { admin: {} },                       // 连 label 都没填
+            category: { admin: { label: '分类', group: '分类字典' } },
+        },
+    })
+    const shape = grouped.map(g => (g.name || '(未分组)') + ':' + g.items.map(i => i.label).join('/'))
+    console.log('       ' + JSON.stringify(shape))
+    const ungrouped = grouped[0]
+    const first = ungrouped && ungrouped.name === '' ? ungrouped.items.map(i => i.name) : []
+    if (first.length !== 2 || !first.includes('event') || !first.includes('member')) {
+        fail('没填 group 的类型没有排在最前')
+    } else if (grouped[1].name !== '内容' || grouped[2].name !== '分类字典' || grouped.length !== 3) {
+        fail('分组顺序/数量不对（应按首次出现）')
+    } else if (grouped[1].items[0].label !== '文章') {
+        fail('admin.label 没有生效')
+    } else if (!grouped[0].items.some(i => i.name === 'member' && i.label === 'member')) {
+        fail('admin.label 缺省没有回退类型名')
+    } else {
+        pass('类型列表: 未分组在最前 + 分组顺序 + label 回退')
+    }
     return failed
 }
 

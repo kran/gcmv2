@@ -531,7 +531,7 @@ types:
     constraints:
       unique: [[external_id]]
       indexes: [[state, position]]
-    admin: { view: list, columns: [slug, state, updated_at] }
+    admin: { view: list, label: 文章, group: 内容, columns: [slug, state, updated_at] }
     fields:
       - { name: title, kind: text, required: true }
       - { name: slug, kind: slug }
@@ -557,6 +557,14 @@ types:
 	}
 	if !ts.IsPublished("article", map[string]any{"state": "published"}) {
 		t.Fatal("published capability did not match")
+	}
+	// admin 段的后台展示名与分组（空 = 由后台回退成类型名/排在最前）
+	admin := ts.Defs()["article"].Admin
+	if admin.Label != "文章" || admin.Group != "内容" || admin.View != "list" {
+		t.Fatalf("admin = %#v", admin)
+	}
+	if empty := ts.Defs()["article"].Admin.Columns; len(empty) != 3 {
+		t.Fatalf("admin columns = %#v", empty)
 	}
 	if got := ts.Address("article", map[string]any{"slug": "hello"}); got != "hello" {
 		t.Fatalf("address = %q", got)

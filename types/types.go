@@ -83,7 +83,11 @@ const (
 
 // AdminView 仅影响后台展示，不参与数据校验和公开策略。
 type AdminView struct {
-	View    string   `yaml:"view,omitempty" json:"view,omitempty"`
+	View string `yaml:"view,omitempty" json:"view,omitempty"`
+	// Label 后台显示名; 空 = 回退类型名（配置键）。字段级已有 FieldDef.Label，这里管的是"类型"。
+	Label string `yaml:"label,omitempty" json:"label,omitempty"`
+	// Group 后台"内容管理"左侧类型列表的分组; 空 = 排在最前（不归入任何分组）。
+	Group   string   `yaml:"group,omitempty" json:"group,omitempty"`
 	Icon    string   `yaml:"icon,omitempty" json:"icon,omitempty"`
 	Columns []string `yaml:"columns,omitempty" json:"columns,omitempty"`
 }
