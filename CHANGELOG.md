@@ -17,6 +17,7 @@
 ### Behaviour changes
 
 - `ListQuery.CountLimit` and `SearchQuery.CountLimit` bound what `total` costs. `0` uses the default (10000 for lists, 1000 for search) and saturates `total` at that limit, `core.CountExact` keeps the exact count, and a positive value sets an explicit cap. Callers that page treat `total` as "at least this many"; callers that need an exact total on a large table must ask for it.
+- Search reads the query as words when the exact substring finds nothing. CJK is indexed as bigrams, so `农业著名` expands to 农业/业著/著名 — and 业著 is a seam between two words that occurs nowhere, which made a phrase query for the whole string return nothing at all. The fallback is two steps: drop the bigrams the corpus does not contain and require the rest (so `农业著名` finds the pieces containing both words), and if that is still empty, OR the terms so a query whose words exist never comes back empty. Exact substring matches are tried first and behave as before.
 - Search ranks matches with bm25 over the whole match set, so a term matching most of a large table still costs proportionally to the match count. The count limit does not bound that.
 
 ### Fixed
@@ -27,6 +28,7 @@
 ### Fixed
 
 - A node whose declared searchable fields were all empty was left out of the index entirely, so it could not be found by its own `display`. The display column is now written whenever there is a label, which is what the column is for (a member with only a name is searchable again).
+- A query containing a double quote was spliced straight into the FTS5 phrase, so searching for `"` was a syntax error and the endpoint answered 500. Every term is now quote-escaped, which keeps user punctuation literal.
 - The render error for a missing template named the templates directory instead of the candidates it looked for.
 
 ### Changed

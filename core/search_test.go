@@ -205,3 +205,66 @@ func TestSearchFindsDisplayWithoutDeclaring(t *testing.T) {
 		t.Fatalf("display 不该进 body_text: %q", text)
 	}
 }
+
+// 查询切出来的 bigram 会跨词边界（"农业著名" → 农业/业著/著名）。文章里没有连续的
+// "农业著名" 时既不能整条归零, 也不能把只含一个词的算进来: 丢掉语料里不存在的 bigram
+// （"业著"是接缝, 语料里查无此词）再 AND, 得到的就是"同时含这两个词"。
+func TestSearchMatchesAllWordsWhenBigramsSpanBoundaries(t *testing.T) {
+	service := newFilterSvc(t)
+	both, _ := service.CreateNode(t.Context(), &Node{Type: "article", Display: "both",
+		Fields: Fields{"title": "农业现代化", "body": "著名学者", "publication_state": "published"}})
+	service.CreateNode(t.Context(), &Node{Type: "article", Display: "one",
+		Fields: Fields{"title": "农业发展", "body": "区域经济", "publication_state": "published"}})
+
+	// 连续子串仍然走精确路径
+	if _, total, _ := searchOneType(t, service, "农业现代", "article", BypassPolicy()); total != 1 {
+		t.Fatalf("substring: total=%d, want 1", total)
+	}
+	rows, total, err := searchOneType(t, service, "农业著名", "article", BypassPolicy())
+	if err != nil {
+		t.Fatalf("widened search: %v", err)
+	}
+	if total != 1 || len(rows) != 1 || rows[0].ID != both {
+		t.Fatalf("只该命中同时含两个词的那篇: total=%d rows=%d", total, len(rows))
+	}
+}
+
+// 接缝 bigram 恰好也出现在语料里时, AND 会太严（"农业 业著 著名" 要求三者同时有）。
+// 这时退到 OR: 宁可多给, 也不要空手。
+func TestSearchFallsBackToOrWhenBoundaryBigramExists(t *testing.T) {
+	service := newFilterSvc(t)
+	service.CreateNode(t.Context(), &Node{Type: "article", Display: "seam",
+		Fields: Fields{"title": "企业著称", "body": "区域经济", "publication_state": "published"}})
+	both, _ := service.CreateNode(t.Context(), &Node{Type: "article", Display: "both",
+		Fields: Fields{"title": "农业现代化", "body": "著名学者", "publication_state": "published"}})
+
+	rows, total, err := searchOneType(t, service, "农业著名", "article", BypassPolicy())
+	if err != nil {
+		t.Fatalf("fallback search: %v", err)
+	}
+	if total == 0 {
+		t.Fatal("退到 OR 后不该空手")
+	}
+	var found bool
+	for _, r := range rows {
+		if r.ID == both {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("同时含两个词的那篇应该在结果里: total=%d", total)
+	}
+}
+
+// 用户输入里的引号是普通字符, 不该破坏 FTS 语法（原来搜一个 " 就是 500）。
+func TestSearchTreatsQuotesAsLiteral(t *testing.T) {
+	service := newFilterSvc(t)
+	service.CreateNode(t.Context(), &Node{Type: "article", Display: "t",
+		Fields: Fields{"title": "人工智能", "body": "产业路径", "publication_state": "published"}})
+	if _, _, err := searchOneType(t, service, `"`, "article", BypassPolicy()); err != nil {
+		t.Fatalf("lone quote: %v", err)
+	}
+	if _, total, err := searchOneType(t, service, `"人工智能`, "article", BypassPolicy()); err != nil || total != 1 {
+		t.Fatalf(`quoted query: total=%d err=%v`, total, err)
+	}
+}
