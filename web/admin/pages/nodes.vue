@@ -7,7 +7,7 @@
         <el-button link type="primary" size="small" @click="loadTypes">刷新</el-button>
       </div>-->
       <div class="type-list">
-        <template v-for="(g, gi) in typeGroups" :key="gi">
+        <template v-for="g in typeGroups" :key="g.name">
           <div class="type-group">{{ g.name }}</div>
           <div v-for="item in g.items" :key="item.name"
                class="type-item" :class="{ active: query.type === item.name }"
@@ -154,26 +154,23 @@ export default {
             const admin = (this.typeDefs[name] || {}).admin || {}
             return admin.label || name
         },
-        // 分组只作用于左侧类型列表：没填 group 的归到最前面的"未分组"，
-        // 顺序一律按类型键（typeNames 已是键序），组按首次出现。
+        // 分组只作用于左侧类型列表：没填 group 的按名字并进"未分组"（站点自己叫这个名也并进来，
+        // 不做特殊处理），这一节固定排最前；组内顺序一律按类型键（typeNames 已是键序），组按首次出现。
         buildTypeGroups() {
-            const ungrouped = []
             const groups = []
             const byName = {}
             this.typeNames.forEach(name => {
                 const admin = (this.typeDefs[name] || {}).admin || {}
-                const item = { name, label: admin.label || name }
-                if (!admin.group) {
-                    ungrouped.push(item)
-                    return
+                const group = admin.group || '未分组'
+                if (!byName[group]) {
+                    byName[group] = { name: group, items: [] }
+                    groups.push(byName[group])
                 }
-                if (!byName[admin.group]) {
-                    byName[admin.group] = { name: admin.group, items: [] }
-                    groups.push(byName[admin.group])
-                }
-                byName[admin.group].items.push(item)
+                byName[group].items.push({ name, label: admin.label || name })
             })
-            return ungrouped.length ? [{ name: '未分组', items: ungrouped }].concat(groups) : groups
+            const at = groups.findIndex(g => g.name === '未分组')
+            if (at > 0) groups.unshift(groups.splice(at, 1)[0])
+            return groups
         },
         // 标题链接 → 编辑对话框
         openEdit(node) {

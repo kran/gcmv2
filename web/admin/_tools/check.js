@@ -219,9 +219,9 @@ async function checkRender() {
     else if (cleared.keys[1] !== null || cleared.filter !== '' || cleared.active !== 0 || cleared.ids !== null) fail('点“全部”后旧分类高亮未重置')
     else pass('分类过滤: 选中与清除都重置了 el-tree 高亮')
 
-    // ③ 左侧类型列表: 排序一律按类型键（typeNames 已是键序），没填 group 的归到最前的"未分组"
+    // ③ 左侧类型列表: 组内按类型键排序；没填 group 的与站点自命的"未分组"并成同一节，且排最前
     const grouped = methods.buildTypeGroups.call({
-        typeNames: ['article', 'banner', 'category', 'event', 'industry', 'member', 'supply'],
+        typeNames: ['article', 'banner', 'category', 'event', 'industry', 'member', 'page', 'supply'],
         typeDefs: {
             article: { admin: { label: '文章', group: '内容' } },
             banner: { admin: { group: '内容' } },                  // 没填 label → 回退类型键
@@ -229,14 +229,15 @@ async function checkRender() {
             event: { admin: { label: '活动' } },                   // 没填 group
             industry: { admin: { label: '行业', group: '基础数据' } },
             member: { admin: { label: '会员单位' } },              // 没填 group
+            page: { admin: { label: '单页', group: '未分组' } },    // 站点自己就叫"未分组"
             supply: { admin: { label: '供需', group: '内容' } },
         },
     })
     const shape = grouped.map(g => g.name + ':' + g.items.map(i => i.label).join('/'))
     console.log('       ' + JSON.stringify(shape))
     const keys = (g) => grouped[g] ? grouped[g].items.map(i => i.name).join() : '(缺组)'
-    if (grouped[0].name !== '未分组' || keys(0) !== 'event,member') {
-        fail('没填 group 的类型没有归到最前的"未分组"')
+    if (grouped[0].name !== '未分组' || keys(0) !== 'event,member,page') {
+        fail('"未分组"没有合并成一节并排在最前')
     } else if (grouped[1].name !== '内容' || keys(1) !== 'article,banner,supply') {
         fail('组内没有按类型键排序')
     } else if (grouped[2].name !== '基础数据' || keys(2) !== 'category,industry' || grouped.length !== 3) {
@@ -244,7 +245,7 @@ async function checkRender() {
     } else if (grouped[1].items.find(i => i.name === 'banner').label !== 'banner') {
         fail('admin.label 缺省没有回退类型名')
     } else {
-        pass('类型列表: 未分组在最前 + 组内按类型键 + label 回退')
+        pass('类型列表: 未分组合并且最前 + 组内按类型键 + label 回退')
     }
     return failed
 }
