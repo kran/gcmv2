@@ -180,8 +180,12 @@ func (f *ftsIndex) Delete(tx *dba.SQL, id int64) error {
 	return nil
 }
 
-// ftsPhrase FTS5 短语字面量。内部引号翻倍转义: 用户输入里的引号是普通字符,
-// 不该破坏查询语法（原来整个查询直接拼进双引号, 搜一个 " 就是 500）。
+// ftsPhrase 把一个词元写成 FTS5 短语字面量（内部的 " 翻倍转义 —— FTS5 的查询语言
+// 有自己的语法, 参数绑定只保护 SQL 那一层, MATCH 后面的字符串还会被 FTS5 再解析一次;
+// 官方没有转义函数, 也没有 db.quote() 之类的替代）。
+//
+// 每个词元都包成短语, 关键字和操作符因此只是普通词: AND/OR/NOT/NEAR 不会当操作符,
+// a:b 不会变成列过滤, abc* 不会变成前缀查询, 单个 " 也不再是语法错误.
 func ftsPhrase(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
 }

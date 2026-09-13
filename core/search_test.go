@@ -284,3 +284,30 @@ func TestSearchExactCount(t *testing.T) {
 		t.Fatalf("exact count: rows=%d total=%d err=%v", len(rows), total, err)
 	}
 }
+
+// 用户输入不能变成 FTS5 的语法。每个词元都被包成短语, 所以关键字/操作符只是普通词。
+func TestSearchTreatsFTSOperatorsAsTerms(t *testing.T) {
+	service := newFilterSvc(t)
+	keywords, _ := service.CreateNode(t.Context(), &Node{Type: "article", Display: "kw",
+		Fields: Fields{"title": "t", "body": "AND OR NOT NEAR", "publication_state": "published"}})
+	service.CreateNode(t.Context(), &Node{Type: "article", Display: "abc",
+		Fields: Fields{"title": "t", "body": "abc def", "publication_state": "published"}})
+
+	// AND 只当词: 命中含该词的文档, 而不是"语法错"或"命中全部"
+	if _, total, err := searchOneType(t, service, "AND", "article", BypassPolicy()); err != nil || total != 1 {
+		t.Fatalf("AND 被当成操作符: total=%d err=%v", total, err)
+	}
+	// 两个关键字当作相邻短语（不是"AND OR"这样的表达式）
+	rows, total, err := searchOneType(t, service, "AND OR", "article", BypassPolicy())
+	if err != nil || total != 1 || len(rows) != 1 || rows[0].ID != keywords {
+		t.Fatalf("AND OR 应该按短语匹配: total=%d err=%v", total, err)
+	}
+	// 列过滤语法不该生效（生效会报 no such column）
+	if _, _, err := searchOneType(t, service, "a:b", "article", BypassPolicy()); err != nil {
+		t.Fatalf("a:b 被当成列过滤: %v", err)
+	}
+	// 前缀查询语法不该生效（abc* 退化成普通词 abc）
+	if _, total, err := searchOneType(t, service, "abc*", "article", BypassPolicy()); err != nil || total != 1 {
+		t.Fatalf("abc* 应该退化成普通词: total=%d err=%v", total, err)
+	}
+}
