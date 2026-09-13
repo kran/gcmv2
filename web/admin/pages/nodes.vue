@@ -362,8 +362,10 @@ export default {
     padding: 16px 0 16px 16px;
 }
 .type-list { display: flex; flex-direction: column; gap: 0; }
-.type-group { margin-top: 10px; padding: 9px 16px 4px; font-size: 11px; color: #a19f9d; border-top: 1px solid #f3f2f1; }
-.type-group:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+/* 分组标题：文字后面接一条贯穿线（legend 的感觉），左对齐、不画方框 */
+.type-group { display: flex; align-items: center; gap: 8px; margin: 14px 0 4px; padding: 0 16px; font-size: 11px; color: #a19f9d; }
+.type-group::after { content: ''; flex: 1; height: 1px; background: #edebe9; }
+.type-group:first-child { margin-top: 2px; }
 .type-item {
     display: flex; align-items: center; gap: 8px;
     padding: 7px 16px; border-radius: 0; cursor: pointer;
