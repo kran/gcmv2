@@ -21,8 +21,6 @@ var (
 	ErrNotFound = errors.New("core: node not found")
 	// ErrRevisionConflict 节点在客户端读取后已被其他写入修改。
 	ErrRevisionConflict = errors.New("core: node revision conflict")
-	// ErrNodeArchived means an operation requires an active Node.
-	ErrNodeArchived = errors.New("core: node is archived")
 	// ErrInvalidFields means the submitted fields failed Schema validation
 	// (missing required, wrong Kind, immutable, duplicate ref target).
 	ErrInvalidFields = errors.New("core: invalid fields")
@@ -70,7 +68,7 @@ func (s *Service) GetNodeByAddress(ctx context.Context, address string) (*Node, 
 	if len(conditions) == 0 {
 		return nil, nil
 	}
-	query := `SELECT * FROM nodes WHERE archived_at IS NULL AND (` + strings.Join(conditions, " OR ") + `) LIMIT 1`
+	query := `SELECT * FROM nodes WHERE (` + strings.Join(conditions, " OR ") + `) LIMIT 1`
 	n, err := s.db.WithCtx(ctx).Add(query, args...).FetchOne[Node]()
 	if err != nil {
 		return nil, err
@@ -107,7 +105,6 @@ func (s *Service) CreateNode(ctx context.Context, n *Node) (int64, error) {
 	m.ID = 0
 	m.Fields = Fields(fields)
 	m.Revision = 1
-	m.ArchivedAt = nil
 	now := time.Now()
 	m.CreatedAt = now
 	m.UpdatedAt = now
@@ -126,7 +123,6 @@ func (s *Service) CreateNode(ctx context.Context, n *Node) (int64, error) {
 		}
 		m.ID = 0
 		m.Revision = 1
-		m.ArchivedAt = nil
 		m.CreatedAt = now
 		m.UpdatedAt = now
 		if err = s.types.ValidateFields(m.Type, m.Fields); err != nil {
@@ -171,9 +167,6 @@ func (s *Service) PatchNode(ctx context.Context, id int64, patch *NodePatch) err
 	}
 	if existing == nil {
 		return ErrNotFound
-	}
-	if existing.ArchivedAt != nil {
-		return ErrNodeArchived
 	}
 	if patch.Display == nil && len(patch.Fields) == 0 {
 		return nil

@@ -140,9 +140,9 @@ id / type / display / slug / status / sort / fields / timestamps
 - [x] FieldDef 支持 `on_delete: restrict|set_null|cascade`。
 - [x] required ref 默认使用 restrict。
 - [x] 删除前返回结构化的入边阻塞信息。
-- [x] 公共 DELETE 使用软删除/归档，不直接物理删除。
+- [x] ~~公共 DELETE 使用软删除/归档~~ → 已于 v0.9.3 撤销：公共 DELETE 就是永久删除，软删除移出内核。
 - [x] 当前 Web 只有 Admin DELETE 执行永久删除。
-- [ ] 删除、归档和恢复全部进入审计。
+- [ ] 删除进入审计。
 
 ## 2.4 关系不变量
 
@@ -612,15 +612,14 @@ password.Mount(site, password.Options{Realm: "member"})
 
 ### 软删除和并发
 
-- [x] Core archive/restore/permanent-delete；公共 DELETE 默认归档，Admin DELETE 永久删除。
-- [x] 默认查询排除归档。
+- [x] Core permanent-delete（archive/restore 已于 v0.9.3 移出内核）。
 - [x] revision 乐观锁。
-- [x] Web 更新和归档冲突返回 409。
+- [x] Web 更新冲突返回 409。
 
 ### 审计
 
 - [ ] Actor、Action、Node、RequestID、Timestamp。
-- [ ] 创建、更新、归档、恢复、删除、登录和状态转换写审计。
+- [ ] 创建、更新、删除、登录和状态转换写审计。
 - [ ] 记录字段级 before/after。
 - [ ] 审计只追加。
 

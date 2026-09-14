@@ -29,16 +29,12 @@ func Open(db *dba.SQL, ts *types.Types) (*Service, error) {
 
 	//define hooks
 	err := s.hooks.Define(map[string]any{
-		HookNodeBeforeCreate:  func(*dba.SQL, *Node) error { return nil },
-		HookNodeAfterCreate:   func(*dba.SQL, *Node) error { return nil },
-		HookNodeBeforeUpdate:  func(*dba.SQL, *NodePatch) error { return nil },
-		HookNodeAfterUpdate:   func(*dba.SQL, *Node) error { return nil },
-		HookNodeBeforeDelete:  func(*dba.SQL, int64) error { return nil },
-		HookNodeAfterDelete:   func(*dba.SQL, int64) error { return nil },
-		HookNodeBeforeArchive: func(*dba.SQL, int64) error { return nil },
-		HookNodeAfterArchive:  func(*dba.SQL, *Node) error { return nil },
-		HookNodeBeforeRestore: func(*dba.SQL, int64) error { return nil },
-		HookNodeAfterRestore:  func(*dba.SQL, *Node) error { return nil },
+		HookNodeBeforeCreate: func(*dba.SQL, *Node) error { return nil },
+		HookNodeAfterCreate:  func(*dba.SQL, *Node) error { return nil },
+		HookNodeBeforeUpdate: func(*dba.SQL, *NodePatch) error { return nil },
+		HookNodeAfterUpdate:  func(*dba.SQL, *Node) error { return nil },
+		HookNodeBeforeDelete: func(*dba.SQL, int64) error { return nil },
+		HookNodeAfterDelete:  func(*dba.SQL, int64) error { return nil },
 	})
 	if err != nil {
 		return nil, fmt.Errorf("core: define standard hooks: %w", err)
@@ -57,6 +53,9 @@ func Open(db *dba.SQL, ts *types.Types) (*Service, error) {
 	}
 	if err = s.syncSchemaIndexes(); err != nil {
 		return nil, fmt.Errorf("core: schema indexes: %w", err)
+	}
+	if err = s.dropLegacyArchive(context.Background()); err != nil {
+		return nil, fmt.Errorf("core: drop legacy archive: %w", err)
 	}
 
 	s.initSearch()

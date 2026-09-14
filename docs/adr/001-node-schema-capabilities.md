@@ -41,7 +41,6 @@ type Node struct {
     Fields     Fields
     CreatedAt  time.Time
     UpdatedAt  time.Time
-    ArchivedAt *time.Time
 
     Expand map[string]any
     Extra  map[string]any
@@ -55,7 +54,6 @@ type Node struct {
 - `Display`：所有实体统一的可读标签
 - `Revision`：乐观锁版本，每次有效更新递增
 - `Fields`：类型定义中的业务值；不包含 ref/ref[]
-- `ArchivedAt`：通用软删除元数据
 - `Expand/Extra`：只读装配数据，不持久化
 
 ### 2. slug/status/sort 不再是通用 Node 语义
@@ -352,7 +350,7 @@ nodes.fields JSON + edges
 
 v0.9 开发分支已经完成：
 
-- Node 固定列删除 slug/status/sort，增加 revision/archived_at。
+- Node 固定列删除 slug/status/sort，增加 revision（archived_at 已于 v0.9.3 移除）。
 - TypeDef 改为 Fields/Constraints/Capabilities/Admin 四个明确分组。
 - 实现 searchable/addressable/publication/authentication/tree capability。
 - 实现字段 default 和 immutable。

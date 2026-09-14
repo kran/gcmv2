@@ -511,8 +511,8 @@ func (f *scaleFixture) reportCandidates(t *testing.T) {
 	// 候选 A: 显式带上 type IN (...) — 部分索引（WHERE type IN ...）必须能推出条件才可用
 	measurePool(t, f, slow, "候选A: 地址走全局表达式索引(+type IN)", func() {
 		var id int64
-		row := f.db.Pool().QueryRow(`SELECT id FROM nodes WHERE archived_at IS NULL
-			AND type IN ('article','category') AND `+caseExpr+` = ? LIMIT 1`, slug())
+		row := f.db.Pool().QueryRow(`SELECT id FROM nodes
+			WHERE type IN ('article','category') AND `+caseExpr+` = ? LIMIT 1`, slug())
 		if err := row.Scan(&id); err != nil {
 			t.Fatal(err)
 		}
@@ -520,14 +520,14 @@ func (f *scaleFixture) reportCandidates(t *testing.T) {
 
 	// 候选 B: 按类型建地址索引（addressable capability 天然知道自己有哪些类型）
 	_, err := f.db.Pool().Exec(`CREATE INDEX IF NOT EXISTS cand_addr_article
-		ON nodes (json_extract(fields,'$.slug')) WHERE type = 'article' AND archived_at IS NULL`)
+		ON nodes (json_extract(fields,'$.slug')) WHERE type = 'article'`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	measurePool(t, f, iterations, "候选B: 地址走按类型索引", func() {
 		var id int64
-		row := f.db.Pool().QueryRow(`SELECT id FROM nodes WHERE archived_at IS NULL
-			AND type = 'article' AND json_extract(fields,'$.slug') = ? LIMIT 1`, slug())
+		row := f.db.Pool().QueryRow(`SELECT id FROM nodes
+			WHERE type = 'article' AND json_extract(fields,'$.slug') = ? LIMIT 1`, slug())
 		if err := row.Scan(&id); err != nil {
 			t.Fatal(err)
 		}
@@ -555,7 +555,7 @@ func (f *scaleFixture) reportCandidates(t *testing.T) {
 	})
 
 	// ②b 检索取首页: 区分"bm25 排名（要给全部命中打分）"与"计数"两类成本
-	searchFilter := `nodes_fts MATCH ? AND n.archived_at IS NULL AND n.type = 'article'
+	searchFilter := `nodes_fts MATCH ? AND n.type = 'article'
 		AND json_extract(n.fields,'$.publication_state') = 'published'`
 	measurePool(t, f, slow, "候选: 检索页(bm25 排名)", func() {
 		rows, err := f.db.Pool().Query(`SELECT n.id FROM nodes_fts JOIN nodes n ON n.id = nodes_fts.rowid
@@ -582,7 +582,7 @@ func (f *scaleFixture) reportCandidates(t *testing.T) {
 	measurePool(t, f, slow, "候选: 列表页截断计数(上限 1000)", func() {
 		var total int64
 		row := f.db.Pool().QueryRow(`SELECT COUNT(*) FROM (SELECT 1 FROM nodes
-			WHERE archived_at IS NULL AND type = 'article'
+			WHERE type = 'article'
 			AND json_extract(fields,'$.publication_state') = 'published' LIMIT 1001)`)
 		if err := row.Scan(&total); err != nil {
 			t.Fatal(err)
@@ -597,7 +597,7 @@ func (f *scaleFixture) reportCandidates(t *testing.T) {
 		placeholders = append(placeholders, "?")
 	}
 	measurePool(t, f, slow, "候选: 子树过滤由边表驱动", func() {
-		query := `SELECT id FROM nodes WHERE archived_at IS NULL AND type = 'article'
+		query := `SELECT id FROM nodes WHERE type = 'article'
 			AND json_extract(fields,'$.publication_state') = 'published'
 			AND id IN (SELECT from_node FROM edges WHERE field = 'categories' AND to_node IN (` +
 			strings.Join(placeholders, ",") + `))

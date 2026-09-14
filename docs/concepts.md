@@ -110,7 +110,7 @@ upload-image    upload-file     gallery
 ### 3.1 表
 
 ```text
-nodes          id/type/display/revision/fields(JSON)/created_at/updated_at/archived_at
+nodes          id/type/display/revision/fields(JSON)/created_at/updated_at
 edges          id/from_node/field/to_node/sort/single_ref/symmetric/created_at
 auth_methods   id/type/node_id/method/identifier/data(JSON, 不透明)/timestamps
 sessions       token_hash/realm/node_id/expires_at/created_at
@@ -190,7 +190,7 @@ relation depth 4；search targets 64
 
 ```text
 core.Node（10 个，事务内）:
-  before/after create · update · delete · archive · restore
+  before/after create · update · delete
 
 web（8 个）:
   web.before_create / before_update / before_delete   写路径业务校验
@@ -224,7 +224,7 @@ web（8 个）:
 ### 5.5 哨兵错误（13 个）
 
 ```text
-ErrNotFound · ErrRevisionConflict · ErrNodeArchived · ErrInvalidFields
+ErrNotFound · ErrRevisionConflict · ErrInvalidFields
 ErrEdgeNotFound · ErrRequiredReference · ErrRelationCardinality · ErrDeleteRestricted
 ErrInvalidQuery · ErrInvalidField · ErrInvalidOperator · ErrInvalidValue · ErrQueryTooComplex
 ```
@@ -263,7 +263,7 @@ ErrInvalidQuery · ErrInvalidField · ErrInvalidOperator · ErrInvalidValue · E
 | `CmsCtx.ReadRule` | 一次解析（范围 + 字段掩码），按 `(action, type)` 缓存在请求上下文上（生命周期 = Actor） |
 | `MaskNode` / `MaskNodes` / `MaskTree` | 应用字段掩码（拷贝后删键、递归进 `Expand`）；读入口内部使用，手工组装节点的代码可自行调用 |
 | `CmsCtx.Read*` | 策略层读入口（`ReadPage`/`ReadOne`/`ReadAddress`/`ReadFull`/`ReadSearch`/`ReadTree`）：解析规则 + 取数 + 裁字段一步到位 |
-| `CmsCtx.Write*` | 策略层写入口（`CreateNode`/`UpdateNode`/`DeleteNode`）：客户端发起的写走规则，返回裁剪过的节点（`DeleteNode` 是永久删除；归档另调 `engine.ArchiveNode`） |
+| `CmsCtx.Write*` | 策略层写入口（`CreateNode`/`UpdateNode`/`DeleteNode`）：客户端发起的写走规则，返回裁剪过的节点（永久删除） |
 | 写规则 | create/update: `func(*CmsCtx, …, *core.List[string]) error`；delete: `func(*CmsCtx, int64) error`（`Site.WriteRule` 注册） |
 | `Site.ReadScope` | 解析读范围：有 handler → 用规则；无 → 系统读动作走 publication 默认，站点读动作报错 |
 | `Site.Exposes` | `Has(web.read.<action>.<type>)` —— 该类型是否被站点显式暴露 |

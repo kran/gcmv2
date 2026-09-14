@@ -16,7 +16,7 @@ import (
 //	    DeleteNode 是永久删除（按字段 on_delete 处理引用），和 HTTP DELETE 同一套语义：
 //	    站点自己写 handler 时用它，不必自己 Fire 事件。
 //
-//	归档（保留数据、可恢复）不是删除：显式调 engine.ArchiveNode 或后台的 archive 接口。
+//	"下线 / 撤回"不是内核概念：用类型自己的状态字段表达，并在读规则里限制范围。
 //
 //	engine.CreateNode / PatchNode / DeleteNode
 //	    "系统自己的写"：审批、计数、导入、迁移、后台。没有客户端授权可言，不需要规则。
@@ -80,7 +80,7 @@ func (c *CmsCtx) UpdateNode(id int64, patch *core.NodePatch) (*core.Node, error)
 }
 
 // DeleteNode 走删除规则，然后永久删除（按字段 on_delete 处理引用）。站点自己写
-// handler 时调它；只想下线、留数据可恢复的调 engine.ArchiveNode。
+// handler 时调它。
 //
 // 注意顺序：本入口只有 id，必须先读节点才知道类型，因此是"先读、后 Fire 规则"。
 // 不能让匿名访客据此区分"节点是否存在"的场景（比如通用路由），应该先用路径上的

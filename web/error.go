@@ -157,8 +157,6 @@ func CoreError(err error) *Error {
 		return NotFound("not found")
 	case errors.Is(err, core.ErrRevisionConflict):
 		return Conflict("revision conflict: reload and retry")
-	case errors.Is(err, core.ErrNodeArchived):
-		return Conflict("node is archived")
 	case errors.Is(err, core.ErrDeleteRestricted):
 		return Errorf(http.StatusConflict, CodeDeleteRestricted, "%s", err.Error())
 	case errors.Is(err, core.ErrRequiredReference), errors.Is(err, core.ErrRelationCardinality):

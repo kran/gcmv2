@@ -105,7 +105,7 @@ types:
 ```
 
 嵌套引用没有路径可落 Edge。若允许降级成 JSON 整数，就只剩裸 ID：没有外键、
-基数、删除策略、归档检查，`CheckRelations` 也无法发现，属于静默数据损坏。
+基数、删除策略，`CheckRelations` 也无法发现，属于静默数据损坏。
 需要“一个对象数组里带引用”时，建模为关系 Node。
 
 ## 引用基数
@@ -121,7 +121,7 @@ ref[]  0..N，required 时 1..N
 
 - [x] ref 在数据库中最多一条 Edge。
 - [x] ref[] 不允许重复 target。
-- [x] Edge target 必须存在且未归档。
+- [x] Edge target 必须存在。
 - [x] target.Type 必须等于 FieldDef.To。
 - [x] required ref 在 Create 和 Patch 后不能为空。
 - [x] 并发写入由数据库 partial unique index 和 symmetric trigger 兜底。
@@ -177,14 +177,9 @@ required ref 默认 restrict。
 
 已实现行为：
 
-- 普通查询和展开不返回已归档目标
-- `EditableNode` 和 Ref API 保留已归档目标 ID，供管理和修复
-- required ref 指向归档目标时进入数据完整性报告
 - 恢复目标后引用自动恢复可见
-- 公共 DELETE 与 Admin 的 DELETE 都是永久删除，因此都执行字段的 `on_delete`；归档（`POST /admin/nodes/{id}/archive`）不动引用，只靠 `archived_at` 隐藏
-- 认证 Node 归档时撤销其全部 Session
+- 公共 DELETE 与 Admin 的 DELETE 都是永久删除，因此都执行字段的 `on_delete`；软删除/归档不属于内核（v0.9.3 移除），要"下线"用类型自己的状态字段
 
-是否允许新引用指向已归档 Node：不允许。
 
 ## 对称、传递和等价
 
@@ -320,7 +315,6 @@ edges 至少需要：
 - 找出 ref 多于一条的 Node
 - 找出 required ref 缺失的 Node
 - 找出 Tree 环
-- 找出指向归档目标的 required ref
 
 检查默认只报告；修复必须显式确认，不能静默删数据。
 
@@ -351,9 +345,9 @@ edges 至少需要：
 
 - [x] ref/ref[] 基数由应用校验和数据库约束保证。
 - [x] 删除策略有 restrict/set_null/cascade 测试。
-- [x] 软删除保留 Edge，永久删除执行 on_delete；新引用不能指向归档 Node。
+- [x] 永久删除执行 on_delete（软删除/归档已于 v0.9.3 移出内核）。
 - [x] relation capability 的关系 Node 仍通过通用 Node API 管理。
 - [x] 关系查询和 Expand 经过逐跳 Schema 校验，并支持 symmetric 语义。
 - [x] EditableNode/RefID/RefIDs/HasRef 不再让业务代码误读 Node.Fields。
-- [x] 数据完整性检查可发现悬空、未知字段、目标类型、基数、required、归档引用、元数据和环问题。
+- [x] 数据完整性检查可发现悬空、未知字段、目标类型、基数、required、元数据和环问题。
 - [ ] CRM 示例中的 employment 和 opportunity_contact 可以完整建模并完成 UI 验证。

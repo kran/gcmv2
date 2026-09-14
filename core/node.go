@@ -12,7 +12,7 @@ import (
 // ── Node 通用列 ───────────────────────────────
 //
 // 类型字段名不得与这些保留名冲突（types 校验期拒绝）:
-//   id / type / display / revision / fields / created_at / updated_at / archived_at
+//   id / type / display / revision / fields / created_at / updated_at
 
 // Node 节点 — 值模型（读/模板/JSON 展示用）。
 //
@@ -86,13 +86,12 @@ func (f Fields) Value() (driver.Value, error) {
 
 // Node 节点 — 值模型（读/模板/JSON/DB 直接可用）。
 type Node struct {
-	ID         int64      `db:"id,omitempty" json:"id"` // omitempty: 插入跳零值走自增
-	Type       string     `db:"type" json:"type"`
-	Display    string     `db:"display" json:"display"`
-	Revision   int64      `db:"revision" json:"revision"`
-	CreatedAt  time.Time  `db:"created_at" json:"created_at"`
-	UpdatedAt  time.Time  `db:"updated_at" json:"updated_at"`
-	ArchivedAt *time.Time `db:"archived_at" json:"archived_at,omitempty"`
+	ID        int64     `db:"id,omitempty" json:"id"` // omitempty: 插入跳零值走自增
+	Type      string    `db:"type" json:"type"`
+	Display   string    `db:"display" json:"display"`
+	Revision  int64     `db:"revision" json:"revision"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
 
 	// 类型字段（Scan/Value 自动 JSON 转换；ref/ref[] 存 edges）
 	Fields Fields `db:"fields" json:"fields"`

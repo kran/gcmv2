@@ -4,7 +4,6 @@ import (
 	"errors"
 	"testing"
 
-	gquery "github.com/kran/gcmv2/query"
 	"github.com/kran/gcmv2/types"
 )
 
@@ -88,49 +87,6 @@ func TestDeletePolicies(t *testing.T) {
 	}
 	if _, found, err := service.RefID(t.Context(), note, "account"); err != nil || found {
 		t.Fatalf("set_null ref = found %v, err %v", found, err)
-	}
-}
-
-func TestArchivePreservesEdgesAndRestore(t *testing.T) {
-	service := newDeletePolicyService(t)
-	account, _ := service.CreateNode(t.Context(), &Node{Type: "account", Display: "account", Fields: Fields{"name": "account"}})
-	contract, _ := service.CreateNode(t.Context(), &Node{Type: "contract", Display: "contract", Fields: Fields{"name": "contract", "account": account}})
-	node, _ := service.GetNodeByID(t.Context(), account)
-	if err := service.ArchiveNode(t.Context(), account, node.Revision); err != nil {
-		t.Fatal(err)
-	}
-	name := "changed"
-	if err := service.PatchNode(t.Context(), account, &NodePatch{Revision: &node.Revision, Display: &name}); !errors.Is(err, ErrNodeArchived) {
-		t.Fatalf("patch archived node = %v", err)
-	}
-	if target, found, err := service.RefID(t.Context(), contract, "account"); err != nil || !found || target != account {
-		t.Fatalf("archived ref = %d, %v, %v", target, found, err)
-	}
-	matching := queryAll(t, service, "contract", gquery.OneOf(gquery.Ref("account"), account))
-	if len(matching) != 0 {
-		t.Fatalf("query must hide archived relation target: %#v", matching)
-	}
-	expanded, err := service.Expand(t.Context(), contract, gquery.Expand(gquery.Ref("account")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, visible := expanded.Expand["account"]; visible {
-		t.Fatalf("expand must hide archived relation target: %#v", expanded.Expand)
-	}
-	report, err := service.CheckRelations(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !hasRelationIssue(report, RelationArchivedRequired) {
-		t.Fatalf("missing archived required issue: %#v", report)
-	}
-	archived, _ := service.GetNodeByID(t.Context(), account)
-	if err := service.RestoreNode(t.Context(), account, archived.Revision); err != nil {
-		t.Fatal(err)
-	}
-	report, err = service.CheckRelations(t.Context())
-	if err != nil || !report.OK() {
-		t.Fatalf("restored integrity = %#v, %v", report, err)
 	}
 }
 

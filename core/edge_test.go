@@ -194,7 +194,7 @@ func TestPreviewMergeErrors(t *testing.T) {
 	}
 }
 
-func TestSingleRefCardinalityAndArchivedTarget(t *testing.T) {
+func TestSingleRefCardinality(t *testing.T) {
 	typesYAML := `
 types:
   person:
@@ -226,20 +226,6 @@ types:
 	}
 	if _, err := s.AddEdge(t.Context(), first, second, "partner", 0); !errors.Is(err, ErrRelationCardinality) {
 		t.Fatalf("symmetric single ref error = %v", err)
-	}
-	firstNode, _ := s.GetNodeByID(t.Context(), first)
-	if err := s.ArchiveNode(t.Context(), first, firstNode.Revision); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.AddEdge(t.Context(), article, first, "reviewers", 0); !errors.Is(err, ErrNodeArchived) {
-		t.Fatalf("archived target error = %v", err)
-	}
-	articleNode, _ := s.GetNodeByID(t.Context(), article)
-	if err := s.ArchiveNode(t.Context(), article, articleNode.Revision); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.AddEdge(t.Context(), article, third, "reviewers", 0); !errors.Is(err, ErrNodeArchived) {
-		t.Fatalf("archived source error = %v", err)
 	}
 }
 

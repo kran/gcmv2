@@ -20,7 +20,6 @@ const (
 	RelationCardinality        RelationIssueKind = "cardinality"
 	RelationDuplicate          RelationIssueKind = "duplicate"
 	RelationRequiredMissing    RelationIssueKind = "required_missing"
-	RelationArchivedRequired   RelationIssueKind = "archived_required_target"
 	RelationMetadataMismatch   RelationIssueKind = "metadata_mismatch"
 	RelationNonCanonical       RelationIssueKind = "non_canonical"
 	RelationCycle              RelationIssueKind = "cycle"
@@ -111,23 +110,6 @@ func (s *Service) CheckRelations(ctx context.Context) (RelationReport, error) {
 		if undirected {
 			counts[relationCountKey{nodeID: target.ID, field: field.Name}]++
 		}
-		if field.Required {
-			if !undirected && source.ArchivedAt == nil && target.ArchivedAt != nil {
-				report.add(RelationIssue{Kind: RelationArchivedRequired, EdgeID: edge.ID, NodeID: source.ID,
-					NodeType: source.Type, TargetID: target.ID, TargetType: target.Type, Field: field.Name,
-					Message: "required ref points to an archived target"})
-			}
-			if undirected && source.ArchivedAt == nil && target.ArchivedAt != nil {
-				report.add(RelationIssue{Kind: RelationArchivedRequired, EdgeID: edge.ID, NodeID: source.ID,
-					NodeType: source.Type, TargetID: target.ID, TargetType: target.Type, Field: field.Name,
-					Message: "required ref points to an archived target"})
-			}
-			if undirected && target.ArchivedAt == nil && source.ArchivedAt != nil {
-				report.add(RelationIssue{Kind: RelationArchivedRequired, EdgeID: edge.ID, NodeID: target.ID,
-					NodeType: target.Type, TargetID: source.ID, TargetType: source.Type, Field: field.Name,
-					Message: "required ref points to an archived target"})
-			}
-		}
 		if field.Transitive || isTreeField(s.types, source.Type, field.Name) {
 			key := relationFieldKey{typeName: source.Type, field: field.Name}
 			if adjacency[key] == nil {
@@ -138,9 +120,6 @@ func (s *Service) CheckRelations(ctx context.Context) (RelationReport, error) {
 	}
 
 	for _, node := range nodes {
-		if node.ArchivedAt != nil {
-			continue
-		}
 		td, ok := s.types.Type(node.Type)
 		if !ok {
 			continue

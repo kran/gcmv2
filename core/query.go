@@ -64,11 +64,11 @@ func (s *Service) countQuery(ctx context.Context, query ListQuery) (int64, error
 	var total *int64
 	if limit > 0 {
 		total, err = s.db.WithCtx(ctx).Add(`SELECT COUNT(1) FROM (SELECT nodes.id FROM nodes
-			WHERE archived_at IS NULL AND type = #{1} AND #{2} LIMIT #{3})`,
+			WHERE type = #{1} AND #{2} LIMIT #{3})`,
 			query.Type, where, limit+1).FetchOne[int64]()
 	} else {
 		total, err = s.db.WithCtx(ctx).Add(`SELECT COUNT(1) FROM nodes
-			WHERE archived_at IS NULL AND type = #{1} AND #{2}`,
+			WHERE type = #{1} AND #{2}`,
 			query.Type, where).FetchOne[int64]()
 	}
 	if err != nil {
@@ -132,7 +132,7 @@ func (s *Service) buildQuery(ctx context.Context, query ListQuery) (*dba.SQL, er
 		return nil, err
 	}
 	db := s.db.WithCtx(ctx).Add(
-		`SELECT ${F:*} FROM nodes WHERE archived_at IS NULL AND type = #{1} AND #{2} ${order}`,
+		`SELECT ${F:*} FROM nodes WHERE type = #{1} AND #{2} ${order}`,
 		query.Type, where).Var("order", "ORDER BY "+order)
 	return db, nil
 }

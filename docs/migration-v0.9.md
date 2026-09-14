@@ -35,7 +35,7 @@ if errors.Is(err, core.ErrRevisionConflict) {
 Core migration `00009_node_schema_capabilities.sql`:
 
 1. Copies every old slug/status/sort value into `legacy_node_columns`.
-2. Adds revision and archived_at.
+2. Adds revision and archived_at (`archived_at` is dropped again at startup from v0.9.3 on).
 3. Removes slug/status/sort from nodes.
 4. Stops all runtime reads of the old values.
 
@@ -167,4 +167,4 @@ after those site migrations. The old `FullFields` API is replaced by `FullNode`/
 
 Composite fields (`array` / `object`) must not contain `ref` or `ref[]` sub-fields. Such a declaration used to load successfully and store raw node IDs inside `fields` JSON, so it had no edge, no cardinality, no delete policy, and was invisible to `CheckRelations`. Types that used this shape must be remodelled as a relation Node; the Schema loader now rejects them with a `kind ref cannot be nested in array/object` error.
 
-Public `DELETE /api/nodes/{type}/{id}` permanently deletes (running the fields' `on_delete` handlers for incoming references). Authenticated administrators can call `POST /admin/nodes/{id}/archive` or `/restore` with `{"revision": n}`, while `DELETE /admin/nodes/{id}` remains the explicit permanent-delete operation and can return HTTP 409 for restricted references.
+Public `DELETE /api/nodes/{type}/{id}` permanently deletes (running the fields' `on_delete` handlers for incoming references), and so does `DELETE /admin/nodes/{id}`, which can return HTTP 409 for restricted references. The archive/restore API and the `archived_at` column were **removed in v0.9.3**: soft delete belongs to the project layer (use a state field of your own types), and there is no recycle bin in the kernel.

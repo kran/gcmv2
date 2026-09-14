@@ -55,7 +55,7 @@ func createSchemaIndex(tx *dba.SQL, name, typeName string, fields []string, uniq
 		kind = "UNIQUE INDEX"
 	}
 	statement := `CREATE ` + kind + ` ` + quoteIdentifier(name) + ` ON nodes (` +
-		strings.Join(expressions, ", ") + `) WHERE type = ` + quoteLiteral(typeName) + ` AND archived_at IS NULL`
+		strings.Join(expressions, ", ") + `) WHERE type = ` + quoteLiteral(typeName)
 	_, err := tx.Add(statement).Exec()
 	if err != nil {
 		return fmt.Errorf("core: schema index %s: %w", name, err)
@@ -86,7 +86,7 @@ func (s *Service) createAddressIndex(tx *dba.SQL) error {
 	}
 	expression := `CASE type ` + strings.Join(branches, " ") + ` ELSE NULL END`
 	statement := `CREATE UNIQUE INDEX gcm_schema_address_global ON nodes (` + expression +
-		`) WHERE archived_at IS NULL AND type IN (` + strings.Join(types, ", ") + `)`
+		`) WHERE type IN (` + strings.Join(types, ", ") + `)`
 	_, err := tx.Add(statement).Exec()
 	if err != nil {
 		return fmt.Errorf("core: global address index: %w", err)

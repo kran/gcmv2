@@ -389,8 +389,6 @@ func (s *Site) mountAdmin() {
 			authed.Get("/nodes/{id}", b.getNode)
 			authed.Put("/nodes/{id}", b.updateNode)
 			authed.Delete("/nodes/{id}", b.deleteNode)
-			authed.Post("/nodes/{id}/archive", b.archiveNode)
-			authed.Post("/nodes/{id}/restore", b.restoreNode)
 			authed.Get("/search", b.search)
 			authed.Get("/tree", b.tree)
 			authed.Get("/inbound", b.inbound)
@@ -679,44 +677,6 @@ func (b *backend) updateNode(ctx *CmsCtx) {
 	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
 }
 
-func (b *backend) archiveNode(ctx *CmsCtx) {
-	b.setNodeArchived(ctx, true)
-}
-
-func (b *backend) restoreNode(ctx *CmsCtx) {
-	b.setNodeArchived(ctx, false)
-}
-
-func (b *backend) setNodeArchived(ctx *CmsCtx, archived bool) {
-	id := ctx.PathNum("id", 0)
-	if id <= 0 {
-		ctx.Fail(BadRequest("invalid id"))
-		return
-	}
-	var input struct {
-		Revision int64 `json:"revision"`
-	}
-	err := ctx.BindStrictJSON(&input)
-	if err != nil {
-		b.fail(ctx, err)
-		return
-	}
-	if archived {
-		err = b.eng.ArchiveNode(ctx.R.Context(), id, input.Revision)
-	} else {
-		err = b.eng.RestoreNode(ctx.R.Context(), id, input.Revision)
-	}
-	if errors.Is(err, core.ErrRevisionConflict) {
-		ctx.Fail(err)
-		return
-	}
-	if err != nil {
-		b.fail(ctx, err)
-		return
-	}
-	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
-}
-
 func (b *backend) deleteNode(ctx *CmsCtx) {
 	id := ctx.PathNum("id", 0)
 	if id == 0 {
@@ -852,7 +812,7 @@ func (b *backend) inbound(ctx *CmsCtx) {
 	// 溯源: 每个来源节点取一条边字段（MIN(field) — GROUP BY 去重）
 	rows, err := b.db.Add(
 		`SELECT e.from_node, n.type, n.display, MIN(e.field) FROM edges e JOIN nodes n ON n.id = e.from_node
-		 WHERE e.to_node IN (#{1|expand}) AND n.archived_at IS NULL
+		 WHERE e.to_node IN (#{1|expand})
 		 GROUP BY e.from_node
 		 ORDER BY n.updated_at DESC, n.id DESC
 		 LIMIT #{2} OFFSET #{3}`,

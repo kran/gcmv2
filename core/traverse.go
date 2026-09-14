@@ -122,7 +122,7 @@ func (s *Service) validateTraversal(ctx context.Context, typeName string, start 
 	if err != nil {
 		return err
 	}
-	if node == nil || node.ArchivedAt != nil || node.Type != typeName {
+	if node == nil || node.Type != typeName {
 		return fmt.Errorf("core: traversal start %d is not an active %s", start, typeName)
 	}
 	return nil

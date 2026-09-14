@@ -84,7 +84,7 @@ types:
 	b.Run("json-composite-index", func(b *testing.B) {
 		for b.Loop() {
 			row := sqlDB.QueryRow(`SELECT COUNT(*) FROM nodes
-				WHERE type = 'opportunity' AND archived_at IS NULL
+				WHERE type = 'opportunity'
 				AND json_extract(fields, '$.stage') = 'qualified'
 				AND json_extract(fields, '$.amount') >= 5000000`)
 			var count int
@@ -99,7 +99,7 @@ types:
 			row := sqlDB.QueryRow(`SELECT COUNT(*) FROM nodes n
 				JOIN eav_bench stage ON stage.node_id = n.id AND stage.field = 'stage'
 				JOIN eav_bench amount ON amount.node_id = n.id AND amount.field = 'amount'
-				WHERE n.type = 'opportunity' AND n.archived_at IS NULL
+				WHERE n.type = 'opportunity'
 				AND stage.text_value = 'qualified' AND amount.number_value >= 5000000`)
 			var count int
 			if err := row.Scan(&count); err != nil {

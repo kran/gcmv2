@@ -78,7 +78,7 @@ func (c *CmsCtx) Actor() Actor {
 		return c.actor
 	}
 	node, err := c.site.engine.GetNodeByID(c.R.Context(), session.NodeID)
-	if err != nil || node == nil || node.ArchivedAt != nil || node.Type != realm.NodeType {
+	if err != nil || node == nil || node.Type != realm.NodeType {
 		return c.actor
 	}
 	c.principal = node

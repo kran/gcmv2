@@ -92,10 +92,45 @@ func TestNodeSchemaMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// 迁移产物：00009 仍然会加 archived_at（历史迁移不改写）。
 	want := []string{"id", "type", "display", "fields", "created_at", "updated_at", "revision", "archived_at"}
 	if !slices.Equal(columns, want) {
 		t.Fatalf("nodes columns = %v, want %v", columns, want)
 	}
+	// 真实升级路径：旧库里的 gcm_schema_* 声明式索引引用着 archived_at。
+	// 这里手工造一条（等价于旧版本启动时建出来的），验证启动顺序 —— 删列必须发生在
+	// syncSchemaIndexes 之后（那一步会把 gcm_schema_* 整批删掉重建），否则 SQLite 会拒绝。
+	_, err = db.Add(`CREATE INDEX gcm_schema_legacy_probe ON nodes (type) WHERE type = 'article' AND archived_at IS NULL`).Exec()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 启动路径（core.Open）才是一次性迁移真正删掉 archived_at 的地方：归档已不属于内核。
+	ts := types.New()
+	if err := ts.Load([]byte(testTypesYAML)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(db, ts); err != nil {
+		t.Fatal(err)
+	}
+	columns, err = db.Add(`SELECT name FROM pragma_table_info('nodes') ORDER BY cid`).FetchList[string]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(columns, "archived_at") {
+		t.Fatalf("启动后 archived_at 应当已被删除: %v", columns)
+	}
+	probe, err := db.Add(
+		`SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'gcm_schema_legacy_probe'`).FetchOne[string]()
+	if err != nil || probe != nil {
+		t.Fatalf("引用 archived_at 的旧声明式索引应当已被重建流程删掉: %v, %v", probe, err)
+	}
+	index, err := db.Add(
+		`SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_nodes_active_type'`).FetchOne[string]()
+	if err != nil || index != nil {
+		t.Fatalf("idx_nodes_active_type 应当已被删除: %v, %v", index, err)
+	}
+
 	table, err := db.Add(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'legacy_node_columns'`).FetchOne[string]()
 	if err != nil || table == nil {
 		t.Fatalf("legacy migration table missing: table=%v err=%v", table, err)

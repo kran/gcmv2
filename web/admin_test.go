@@ -95,8 +95,6 @@ func TestAdminNodes(t *testing.T) {
 		{"GET", "/admin/search?q=x"},
 		{"GET", "/admin/integrity/relations"},
 		{"GET", "/admin/merge/preview?source=1&target=2"},
-		{"POST", "/admin/nodes/1/archive"},
-		{"POST", "/admin/nodes/1/restore"},
 	} {
 		w := do(s, req.method, req.path, map[string]any{})
 		if w.Code != http.StatusUnauthorized {
@@ -184,22 +182,6 @@ func TestAdminPasswordFlow(t *testing.T) {
 	}, ck)
 	if w.Code != http.StatusOK {
 		t.Fatalf("update = %d: %s", w.Code, w.Body.String())
-	}
-	current, err := s.Engine().GetNodeByID(t.Context(), created.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	w = do(s, "POST", "/admin/nodes/"+itoa(created.ID)+"/archive", map[string]any{"revision": current.Revision}, ck)
-	if w.Code != http.StatusOK {
-		t.Fatalf("archive = %d: %s", w.Code, w.Body.String())
-	}
-	current, err = s.Engine().GetNodeByID(t.Context(), created.ID)
-	if err != nil || current.ArchivedAt == nil {
-		t.Fatalf("archived node = %#v, %v", current, err)
-	}
-	w = do(s, "POST", "/admin/nodes/"+itoa(created.ID)+"/restore", map[string]any{"revision": current.Revision}, ck)
-	if w.Code != http.StatusOK {
-		t.Fatalf("restore = %d: %s", w.Code, w.Body.String())
 	}
 	// 永久删除
 	w = do(s, "DELETE", "/admin/nodes/"+itoa(created.ID), nil, ck)

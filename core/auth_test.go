@@ -1,7 +1,6 @@
 package core
 
 import (
-	"errors"
 	"testing"
 	"time"
 )
@@ -181,31 +180,6 @@ func TestDeleteNodeSessions(t *testing.T) {
 		if err != nil || session != nil {
 			t.Fatalf("session after revoke = %#v, %v", session, err)
 		}
-	}
-}
-
-func TestArchiveAuthNodeRevokesSessions(t *testing.T) {
-	s := newAuthService(t)
-	id, _ := s.RegisterAuth(t.Context(), "user", "email", "a@x.com", Fields{"credential": "x"}, &Node{Display: "a"})
-	token, _ := s.CreateSession(t.Context(), "members", id)
-	node, _ := s.GetNodeByID(t.Context(), id)
-	if err := s.ArchiveNode(t.Context(), id, node.Revision); err != nil {
-		t.Fatal(err)
-	}
-	session, err := s.ValidSession(t.Context(), token)
-	if err != nil || session != nil {
-		t.Fatalf("archived node session = %#v, %v", session, err)
-	}
-	if _, err := s.CreateSession(t.Context(), "members", id); !errors.Is(err, ErrNodeArchived) {
-		t.Fatalf("session for archived node = %v", err)
-	}
-	archived, _ := s.GetNodeByID(t.Context(), id)
-	if err := s.RestoreNode(t.Context(), id, archived.Revision); err != nil {
-		t.Fatal(err)
-	}
-	restored, _ := s.GetNodeByID(t.Context(), id)
-	if restored.ArchivedAt != nil {
-		t.Fatalf("restored node = %#v", restored)
 	}
 }
 

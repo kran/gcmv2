@@ -229,7 +229,7 @@ func (f *ftsIndex) presentTokens(ctx context.Context, bq string) ([]string, erro
 // ftsWhere 一次检索的行范围片段: 命中集合 ∩ 调用方给的目标范围。
 // 片段自带的 #{1}/#{2} 在拼进外层语句时整体变成一个占位符。
 func ftsWhere(match string, scope dba.Node) dba.Node {
-	return dba.Expr(`nodes_fts MATCH #{1} AND n.archived_at IS NULL AND #{2}`, match, scope)
+	return dba.Expr(`nodes_fts MATCH #{1} AND #{2}`, match, scope)
 }
 
 // countMatches 统计命中数。limit > 0 时截断（子查询里的 LIMIT 让扫描提前结束,
@@ -341,7 +341,7 @@ func (f *ftsIndex) Rebuild(ctx context.Context) error {
 		if _, err := tx.Add(`DELETE FROM nodes_fts`).Exec(); err != nil {
 			return err
 		}
-		q := tx.Add(`SELECT * FROM nodes WHERE archived_at IS NULL`)
+		q := tx.Add(`SELECT * FROM nodes`)
 		rows, err := q.FetchList[Node]()
 		if err != nil {
 			return err
@@ -365,7 +365,7 @@ func (s *Service) RebuildSearch(ctx context.Context) error {
 }
 
 func (s *Service) shouldIndex(node *Node) bool {
-	if node == nil || node.ArchivedAt != nil {
+	if node == nil {
 		return false
 	}
 	_, ok := s.types.Searchable(node.Type)
@@ -423,12 +423,6 @@ func (s *Service) initSearch() {
 	}
 	if err := s.hooks.AddHook(HookNodeAfterDelete, s.searchDelete); err != nil {
 		panic("core: register search delete hook: " + err.Error())
-	}
-	if err := s.hooks.AddHook(HookNodeAfterArchive, s.searchSync); err != nil {
-		panic("core: register search archive hook: " + err.Error())
-	}
-	if err := s.hooks.AddHook(HookNodeAfterRestore, s.searchSync); err != nil {
-		panic("core: register search restore hook: " + err.Error())
 	}
 }
 

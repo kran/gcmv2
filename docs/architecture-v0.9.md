@@ -126,7 +126,7 @@ Lisp 只是受限文本前端，不直接生成 SQL，也不是公网业务参�
 ### 2.8 默认保守，破坏性操作显式
 
 - 公共 DELETE 是永久删除（按字段 `on_delete` 处理引用）。
-- 归档是可恢复操作，必须显式：`engine.ArchiveNode` / `POST /admin/nodes/{id}/archive`。
+- 归档（软删除）不是内核概念：要"下线/撤回"就用类型自己的状态字段，并在读规则里限制范围。
 - required ref 默认 `restrict`。
 - 可选 ref 默认 `set_null`。
 - `cascade` 只允许关系 Node endpoint。
@@ -151,7 +151,7 @@ Lisp 只是受限文本前端，不直接生成 SQL，也不是公网业务参�
 所有业务实体的统一记录。当前固定系统列为：
 
 ```text
-id / type / display / revision / fields / created_at / updated_at / archived_at
+id / type / display / revision / fields / created_at / updated_at
 ```
 
 - `ID`：稳定身份，创建后不可修改。
@@ -159,7 +159,6 @@ id / type / display / revision / fields / created_at / updated_at / archived_at
 - `Display`：通用可读标签。
 - `Revision`：乐观锁版本。
 - `Fields`：只保存标量、对象和数组，不保存 ref/ref[]。
-- `ArchivedAt`：非空表示已归档。
 
 `slug/status/sort` 已不再是 Node 固定列。
 
@@ -271,7 +270,6 @@ Expand 使用 typed path 加载关联 Node，并在每一跳切换 Schema 上下
 - 出边由当前 Type 推导目标 Type。
 - 入边必须显式声明来源 Type。
 - symmetric/equivalence 自动恢复双向语义。
-- 普通 Expand 不返回已归档目标。
 
 ### 3.10 EditableNode
 
@@ -447,13 +445,11 @@ Actor 类型：
 Anonymous / Node / Admin / APIKey
 ```
 
-### 3.13 Archive 与 Permanent Delete
+### 3.13 删除路径
 
-- Archive：设置 `archived_at`，保留 Node 和 Edge，默认查询不可见。
-- Restore：清除 `archived_at`，原引用恢复可见。
-- Permanent Delete：执行所有入边的 `on_delete` 策略后物理删除。
-
-归档认证 Node 会撤销其全部 Session。
+- 内核只有一种删除：执行所有入边的 `on_delete` 策略（restrict/set_null/cascade）后物理删除。
+- 归档/软删除**不属于内核**：它是产品策略（"下架 / 撤回 / 回收站"），用类型自己的状态字段
+  + 读规则范围表达；想做成可恢复的回收站，也放在项目层（或以后的插件）里做。
 
 ### 3.14 Relation Integrity Report
 
@@ -465,7 +461,6 @@ Anonymous / Node / Admin / APIKey
 - 重复 Edge
 - 单 ref 多边
 - required ref 缺失
-- required ref 指向已归档目标
 - Edge 元数据与 Schema 不一致
 - 无向边未规范化
 - transitive/tree 环
@@ -489,7 +484,7 @@ invalid_request    400  请求体/参数格式错误
 unauthorized       401  未认证或凭据失效
 forbidden          403  已认证但无权限
 not_found          404  不存在或不可见
-conflict           409  版本/唯一/归档状态冲突
+conflict           409  版本/唯一冲突
 delete_restricted  409  incoming 引用阻止永久删除
 invalid_value      422  字段值不符合 Schema
 invalid_query      422  查询字段/操作符/值未过 Schema 校验
@@ -549,7 +544,7 @@ Site / Application
 ```text
 nodes
   ├── fields JSON：标量/对象/数组
-  └── revision + archived_at：并发和生命周期
+  └── revision：并发（乐观锁）
 
 edges
   ├── from_node + field + to_node：引用
@@ -587,7 +582,7 @@ Create/Patch request
 
 - 字段属于 source Type。
 - 字段是 ref/ref[]。
-- target 存在、未归档且 Type 匹配。
+- target 存在且 Type 匹配。
 - ref[] 无重复并保存数组顺序。
 - symmetric/equivalence 端点规范化。
 - transitive/tree 写入不形成环。
@@ -692,7 +687,7 @@ Admin/Core permanent delete
 已实现：
 
 - Node 移除固定 `slug/status/sort`。
-- 增加 `revision` 和 `archived_at`。
+- 增加 `revision`（`archived_at` 已在 v0.9.3 移除）。
 - TypeDef 分离 Fields、Constraints、Capabilities、Admin。
 - searchable/addressable/publication/authentication/tree/relation capability。
 - 字段默认值和 immutable。
@@ -725,7 +720,6 @@ Admin/Core permanent delete
 - Realm-bound Session。
 - Session token SHA-256 后持久化。
 - 跨 Realm bind 拒绝。
-- 归档认证 Node 时撤销 Session。
 - Core migration `00010_auth_realms.sql`。
 
 ### 5.4 Query Policy 与 Search
@@ -756,8 +750,6 @@ Admin/Core permanent delete
 - transitive/tree 环检测与遍历能力检查。
 - `on_delete` 默认值和 restrict/set_null/cascade。
 - cascade 仅用于 relation capability endpoint。
-- Archive/Restore 与永久删除分离。
-- 已归档 target 不可新增引用；普通 Query/Expand 不返回它。
 - EditableNode 和 Typed Ref API。
 - 只读 Relation Integrity Report。
 - 只读 Merge Preview；旧危险 Merge 已删除。
@@ -786,7 +778,7 @@ Admin/Core permanent delete
 
 已贯穿全部数据库与外部 I/O 入口，没有“带/不带 Context”的双轨：
 
-- 写：CreateNode / PatchNode / Archive / Restore / DeleteNode / AddEdge / RemoveEdge
+- 写：CreateNode / PatchNode / DeleteNode / AddEdge / RemoveEdge
 - 读：Query / QueryPage / GetNodeByID / GetNodeByAddress / LoadTree
 - 图：Traverse / Subtree / Ancestors / EquivalenceClass / OutEdges / InEdges
 - 关系：RefID / RefIDs / HasRef / FullNode / FullNodes / CheckRelations / PreviewMerge
@@ -825,9 +817,11 @@ relation capability 已可声明，关系 Node 可通过普通 Node API 管理�
 - 内联新建和编辑
 - 关系字段专用冲突提示
 
-### 6.5 Archive 管理体验
+### 6.5 回收站（不在内核）
 
-Core 与 Admin API 已支持 archive/restore，但当前通用后台列表默认排除已归档记录，前端也没有回收站、归档筛选和恢复按钮。现阶段只能在知道 Node ID 时通过管理 API 恢复。
+归档曾经在内核里（`archived_at` + Archive/Restore API），v0.9.3 已整体移除：它让所有读路径
+都要记得过滤，却没有地方能列出已归档记录，属于"进得去出不来"的框架机制。要做回收站，
+在项目层用状态字段实现（或做成插件），内核只负责永久删除。
 
 ### 6.6 Merge
 
@@ -886,13 +880,12 @@ Core 与 Admin API 已支持 archive/restore，但当前通用后台列表默认
 2. 客户端不能构造 QueryScope 或绕过 Policy。
 3. 公网 API 不接收 Raw SQL、任意排序字符串或未限制查询。
 4. ref/ref[] 只存在 Edge，不复制进 `Node.Fields`。
-5. 新 Edge 不能指向不存在、类型错误或已归档 Node。
+5. 新 Edge 不能指向不存在或类型错误的 Node。
 6. 单 ref 的最终基数由数据库约束兜底。
 7. symmetric/equivalence 只存一条 canonical Edge。
-8. 永久删除必须执行 on_delete；公共删除只归档。
-9. 归档认证 Node 必须使其 Session 失效。
-10. 所有列表、详情、搜索和导出必须具有显式 Scope。
-11. 管理旁路必须写出 `BypassPolicy()`，不能依赖空值。
+8. 删除必须执行 on_delete（内核只有永久删除，没有软删除）。
+9. 所有列表、详情、搜索和导出必须具有显式 Scope。
+10. 管理旁路必须写出 `BypassPolicy()`，不能依赖空值。
 12. 数据完整性修复必须显式执行，检查器不得静默改数据。
 13. 任何请求体都有硬上限（`maxBodyBytes` 8MB，`CmsCtxMaker` 里兜住，插件路由也覆盖）。
 14. JSON 解码额外收紧到 `maxJSONBytes` 1MB，并由 `BindStrictJSON` 统一映射成 413/400。

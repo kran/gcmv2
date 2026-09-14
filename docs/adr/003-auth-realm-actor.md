@@ -245,7 +245,7 @@ created_at
 - [x] logout 删除当前 Session。
 - [x] Core 提供删除某个 Node 全部 Session 的原语。
 - [ ] 修改密码流程调用删除该 Node 的全部 Session。
-- [ ] 归档认证 Node 后删除全部 Session。
+- 归档认证 Node 后删除全部 Session：归档机制已于 v0.9.3 移出内核，此项作废（改由项目层处理）。
 - [x] Session 续期频率受限，不每次请求写库。
 - [ ] 支持列出和撤销当前账号的其他 Session。
 

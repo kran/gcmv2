@@ -61,23 +61,17 @@ func addEdges(tx *dba.SQL, ts *types.Types, td types.TypeDef, from int64, refs m
 	return nil
 }
 
-// checkTarget rejects missing, archived, and wrong-Type targets.
+// checkTarget rejects missing and wrong-Type targets.
 func checkTarget(tx *dba.SQL, id int64, wantType string) error {
-	target, err := tx.Add(`SELECT type, archived_at FROM nodes WHERE id = #{1}`, id).FetchOne[struct {
-		Type       string     `db:"type"`
-		ArchivedAt *time.Time `db:"archived_at"`
-	}]()
+	target, err := tx.Add(`SELECT type FROM nodes WHERE id = #{1}`, id).FetchOne[string]()
 	if err != nil {
 		return err
 	}
 	if target == nil {
 		return fmt.Errorf("%w: target %d", ErrNotFound, id)
 	}
-	if target.ArchivedAt != nil {
-		return fmt.Errorf("%w: target %d", ErrNodeArchived, id)
-	}
-	if target.Type != wantType {
-		return fmt.Errorf("target %d is type %q, want %q", id, target.Type, wantType)
+	if *target != wantType {
+		return fmt.Errorf("target %d is type %q, want %q", id, *target, wantType)
 	}
 	return nil
 }
@@ -209,9 +203,6 @@ func (s *Service) AddEdge(ctx context.Context, from, to int64, fieldName string,
 	}
 	if fromNode == nil {
 		return 0, fmt.Errorf("core: addref: %w: source %d", ErrNotFound, from)
-	}
-	if fromNode.ArchivedAt != nil {
-		return 0, fmt.Errorf("core: addref: %w: source %d", ErrNodeArchived, from)
 	}
 	field, _, err := s.fieldOnType(fromNode.Type, fieldName)
 	if err != nil {

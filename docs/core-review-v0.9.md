@@ -64,9 +64,9 @@ ADR-004 核心约束已实现：
 
 - Traverse/Subtree 只接受 transitive 或 tree.parent 字段，并限制深度、拒绝新环。
 - EquivalenceClass 验证字段归属和 equivalence 声明。
-- AddEdge/Create/Patch 统一执行 ref/ref[] 基数、目标类型、归档目标和 symmetric 规范化。
+- AddEdge/Create/Patch 统一执行 ref/ref[] 基数、目标类型和 symmetric 规范化。
 - `on_delete` 支持 restrict/set_null/cascade；cascade 只允许关系 Node endpoint。
-- 公共删除改为归档，永久删除执行引用策略。
+- 公共删除与 Admin 删除都是永久删除，执行引用策略（归档机制已于 v0.9.3 移出内核）。
 - 新增 EditableNode/Ref API 和只读关系完整性报告。
 - 旧的直接执行 Merge 已删除，新增 Merge Preview；执行合并留待字段决策和审计完成。
 
@@ -151,7 +151,7 @@ array/object 仍保留为结构语法（不进 kinds 注册表），但容器只
 除 `Render.Partial`（站点程序式调用，内部 Background）外，所有数据库与外部 I/O 入口
 都接收 Context，且没有保留旧的无 Context 重载：
 
-- 写入：CreateNode / PatchNode / Archive / Restore / DeleteNode / AddEdge / RemoveEdge
+- 写入：CreateNode / PatchNode / DeleteNode / AddEdge / RemoveEdge
 - 读取与图：Query / GetNodeByID / GetNodeByAddress / LoadTree / Traverse / Subtree / Ancestors /
   EquivalenceClass / OutEdges / InEdges
 - 认证与配置：RegisterAuth / FindAuth / AddAuthMethod / RemoveAuthMethod / Session 全套 / Settings 全套

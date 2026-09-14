@@ -15,7 +15,7 @@ func (s *Service) nodesByIDs(ctx context.Context, ids []int64) ([]Node, error) {
 		return nil, nil
 	}
 	q := s.db.WithCtx(ctx).Add(
-		`SELECT * FROM nodes WHERE archived_at IS NULL AND id IN (#{1|expand})`, ids)
+		`SELECT * FROM nodes WHERE id IN (#{1|expand})`, ids)
 	rows, err := q.FetchList[Node]()
 	if err != nil {
 		return nil, fmt.Errorf("core: nodes by IDs: %w", err)
@@ -236,19 +236,16 @@ func (s *Service) typedEdges(
 				WHEN e.from_node IN (#{2|expand}) THEN e.to_node ELSE e.from_node END
 			WHERE e.field = #{1} AND e.symmetric = 1
 			  AND (e.from_node IN (#{2|expand}) OR e.to_node IN (#{2|expand}))
-			  AND target.archived_at IS NULL
 			ORDER BY e.sort, e.id LIMIT #{3}`
 		args = []any{relation.field.Name, ids, limit + 1}
 	} else if relation.incoming {
 		query = `SELECT e.* FROM edges e JOIN nodes src ON src.id = e.from_node
 			WHERE e.field = #{1} AND e.to_node IN (#{2|expand})
-			  AND src.type = #{3} AND src.archived_at IS NULL
 			ORDER BY e.to_node, e.sort, e.id LIMIT #{4}`
 		args = []any{relation.field.Name, ids, relation.sourceType, limit + 1}
 	} else {
 		query = `SELECT e.* FROM edges e JOIN nodes target ON target.id = e.to_node
 			WHERE e.field = #{1} AND e.from_node IN (#{2|expand})
-			  AND target.archived_at IS NULL
 			ORDER BY e.from_node, e.sort, e.id LIMIT #{3}`
 		args = []any{relation.field.Name, ids, limit + 1}
 	}

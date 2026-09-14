@@ -174,13 +174,13 @@ func TestDeleteRouteDeletes(t *testing.T) {
 	if fired != id {
 		t.Fatalf("WriteDelete 规则没被 Fire: fired=%d, want %d", fired, id)
 	}
-	// 直接查底表：真删 = 行没了；若是归档，行还在（只是公开读不到）。
+	// 直接查底表：删除 = 行没了（旧实现是归档，行会留下，所以这条曾经测不出来）。
 	row, err := site.DB().WithCtx(t.Context()).Select("nodes", `id = #{1}`, id).FetchOne[core.Node]()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if row != nil {
-		t.Fatalf("公共删除只是归档了（行还在，archived_at=%v）", row.ArchivedAt)
+		t.Fatalf("公共删除没有真的删掉（行还在）")
 	}
 	if got := do(site, "GET", "/api/nodes/article/"+itoa(id), nil); got.Code != http.StatusNotFound {
 		t.Fatalf("删除后公开读取 = %d, want 404: %s", got.Code, got.Body.String())
