@@ -1,6 +1,7 @@
 <template>
+    <!-- 点遮罩 / ESC / 右上角 × 都能关; 有未保存修改时 before-close 会先问一句。 -->
     <el-drawer append-to-body v-model="visibleModel" :title="title"
-               size="60%" :close-on-click-modal="false" :close-on-press-escape="false">
+               size="60%" :before-close="requestClose">
         <el-form>
             <!-- 显示名是节点列, 不是类型字段（不由 schema 渲染），所以这里手写一份行结构 —
                  必须与 FieldRenderer 的字段行一致（.fr-item > .fr-label + 控件）;
@@ -18,7 +19,7 @@
         </el-form>
         <template #footer>
             <div style="display:flex;justify-content:flex-end;gap:8px;">
-                <el-button @click="visibleModel = false">取消</el-button>
+                <el-button @click="requestClose()">取消</el-button>
                 <el-button type="primary" :loading="saving" @click="save"><el-icon><Check /></el-icon>保存</el-button>
             </div>
         </template>
@@ -42,7 +43,11 @@ export default {
     },
     emits: ['update:visible', 'changed'],
     data() {
-        return { form: { display: '', revision: 0, fields: {}, refPreset: {} }, saving: false, def: null }
+        return {
+            form: { display: '', revision: 0, fields: {}, refPreset: {} },
+            saving: false, def: null,
+            initial: '',   // 加载完成时的表单快照（判断"有没有未保存修改"）
+        }
     },
     computed: {
         // 标题在渲染期就会求值, 而 node 只在点开某一行之后才有 ——
@@ -66,6 +71,32 @@ export default {
         },
     },
     methods: {
+        // 快照只含会被提交的东西（display + 声明字段）: refPreset 是回显用的、异步到，
+        // 不参与比较，否则"刚打开就显示未保存"。
+        formSnapshot() {
+            return JSON.stringify({ display: this.form.display || '', fields: this.form.fields || {} })
+        },
+        isDirty() {
+            return this.initial !== '' && this.formSnapshot() !== this.initial
+        },
+        // 抽屉自己的关闭入口（点遮罩 / ESC / ×）走 before-close；底部"取消"和保存成功是
+        // 程序化关闭，所以也让它们走同一个检查。
+        // done 是 el-drawer 的"继续关闭"回调（before-close 约定）；底部"取消"没有它。
+        // 两条路都真的把 visibleModel 置 false，避免依赖某一版 element-plus 的回调语义。
+        requestClose(done) {
+            var self = this
+            var proceed = function () {
+                if (typeof done === 'function') done()
+                self.visibleModel = false
+            }
+            if (!this.isDirty()) {
+                proceed()
+                return
+            }
+            ElMessageBox.confirm('表单有未保存的修改，关闭后这些修改会丢失。', '未保存的修改', {
+                type: 'warning', confirmButtonText: '放弃修改', cancelButtonText: '继续编辑',
+            }).then(proceed).catch(function () {})
+        },
         loadCreate() {
             this.def = this.defs[this.typeName] || null
             var defaults = {}
@@ -80,6 +111,7 @@ export default {
                     this.form.refPreset[this.presetField] = [{ id: this.presetValue, label: this.presetLabel }]
                 }
             }
+            this.initial = this.formSnapshot()
         },
         loadEdit() {
             var r = this.node
@@ -93,6 +125,7 @@ export default {
                     refPreset: {},
                 }
                 // 引用回显: expand * → refPreset（已选值显示标题, 非裸 id）
+                this.initial = this.formSnapshot()
                 window.$api.get('/admin/expand', { node: r.id, expr: '*' }).then((ex) => {
                     var expand = (ex.node && ex.node.expand) || {}
                     var preset = {}
@@ -123,6 +156,7 @@ export default {
                 : window.$api.createNode(this.typeName, body)
             p.then(() => {
                 ElMessage.success('已保存')
+                this.initial = this.formSnapshot()   // 保存成功 = 不再有未保存修改
                 this.$emit('changed')
                 this.visibleModel = false
             }).catch(() => {}).finally(() => { this.saving = false })

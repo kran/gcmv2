@@ -97,6 +97,27 @@ function checkAssets() {
 // ── ⓪b 破坏性操作：措辞与行为必须对得上 ──────────────────────────────
 // NodeOps 的"删除"调的是 deleteNode（永久删除，按 on_delete 处理），而归档节点连后台列表
 // 都查不到（所有读路径都写死 archived_at IS NULL）—— 措辞含糊 = 运营当软删点下去。
+// 编辑抽屉必须能"点外面就关"，且关之前要拦一下未保存的修改。
+// 曾经写死 :close-on-click-modal="false" / :close-on-press-escape="false" —— 只能点关闭按钮，
+// 手一滑就只能取消，改起来烦。element-plus 的默认值是 true，所以这两行不该出现。
+function checkDrawerClose() {
+    const src = read(path.join(ADMIN_DIR, 'pages/NodeEditDialog.vue'))
+    const problems = []
+    if (/:close-on-click-modal\s*=\s*"false"/.test(src)) problems.push('抽屉把"点遮罩关闭"关掉了')
+    if (/:close-on-press-escape\s*=\s*"false"/.test(src)) problems.push('抽屉把 ESC 关闭关掉了')
+    if (!/:before-close\s*=\s*"requestClose"/.test(src)) problems.push('抽屉缺 :before-close="requestClose"（未保存提示）')
+    if (!/isDirty\s*\(/.test(src)) problems.push('没有脏检查 isDirty')
+    if (!/ElMessageBox\.confirm/.test(src)) problems.push('没有确认弹窗 ElMessageBox.confirm')
+    if (!/@click="requestClose\(\)"/.test(src)) problems.push('底部"取消"没走 requestClose（会绕过未保存提示）')
+    let failed = 0
+    for (const problem of problems) {
+        failed++
+        console.log('  FAIL ' + problem)
+    }
+    if (!failed) console.log('  ok   NodeEditDialog 点遮罩/ESC 可关，且关前拦未保存修改')
+    return failed
+}
+
 function checkDestructiveWording() {
     const src = read(path.join(ADMIN_DIR, 'pages/NodeOps.vue'))
     const problems = []
@@ -396,7 +417,7 @@ async function main() {
         process.exit(2)
     }
     console.log(mode === 'sfc' ? '编译校验 (' + pageList().length + ' 个页面)' : '渲染回归')
-    const failed = checkAssets() + checkDestructiveWording() + (mode === 'sfc' ? await checkSFC() : await checkRender())
+    const failed = checkAssets() + checkDestructiveWording() + checkDrawerClose() + (mode === 'sfc' ? await checkSFC() : await checkRender())
     console.log(failed ? failed + ' 项失败' : '全部通过')
     process.exit(failed ? 1 : 0)
 }
