@@ -41,7 +41,8 @@
             <div class="type-item" :class="{ active: f.active === 0 }" @click="clearFilter(f)">
               <span>全部</span>
             </div>
-            <el-tree :ref="'tree-' + f.field" :data="f.nodes" node-key="id" default-expand-all
+            <!-- 默认收起: 分类多的时候整片展开没法看。点节点=选中, 点箭头=展开。 -->
+            <el-tree :ref="'tree-' + f.field" :data="f.nodes" node-key="id"
                      :expand-on-click-node="false" highlight-current
                      :current-node-key="f.active" @node-click="(n) => pickTreeNode(f, n)">
               <template #default="{ data }">
