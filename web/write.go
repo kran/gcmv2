@@ -10,9 +10,12 @@ import (
 //
 // 与读入口同样的两层分工：
 //
-//	CmsCtx.CreateNode / UpdateNode / DeleteNode
+//	CmsCtx.CreateNode / UpdateNode
 //	    "客户端发起的写"：触发 web.write.<action>.<type> 规则（身份判断 + 允许字段
 //	    + 就地加工）→ 调引擎 → 返回裁剪过的节点。
+//
+//	删除没有 CmsCtx 入口：公共 DELETE 在 handler 里自己 Fire 规则，然后走
+//	ArchiveNode（归档）；永久删除只属于后台，引擎直调，按字段的 on_delete 处理。
 //
 //	engine.CreateNode / PatchNode / DeleteNode
 //	    "系统自己的写"：审批、计数、导入、迁移、后台。没有客户端授权可言，不需要规则。
@@ -73,25 +76,6 @@ func (c *CmsCtx) UpdateNode(id int64, patch *core.NodePatch) (*core.Node, error)
 		return nil, err
 	}
 	return c.readBack(id)
-}
-
-// DeleteNode 走删除规则（公共删除 = 归档）。
-func (c *CmsCtx) DeleteNode(id int64) error {
-	existing, err := c.site.engine.GetNodeById(c.R.Context(), id)
-	if err != nil {
-		return err
-	}
-	if existing == nil {
-		return NotFound("not found")
-	}
-	event, err := c.writeEvent(WriteDelete, existing.Type)
-	if err != nil {
-		return err
-	}
-	if err := c.site.engine.Hooks().Fire(event, c, id); err != nil {
-		return err
-	}
-	return c.site.engine.DeleteNode(c.R.Context(), id)
 }
 
 // writeEvent 取写事件名；未注册规则的类型直接拒绝（匿名 401 / 已认证 403）。

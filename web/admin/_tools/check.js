@@ -94,6 +94,22 @@ function checkAssets() {
     return failed
 }
 
+// ── ⓪b 破坏性操作：措辞与行为必须对得上 ──────────────────────────────
+// NodeOps 的"删除"调的是 deleteNode（永久删除，按 on_delete 处理），而归档节点连后台列表
+// 都查不到（所有读路径都写死 archived_at IS NULL）—— 措辞含糊 = 运营当软删点下去。
+function checkDestructiveWording() {
+    const src = read(path.join(ADMIN_DIR, 'pages/NodeOps.vue'))
+    const problems = []
+    // 盯住按钮本身（只查"文件里出现过永久删除"太松：确认框里有，按钮上却可能写着"删除"）
+    const btn = /@click="doDelete"[^>]*>([^<]*)</.exec(src)
+    if (!btn || !btn[1].includes('永久删除')) problems.push('删除按钮文案不是"永久删除"')
+    if (!src.includes('$api.deleteNode(')) problems.push('删除动作没调 deleteNode')
+    if (src.includes('archiveNode(')) problems.push('NodeOps 里出现了 archiveNode')
+    for (const msg of problems) console.log('  FAIL ' + msg)
+    if (!problems.length) console.log('  ok   NodeOps 的删除明确标注为永久删除')
+    return problems.length
+}
+
 // ── ① 编译校验：每个页面都能被 SFC 加载器编译 ────────────────────────
 async function checkSFC() {
     const { loadComponent } = loadRuntime()
@@ -380,7 +396,7 @@ async function main() {
         process.exit(2)
     }
     console.log(mode === 'sfc' ? '编译校验 (' + pageList().length + ' 个页面)' : '渲染回归')
-    const failed = checkAssets() + (mode === 'sfc' ? await checkSFC() : await checkRender())
+    const failed = checkAssets() + checkDestructiveWording() + (mode === 'sfc' ? await checkSFC() : await checkRender())
     console.log(failed ? failed + ' 项失败' : '全部通过')
     process.exit(failed ? 1 : 0)
 }

@@ -3,7 +3,7 @@
         <el-button v-if="showCreate" size="small" link class="op-btn" @click="openCreate()">新建子级</el-button>
         <el-button size="small" link class="op-btn" @click="openEdit">编辑</el-button>
         <el-button size="small" link class="op-btn" @click="openExpand">引用</el-button>
-        <el-button size="small" link class="op-btn" @click="doDelete">删除</el-button>
+        <el-button size="small" link class="op-btn" @click="doDelete">永久删除</el-button>
     </div>
     <node-edit-dialog v-model:visible="editVisible" :node="node" :type-name="typeName"
                       :preset-field="parentField" :preset-value="parentId"
@@ -34,7 +34,7 @@
     </el-dialog>
 </template>
 <script>
-// NodeOps: 通用节点操作（编辑/删除/引用展开）— nodes.vue / tree.vue 共用。
+// NodeOps: 通用节点操作（编辑/永久删除/引用展开）— nodes.vue / tree.vue 共用。
 export default {
     name: 'NodeOps',
     components: { NodeEditDialog: Vue.defineAsyncComponent(() => window.Panel.loadComponent('pages/NodeEditDialog.vue')) },
@@ -77,10 +77,13 @@ export default {
         },
         doDelete() {
             var r = this.node
-            ElMessageBox.confirm('删除 #' + r.id + ' ?（关联引用一并清理）', '确认', { type: 'warning' })
+            // 这里是永久删除（engine.DeleteNode，按 on_delete 处理，被必填引用指向会拒绝）——
+            // 和"归档"不是一回事：归档节点连后台列表都查不到，所以措辞必须写明永久，别让人当软删点。
+            ElMessageBox.confirm('永久删除 #' + r.id + ' ？不可撤销，且被引用时可能被拒绝。', '确认',
+                { type: 'warning', confirmButtonText: '永久删除' })
                 .then(() => {
                     window.$api.deleteNode(r.id).then(() => {
-                        ElMessage.success('已删除')
+                        ElMessage.success('已永久删除')
                         this.$emit('changed')
                     }).catch(() => {})
                 }).catch(() => {})

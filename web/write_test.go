@@ -1,6 +1,7 @@
 package web
 
 import (
+	"net/http"
 	"sync/atomic"
 	"testing"
 
@@ -130,15 +131,50 @@ func TestUpdateAndDeleteEntry(t *testing.T) {
 		t.Fatalf("规则未加工 patch: %#v", updated.Display)
 	}
 
-	if err := ctx.DeleteNode(999999); err == nil {
-		t.Fatal("删除不存在的节点应报错")
-	}
-	if err := ctx.DeleteNode(id); err != nil {
+	_ = ctx
+}
+
+// 公共删除（DELETE /api/nodes/{type}/{id}）= Fire WriteDelete 规则 + ArchiveNode。
+//
+// 断言必须能区分"归档"和"永久删除"：两者都会让默认读取拿不到，所以这里直接查
+// archived_at。之前只断言"读不到"，于是即使实现走的是永久删除也照样通过 —— 一个
+// 看起来在测契约、实际测不出东西的测试。
+func TestDeleteRouteArchives(t *testing.T) {
+	var fired int64
+	site, _ := maskTestSite(t, func(site *Site, _ *atomic.Int32) {
+		site.WriteRule(WriteDelete, "article", func(_ *CmsCtx, id int64) error {
+			fired = id
+			return nil // 允许匿名：本测试只关心"规则被 Fire"与"结果是归档"
+		})
+	})
+	id, err := site.Engine().CreateNode(t.Context(), &core.Node{
+		Type: "article", Display: "待删文章", Fields: core.Fields{"title": "待删文章"},
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	// 公共删除 = 归档：默认读取（不含归档）拿不到
-	if deleted, err := site.Engine().GetNodeById(t.Context(), id); err != nil || deleted != nil {
-		t.Fatalf("归档后不该再读到: %#v, %v", deleted, err)
+	w := do(site, "DELETE", "/api/nodes/article/"+itoa(id), nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete route = %d: %s", w.Code, w.Body.String())
+	}
+	if fired != id {
+		t.Fatalf("WriteDelete 规则没被 Fire: fired=%d, want %d", fired, id)
+	}
+	// 直接取 core.Node：GetNodeById 会把归档的过滤掉，只有绕过它才看得见 archived_at。
+	row, err := site.DB().WithCtx(t.Context()).Select("nodes", `id = #{1}`, id).FetchOne[core.Node]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row == nil {
+		t.Fatal("公共删除把节点物理删掉了（应当只是归档）")
+	}
+	if row.ArchivedAt == nil {
+		t.Fatal("公共删除没有写 archived_at（应当只是归档）")
+	}
+	// 归档 = 数据还在、只是读不到。这里走公开读路径（负责过滤归档的是读路径，
+	// 不是 GetNodeById —— 后者连归档节点也返回，只有 Node.ArchivedAt 能分辨）。
+	if got := do(site, "GET", "/api/nodes/article/"+itoa(id), nil); got.Code != http.StatusNotFound {
+		t.Fatalf("归档后公开读取 = %d, want 404: %s", got.Code, got.Body.String())
 	}
 }
 
