@@ -124,13 +124,14 @@ func TestApiNodeTypeMismatch(t *testing.T) {
 	}
 	for _, request := range []struct {
 		method string
+		path   string
 		body   any
 	}{
-		{http.MethodGet, nil},
-		{http.MethodPut, map[string]any{"display": "越界"}},
-		{http.MethodDelete, nil},
+		{http.MethodGet, "/api/nodes/guestbook/" + itoa(id), nil},
+		{http.MethodPut, "/api/nodes/guestbook/" + itoa(id), map[string]any{"display": "越界"}},
+		{http.MethodPost, "/api/nodes/guestbook/" + itoa(id) + "/archive", nil},
 	} {
-		w := do(s, request.method, "/api/nodes/guestbook/"+itoa(id), request.body)
+		w := do(s, request.method, request.path, request.body)
 		if w.Code != http.StatusNotFound {
 			t.Fatalf("%s mismatched type = %d, want 404", request.method, w.Code)
 		}

@@ -93,7 +93,7 @@ func TestWriteRulesGateNodeWrites(t *testing.T) {
 	}{
 		{http.MethodPost, "/api/nodes/guestbook", map[string]any{"display": "hi"}},
 		{http.MethodPut, "/api/nodes/guestbook/1", map[string]any{"display": "x"}},
-		{http.MethodDelete, "/api/nodes/guestbook/1", nil},
+		{http.MethodPost, "/api/nodes/guestbook/1/archive", nil},
 	} {
 		w := do(s, tc.method, tc.path, tc.body)
 		if w.Code != http.StatusUnauthorized {
@@ -184,8 +184,8 @@ func TestWriteRulesBoundFieldsAndTypes(t *testing.T) {
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("undeclared type update = %d %s", w.Code, w.Body.String())
 	}
-	// 删除：注册过 → 归档成功。
-	w = do(s, http.MethodDelete, "/api/nodes/article/"+strconv.FormatInt(created.ID, 10), nil)
+	// 归档：注册过 → 成功。
+	w = do(s, http.MethodPost, "/api/nodes/article/"+strconv.FormatInt(created.ID, 10)+"/archive", nil)
 	if w.Code != http.StatusOK {
 		t.Fatalf("declared delete = %d %s", w.Code, w.Body.String())
 	}
