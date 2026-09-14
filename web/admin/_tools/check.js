@@ -229,6 +229,10 @@ async function checkRender() {
         titleOf: () => '新闻',
         refresh() {},
     }
+    // 组件的方法统统绑到假上下文上（只补没显式覆盖的）—— 免得每加一个方法就得回来补测试脚手架。
+    for (const name of Object.keys(methods)) {
+        if (fake[name] === undefined) fake[name] = methods[name].bind(fake)
+    }
     // 假上下文里用到的 data 字段, 必须在组件自己的 data() 里真实存在 ——
     // 否则测试自己造了一个组件里根本没有的字段, 页面在浏览器里炸了这里却是绿的。
     const baseData = typeof nodesComp.data === 'function' ? nodesComp.data() : {}
@@ -257,6 +261,17 @@ async function checkRender() {
         fail('点“全部”后旧分类高亮未重置')
     } else {
         pass('引用筛选: 树目标含子树、其他目标单选节点、多字段 AND、清除后高亮重置')
+    }
+
+    // ④ 切换类型要清掉上一个类型的查询残留: 搜索框(q)/筛选表达式(filter)/页码
+    fake.query.q = '上一个类型的搜索词'
+    fake.query.filter = '(in ->category [9])'
+    fake.query.page = 7
+    methods.selectType.call(fake, 'signup')
+    if (fake.query.q !== '' || fake.query.filter !== '' || fake.query.page !== 1) {
+        fail('切换类型后查询残留: ' + JSON.stringify({ q: fake.query.q, filter: fake.query.filter, page: fake.query.page }))
+    } else {
+        pass('切换类型清空搜索词/筛选/页码')
     }
 
     // ⑤ 左侧类型列表: 组内按类型键排序；没填 group 的与站点自命的"未分组"并成同一节，且排最前

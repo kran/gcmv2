@@ -222,7 +222,10 @@ export default {
         selectType(t) {
             this.query.type = t
             this.query.page = 1
-            this.query.filter = '' // 类型切换清残留（旧类型的字段对不上新类型, fail-loud 报错）
+            // 类型切换清残留: 筛选表达式是按旧类型的字段填的（对不上新类型, fail-loud 报错）;
+            // 搜索词则是"留在框里还在生效"的隐形过滤 —— 一起清掉, 别让它跨类型继续作用。
+            this.query.q = ''
+            this.query.filter = ''
             const def = this.typeDefs[t] || {}
             this.treeMode = !!(def.admin && def.admin.view === 'tree')
             this.setupFilters(def)
