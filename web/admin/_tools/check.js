@@ -73,6 +73,27 @@ function pageList() {
     return fs.readdirSync(PAGES_DIR).filter(f => f.endsWith('.vue')).sort()
 }
 
+// ── ⓿ 静态资源引用：index.html 里写到的文件必须真的存在 ──────────────
+// 路径写错不会报错，只是 404 + 静默失效（favicon 没了、样式不生效），所以在这里钉住。
+function checkAssets() {
+    const html = read(path.join(ADMIN_DIR, 'index.html'))
+    const refs = []
+    for (const m of html.matchAll(/(?:href|src)="([^"]+)"/g)) {
+        const url = m[1]
+        if (/^(https?:)?\/\//.test(url) || url.startsWith('data:') || url.startsWith('#')) continue
+        refs.push(url.startsWith('/admin/ui/') ? url.slice('/admin/ui/'.length) : url)
+    }
+    let failed = 0
+    for (const rel of refs) {
+        if (!fs.existsSync(path.join(ADMIN_DIR, rel))) {
+            failed++
+            console.log('  FAIL index.html 引用了不存在的文件: ' + rel)
+        }
+    }
+    if (!failed) console.log('  ok   index.html 引用的静态资源都存在（' + refs.length + ' 个）')
+    return failed
+}
+
 // ── ① 编译校验：每个页面都能被 SFC 加载器编译 ────────────────────────
 async function checkSFC() {
     const { loadComponent } = loadRuntime()
@@ -359,7 +380,7 @@ async function main() {
         process.exit(2)
     }
     console.log(mode === 'sfc' ? '编译校验 (' + pageList().length + ' 个页面)' : '渲染回归')
-    const failed = mode === 'sfc' ? await checkSFC() : await checkRender()
+    const failed = checkAssets() + (mode === 'sfc' ? await checkSFC() : await checkRender())
     console.log(failed ? failed + ' 项失败' : '全部通过')
     process.exit(failed ? 1 : 0)
 }
