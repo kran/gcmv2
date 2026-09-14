@@ -221,20 +221,19 @@ func expandTemplateNodes(c *CmsCtx, eng core.Engine, expression string, ids []in
 		}
 		return (*core.Node)(nil)
 	}
-	var paths []gquery.ExpandPath
-	var err error
+	var (
+		expanded []*core.Node
+		err      error
+	)
 	if strings.TrimSpace(expression) == "" || strings.TrimSpace(expression) == "*" {
-		node, getErr := eng.GetNodeByID(c.R.Context(), ids[0])
-		fail(getErr)
-		if node == nil {
-			fail(core.ErrNotFound)
-		}
-		paths = eng.AutoExpand(node.Type)
+		// 路径取决于节点类型: 交给内核读一次节点自己决定。不要为了拿类型先 GetNodeByID,
+		// 紧接着 ExpandMany 又把同一批行读第二遍。
+		expanded, err = eng.ExpandAutoMany(c.R.Context(), ids)
 	} else {
-		paths, err = gquery.ParseExpand(expression)
-		fail(err)
+		paths, perr := gquery.ParseExpand(expression)
+		fail(perr)
+		expanded, err = eng.ExpandMany(c.R.Context(), ids, paths...)
 	}
-	expanded, err := eng.ExpandMany(c.R.Context(), ids, paths...)
 	fail(err)
 	// 展开出来的节点可能属于不同（甚至不可见）类型：行范围 trusted，但字段按
 	// 各自类型读规则裁（ReadView —— 与单独取该节点同源）。

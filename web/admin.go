@@ -626,15 +626,16 @@ func (b *backend) queryNodes(ctx *CmsCtx) {
 }
 
 // expandMany 列表批量展开全部出边 ref 字段 — "*" 引擎语义（core 解析）。
+// 根节点直接用列表已经查出来的行: 按 ids 回表再读一遍整页是白读。
 func (b *backend) expandMany(ctx context.Context, nodes []core.Node) ([]core.Node, error) {
 	if len(nodes) == 0 {
 		return nodes, nil
 	}
-	ids := make([]int64, 0, len(nodes))
-	for _, n := range nodes {
-		ids = append(ids, n.ID)
+	roots := make([]*core.Node, len(nodes))
+	for i := range nodes {
+		roots[i] = &nodes[i]
 	}
-	expanded, err := b.eng.ExpandMany(ctx, ids, b.eng.AutoExpand(nodes[0].Type)...)
+	expanded, err := b.eng.ExpandNodes(ctx, roots, b.eng.AutoExpand(nodes[0].Type)...)
 	if err != nil {
 		return nil, err
 	}

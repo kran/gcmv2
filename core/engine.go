@@ -50,7 +50,11 @@ type Engine interface {
 	EquivalenceClass(ctx context.Context, typeName string, start int64, field string, maxHops int) ([]int64, error)
 	Expand(ctx context.Context, id int64, paths ...query.ExpandPath) (*Node, error)
 	ExpandAuto(ctx context.Context, id int64) (*Node, error)
+	ExpandAutoMany(ctx context.Context, ids []int64) ([]*Node, error)
 	ExpandMany(ctx context.Context, ids []int64, paths ...query.ExpandPath) ([]*Node, error)
+	// ExpandNodes 对已加载的根节点套用展开路径(不读库) —— 列表/模板已持有行时用它,
+	// 避免为了拿类型或为了展开再 SELECT 一遍同一批行。
+	ExpandNodes(ctx context.Context, roots []*Node, paths ...query.ExpandPath) ([]*Node, error)
 	AutoExpand(typeName string) []query.ExpandPath
 
 	// ── 认证（opaque credentials + Realm-bound sessions） ──

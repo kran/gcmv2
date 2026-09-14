@@ -1,14 +1,92 @@
 package core
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/kran/dba"
 	gquery "github.com/kran/gcmv2/query"
 )
+
+// captureQueries 记录 dba 实际执行过的 SQL, 用于断言"同一批行没有被读两遍"。
+// 必须在 New(db, ...) 之前把返回的 db 装进 Service。
+func captureQueries(t *testing.T, db *dba.SQL) (*dba.SQL, func() []string) {
+	t.Helper()
+	var mu sync.Mutex
+	var out []string
+	db = db.SetLogger(func(_ context.Context, _ time.Time, query string, args []any, _ error) {
+		flat := strings.Join(strings.Fields(query), " ")
+		mu.Lock()
+		out = append(out, fmt.Sprintf("%s %v", flat, args))
+		mu.Unlock()
+	})
+	return db, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), out...)
+	}
+}
+
+// 回归: 根节点只能读一次。曾经 ExpandAuto / 模板渲染为了拿类型先 GetNodeByID,
+// 紧接着 ExpandMany 再按 ids 把同一行读第二遍。
+func TestExpandReadsRootOnce(t *testing.T) {
+	ts := newTypes(t, expandPathTypes)
+	db, taken := captureQueries(t, testDB(t))
+	s := New(db, ts)
+
+	cat, _ := s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: Fields{"name": "行业"}})
+	p1, _ := s.CreateNode(t.Context(), &Node{Type: "person", Display: "t", Fields: Fields{"name": "张三"}})
+	art, _ := s.CreateNode(t.Context(), &Node{Type: "article", Display: "t", Fields: Fields{
+		"title": "甲", "authors": []any{p1}, "categories": []any{cat}}})
+
+	rootReads := func(queries []string) int {
+		// 日志格式是 "<sql> <args>", 根节点那次的 args 恰好只有它自己。
+		want := " " + fmt.Sprintf("[%d]", art)
+		n := 0
+		for _, q := range queries {
+			if strings.Contains(q, "FROM nodes WHERE id IN") && strings.HasSuffix(q, want) {
+				n++
+			}
+		}
+		return n
+	}
+
+	mark := len(taken())
+	if _, err := s.ExpandAuto(t.Context(), art); err != nil {
+		t.Fatal(err)
+	}
+	if got := rootReads(taken()[mark:]); got != 1 {
+		t.Fatalf("ExpandAuto 读了根节点 %d 次, 期望 1: %v", got, taken()[mark:])
+	}
+
+	// ExpandAutoMany 同理（模板渲染走这条路）。
+	mark = len(taken())
+	if _, err := s.ExpandAutoMany(t.Context(), []int64{art}); err != nil {
+		t.Fatal(err)
+	}
+	if got := rootReads(taken()[mark:]); got != 1 {
+		t.Fatalf("ExpandAutoMany 读了根节点 %d 次, 期望 1: %v", got, taken()[mark:])
+	}
+
+	// ExpandNodes: 根节点是调用方给的, 一次库都不该读。
+	nodes, err := s.nodesByIDs(t.Context(), []int64{art})
+	if err != nil || len(nodes) != 1 {
+		t.Fatalf("load root: %v %d", err, len(nodes))
+	}
+	mark = len(taken())
+	if _, err := s.ExpandNodes(t.Context(), []*Node{&nodes[0]}, s.AutoExpand(nodes[0].Type)...); err != nil {
+		t.Fatal(err)
+	}
+	if got := rootReads(taken()[mark:]); got != 0 {
+		t.Fatalf("ExpandNodes 回表读了根节点 %d 次, 期望 0: %v", got, taken()[mark:])
+	}
+}
 
 func expandText(t *testing.T, service *Service, id int64, expression string) (*Node, error) {
 	t.Helper()

@@ -47,6 +47,7 @@ func (s *Service) Expand(ctx context.Context, id int64, paths ...gquery.ExpandPa
 
 // ExpandMany expands relation paths without N+1 queries. Every path hop is
 // validated against the current Type; incoming hops include their source Type.
+// 已持有节点行的调用方（列表/模板）应用 ExpandNodes, 不要按 ids 再回表读一遍。
 func (s *Service) ExpandMany(ctx context.Context, ids []int64, paths ...gquery.ExpandPath) ([]*Node, error) {
 	nodes, err := s.nodesByIDs(ctx, ids)
 	if err != nil {
@@ -56,28 +57,39 @@ func (s *Service) ExpandMany(ctx context.Context, ids []int64, paths ...gquery.E
 	for i := range nodes {
 		roots[i] = &nodes[i]
 	}
-	return s.expandRoots(ctx, roots, paths...)
+	return s.ExpandNodes(ctx, roots, paths...)
 }
 
 // ExpandAuto 展开一个节点"自动声明"的全部引用路径。路径取决于节点类型，所以由内核读一次
 // 节点自己决定；调用方不必为了拿类型先查一次节点、再让 Expand 查第二遍。
 func (s *Service) ExpandAuto(ctx context.Context, id int64) (*Node, error) {
-	nodes, err := s.nodesByIDs(ctx, []int64{id})
+	nodes, err := s.ExpandAutoMany(ctx, []int64{id})
+	if err != nil {
+		return nil, err
+	}
+	return nodes[0], nil
+}
+
+// ExpandAutoMany 是 ExpandAuto 的批量形态: 路径取第一个节点的类型(列表端点同口径),
+// 根节点只读一次。
+func (s *Service) ExpandAutoMany(ctx context.Context, ids []int64) ([]*Node, error) {
+	nodes, err := s.nodesByIDs(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
 	if len(nodes) == 0 {
 		return nil, ErrNotFound
 	}
-	roots, err := s.expandRoots(ctx, []*Node{&nodes[0]}, s.AutoExpand(nodes[0].Type)...)
-	if err != nil {
-		return nil, err
+	roots := make([]*Node, len(nodes))
+	for i := range nodes {
+		roots[i] = &nodes[i]
 	}
-	return roots[0], nil
+	return s.ExpandNodes(ctx, roots, s.AutoExpand(nodes[0].Type)...)
 }
 
-// expandRoots 对已经加载好的根节点套用展开路径（ExpandMany / ExpandAuto 共用）。
-func (s *Service) expandRoots(ctx context.Context, roots []*Node, paths ...gquery.ExpandPath) ([]*Node, error) {
+// ExpandNodes 对"已经加载好的"根节点套用展开路径（ExpandMany / ExpandAuto* 共用）。
+// 供已持有节点的调用方直接复用: 为拿类型或为展开把同一批行再 SELECT 一遍是白读。
+func (s *Service) ExpandNodes(ctx context.Context, roots []*Node, paths ...gquery.ExpandPath) ([]*Node, error) {
 	if len(paths) == 0 || len(roots) == 0 {
 		return roots, nil
 	}
