@@ -1,7 +1,6 @@
 package core
 
 import (
-	"strings"
 	"testing"
 	"time"
 )
@@ -30,21 +29,14 @@ func TestTimeCanonicalForm(t *testing.T) {
 	}
 }
 
-// Scan 除统一格式外还要认历史写法：驱动默认的 time.Time.String()、种子 SQL 的无时区字符串。
-func TestTimeScanLegacy(t *testing.T) {
-	cases := []struct{ raw, want string }{
+// Scan 只认统一格式（外加驱动可能给的 time.Time / nil / []byte）。
+// 历史写法必须报错：内核不做兼容，老数据由 tools/legacy-time 处理。
+func TestTimeScanStrict(t *testing.T) {
+	var got Time
+	accept := []struct{ raw, want string }{
 		{"2026-09-14T23:06:41Z", "2026-09-14T23:06:41Z"},
-		{"2026-09-15T07:06:41.615238+08:00", "2026-09-14T23:06:41Z"},
-		// 驱动默认格式：带时区缩写与单调时钟后缀
-		{"2026-09-15 07:06:57.993279 +0800 CST m=+0.020570626", "2026-09-14T23:06:57Z"},
-		// 驱动的 _time_format=sqlite
-		{"2026-09-15 07:06:57.993279+08:00", "2026-09-14T23:06:57Z"},
-		// 无时区 → 按 UTC（Scan 必须与服务器时区无关）
-		{"2026-09-15 07:06:57", "2026-09-15T07:06:57Z"},
-		{"2026-08-30", "2026-08-30T00:00:00Z"},
 	}
-	for _, tc := range cases {
-		var got Time
+	for _, tc := range accept {
 		if err := got.Scan(tc.raw); err != nil {
 			t.Fatalf("Scan(%q): %v", tc.raw, err)
 		}
@@ -52,22 +44,42 @@ func TestTimeScanLegacy(t *testing.T) {
 			t.Fatalf("Scan(%q) = %q, want %q", tc.raw, got, tc.want)
 		}
 	}
-	var got Time
 	if err := got.Scan([]byte("2026-09-14T23:06:41Z")); err != nil || got.String() != "2026-09-14T23:06:41Z" {
 		t.Fatalf("Scan([]byte) = %q, %v", got, err)
 	}
 	if err := got.Scan(time.Date(2026, 9, 14, 23, 6, 41, 0, time.UTC)); err != nil || got.String() != "2026-09-14T23:06:41Z" {
 		t.Fatalf("Scan(time.Time) = %q, %v", got, err)
 	}
-	if err := got.Scan(int64(1789427201)); err != nil || got.Unix() != 1789427201 {
-		t.Fatalf("Scan(int64) = %q, %v", got, err)
-	}
 	if err := got.Scan(nil); err != nil || !got.IsZero() {
 		t.Fatalf("Scan(nil) = %q, %v", got, err)
 	}
-	// 认不出来必须报错，不能静默变成零值。
-	if err := got.Scan("昨天下午"); err == nil {
-		t.Fatal("garbage must fail loud")
+	// 统一格式以外的写法一律 fail-loud —— 包括曾经用过的那些。
+	for _, raw := range []string{
+		"2026-09-15 07:06:57.993279 +0800 CST m=+0.020570626", // 驱动默认
+		"2026-09-15 07:06:57.993279+08:00",                    // _time_format=sqlite
+		"2026-09-15 07:06:57",                                 // 无时区
+		"2026-08-30",                                          // 纯日期
+		"1789427201",                                          // epoch
+		"昨天下午",
+	} {
+		if err := got.Scan(raw); err == nil {
+			t.Fatalf("Scan(%q) 应当报错（内核不认非统一格式）", raw)
+		}
+	}
+}
+
+// 客户端输入：统一格式或带偏移的 RFC3339 都收（归一化），裸本地时间与历史写法拒收。
+func TestTimeParseInput(t *testing.T) {
+	if parsed, err := ParseTime("2026-09-15T07:06:41+08:00"); err != nil || parsed.String() != "2026-09-14T23:06:41Z" {
+		t.Fatalf("带偏移输入 = %q, %v", parsed, err)
+	}
+	if parsed, err := ParseTime("2026-09-15T07:06:41.615238+08:00"); err != nil || parsed.String() != "2026-09-14T23:06:41Z" {
+		t.Fatalf("带小数输入 = %q, %v", parsed, err)
+	}
+	for _, raw := range []string{"2026-09-15 07:06:57", "2026-09-15 07:06:57 +0800 CST m=+0.02", "1789427201", "昨天"} {
+		if _, err := ParseTime(raw); err == nil {
+			t.Fatalf("ParseTime(%q) 应当报错", raw)
+		}
 	}
 }
 
@@ -90,9 +102,9 @@ func TestTimeJSON(t *testing.T) {
 	}
 }
 
-// 端到端：引擎写的时间必须是统一格式、SQLite 的日期函数能用；
-// 手写 SQL 塞进历史脏值时闸门必须抓住，迁移把它洗干净。
-func TestTimeGateAndMigration(t *testing.T) {
+// 闸门：引擎写入必须过；手写 SQL 塞的脏值（含 SQLite 解析不了的）必须被抓住。
+// 内核不做数据迁移 —— 修数据是 tools/legacy-time 的事。
+func TestTimeGate(t *testing.T) {
 	db := testDB(t)
 	s := New(db, newTypes(t, testTypesYAML))
 	id, err := s.CreateNode(t.Context(), &Node{Type: "article", Display: "时间"})
@@ -106,10 +118,7 @@ func TestTimeGateAndMigration(t *testing.T) {
 		}
 		return v
 	}
-	if got := strings.Trim(raw("quote(created_at)"), "'"); got != TimeOf(time.Now()).Format(TimeFormat) && got != raw("strftime('%Y-%m-%dT%H:%M:%SZ', created_at)") {
-		t.Fatalf("引擎写入的不是统一格式: %q", got)
-	}
-	// 真正的收益：SQLite 能解析它（改之前 datetime() 返回 NULL，按时间的排序/筛选全废）。
+	// 真正的收益：SQLite 能解析它（改之前 datetime() 返回 NULL，按时间排序/筛选全废）。
 	if got := raw("COALESCE(datetime(created_at), 'NULL')"); got == "NULL" {
 		t.Fatal("datetime(created_at) 解析不了 —— 时间格式没统一成功")
 	}
@@ -117,7 +126,7 @@ func TestTimeGateAndMigration(t *testing.T) {
 		t.Fatalf("引擎写入应当通过闸门: %v", err)
 	}
 
-	// 手写 SQL 绕过类型系统塞进驱动默认格式（编译器看不见这种写入）。
+	// 手写 SQL 绕过类型系统（编译器看不见这种写入）。
 	if _, err := db.Add(`UPDATE nodes SET created_at = #{1} WHERE id = #{2}`,
 		"2026-09-15 07:06:57.993279 +0800 CST m=+0.020570626", id).Exec(); err != nil {
 		t.Fatal(err)
@@ -131,33 +140,5 @@ func TestTimeGateAndMigration(t *testing.T) {
 	}
 	if err := s.checkTimeFormats(t.Context()); err == nil {
 		t.Fatal("闸门必须抓住解析不了的脏值")
-	}
-
-	if err := s.normalizeLegacyTimes(t.Context()); err == nil {
-		t.Fatal("遇到解析不了的值，迁移应当报错而不是跳过")
-	}
-	// 修掉不可解析的那行，再迁移：闸门必须通过。
-	if _, err := db.Add(`UPDATE nodes SET updated_at = '2026-08-30 09:38:30' WHERE id = #{1}`, id).Exec(); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.normalizeLegacyTimes(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.checkTimeFormats(t.Context()); err != nil {
-		t.Fatalf("迁移后应当干净: %v", err)
-	}
-	if got := strings.Trim(raw("quote(created_at)"), "'"); got != "2026-09-14T23:06:57Z" {
-		t.Fatalf("驱动默认格式没被归一化: %q", got)
-	}
-	// 迁移是无时区值按本地时区解释：09:38:30 本地 = 01:38:30 UTC（+08:00）。
-	if got := strings.Trim(raw("quote(updated_at)"), "'"); !strings.HasSuffix(got, "Z") || !strings.Contains(got, "T") {
-		t.Fatalf("无时区值没被归一化: %q", got)
-	}
-	// 幂等：再跑一遍不做任何改动。
-	if err := s.normalizeLegacyTimes(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.checkTimeFormats(t.Context()); err != nil {
-		t.Fatal(err)
 	}
 }

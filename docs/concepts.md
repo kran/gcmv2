@@ -275,6 +275,7 @@ ErrInvalidQuery · ErrInvalidField · ErrInvalidOperator · ErrInvalidValue · E
 |---|---|
 | `Error` | Status + Code + Message + Details |
 | `Code`（12 个） | invalid_request / invalid_value / invalid_query / query_too_complex / unauthorized / forbidden / not_found / conflict / delete_restricted / upload_invalid / internal / unavailable |
+| `core.Time` | 统一时间表示（UTC + RFC3339 + 秒精度 + `…Z`）；老数据由 `tools/legacy-time` 转换 |
 | `Fail` | 通用错误出口：`*Error` 原样输出，Core 错误映射，**未知错误 500 + 日志** |
 | `Reject` | Hook/规则拒绝出口：`*Error` 原样输出，Core 错误映射，**未知错误按 403 输出**（不是 500）|
 

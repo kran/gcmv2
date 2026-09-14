@@ -5,9 +5,10 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/kran/dba"
 )
 
 // TimeFormat 是内核统一的时间表示：UTC、RFC3339、秒精度、带 Z 后缀。
@@ -36,7 +37,10 @@ func (t Time) Value() (driver.Value, error) {
 	return t.UTC().Truncate(time.Second).Format(TimeFormat), nil
 }
 
-// Scan 实现 sql.Scanner。除统一格式外，还认历史遗留写法（迁移期用，见 ParseTime）。
+// Scan 实现 sql.Scanner：只认统一格式。
+//
+// 驱动若把列直接映射成 time.Time（例如开了 _texttotime）也照收并归一化；
+// 其余一律报错 —— 库里出现别的写法说明没跑那个一次性工具，宁可起不来也不要静默读错。
 func (t *Time) Scan(src any) error {
 	switch v := src.(type) {
 	case nil:
@@ -44,12 +48,6 @@ func (t *Time) Scan(src any) error {
 		return nil
 	case time.Time:
 		*t = TimeOf(v)
-		return nil
-	case int64:
-		*t = TimeOf(time.Unix(v, 0))
-		return nil
-	case float64:
-		*t = TimeOf(time.Unix(int64(v), 0))
 		return nil
 	case []byte:
 		return t.Scan(string(v))
@@ -65,34 +63,22 @@ func (t *Time) Scan(src any) error {
 	}
 }
 
-// ParseTime 解析统一格式，以及历史遗留的写法：
-// 驱动默认的 time.Time.String()（"… +0800 CST m=+0.02"）、无时区的种子 SQL 字符串、
-// RFC3339（任意偏移）、纯日期。无时区的写法按 UTC 处理（不依赖服务器时区，结果确定）。
+// ParseTime 解析时间输入：统一格式（…Z）或任意带偏移的 RFC3339。
+//
+// **不认**历史写法（驱动默认的 time.Time.String()、无时区的裸字符串、Unix 秒）——
+// 老库里的那些值由一次性工具 tools/legacy-time 在升级前处理，内核不做兼容：
+// 见到非统一格式一律报错，由启动闸门 checkTimeFormats 兜住。
 func ParseTime(s string) (Time, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return Time{}, nil
 	}
-	// 驱动默认格式带单调时钟后缀（" m=+0.02"）：先切掉。
-	if i := strings.Index(s, " m=+"); i > 0 {
-		s = strings.TrimSpace(s[:i])
-	}
-	for _, layout := range []string{
-		TimeFormat,            // 2026-09-14T23:06:41Z（统一格式）
-		time.RFC3339Nano,      // 2026-09-14T23:06:41.615238+08:00
-		time.RFC3339,          // 2026-09-14T23:06:41+08:00
-		"2006-01-02T15:04:05", // 无时区
-		"2006-01-02 15:04:05.999999999 -0700 MST", // time.Time.String()
-		"2006-01-02 15:04:05.999999999-07:00",     // 驱动的 _time_format=sqlite
-		"2006-01-02 15:04:05.999999999",           // 无时区 + 小数
-		"2006-01-02 15:04:05",
-		"2006-01-02",
-	} {
+	for _, layout := range []string{TimeFormat, time.RFC3339Nano, time.RFC3339} {
 		if parsed, err := time.Parse(layout, s); err == nil {
 			return TimeOf(parsed), nil
 		}
 	}
-	return Time{}, fmt.Errorf("core: time: unrecognized %q", s)
+	return Time{}, fmt.Errorf("core: time: %q is not %s (or RFC3339 with an offset)", s, TimeFormat)
 }
 
 // MarshalJSON 输出统一格式（零值输出 null）。
@@ -125,31 +111,22 @@ func (t Time) String() string {
 	return t.UTC().Truncate(time.Second).Format(TimeFormat)
 }
 
-// timeColumns 是所有存时间的内核列。迁移与闸门共用这一张清单：
-// 新加表/新列时在这里补一行，闸门会跟着检查。
-var timeColumns = []struct{ table, column string }{
-	{"nodes", "created_at"},
-	{"nodes", "updated_at"},
-	{"edges", "created_at"},
-	{"auth_methods", "created_at"},
-	{"auth_methods", "updated_at"},
-	{"sessions", "expires_at"},
-	{"sessions", "created_at"},
-	{"settings", "updated_at"},
-	{"accounts", "created_at"},
-	{"accounts", "updated_at"},
-	{"accounts", "session_expires_at"},
-}
-
-// checkTimeFormats 是时间闸门：每个时间列的值都必须**就是**统一格式。
+// checkTimeFormats 是时间闸门：库里每个时间列的值都必须**就是**统一格式。
 //
-// 干什么用：Time 的 Value/Scan 管住了走 dba 映射的读写，但 `dba.H{...}` 和手写 SQL
-// 绕过了类型系统，编译器看不见（历史上就是这么漏掉的）。这里在启动时数一遍，
-// 有一行不对就 fail-loud —— 谁再直接塞 time.Now() 进来，立刻会在这里被抓住。
-// COALESCE 是必要的：strftime 解析不了的值会返回 NULL，而 `x <> NULL` 恒为 NULL，
-// 不会进计数 —— 那正好会漏掉最该抓的那些脏值。
+// 干什么用：core.Time 管住了走 dba 映射的读写，但 `dba.H{...}` 和手写 SQL 绕过类型
+// 系统，编译器看不见（历史上就是这么漏掉的）。这里在启动时数一遍，有一行不对就
+// fail-loud —— 老库没跑 tools/legacy-time 就会挡在这里，而不是静默读错时间。
+//
+// 列清单不写死：按声明的类型（TIMESTAMP / DATETIME）从 pragma 里发现，新表新列自动
+// 纳入；跳过 goose 自己的迁移表（migr_*）与 sqlite 内部表。
+// COALESCE 是必要的：strftime 解析不了的值返回 NULL，而 `x <> NULL` 恒为 NULL，
+// 不会进计数 —— 那正好会漏掉最该抓的脏值。
 func (s *Service) checkTimeFormats(ctx context.Context) error {
-	for _, col := range timeColumns {
+	columns, err := discoverTimeColumns(ctx, s.db)
+	if err != nil {
+		return err
+	}
+	for _, col := range columns {
 		n, err := s.db.WithCtx(ctx).Add(
 			`SELECT COUNT(*) FROM ` + col.table + ` WHERE ` + col.column + ` IS NOT NULL` +
 				` AND COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', ` + col.column + `), '') <> ` + col.column).FetchOne[int]()
@@ -157,67 +134,35 @@ func (s *Service) checkTimeFormats(ctx context.Context) error {
 			return fmt.Errorf("core: time gate %s.%s: %w", col.table, col.column, err)
 		}
 		if n != nil && *n > 0 {
-			return fmt.Errorf("core: %s.%s 有 %d 行不是统一时间格式（应为 %s，见 core.Time）",
-				col.table, col.column, *n, TimeFormat)
+			return fmt.Errorf("core: %s.%s 有 %d 行不是统一时间格式（应为 %s）："+
+				"老库请先跑 tools/legacy-time", col.table, col.column, *n, TimeFormat)
 		}
 	}
 	return nil
 }
 
-// normalizeLegacyTimes 一次性迁移：把历史时间写法统一成 TimeFormat。
-//
-// 处理三种历史值：
-//   - 驱动默认的 time.Time.String()（"… +0800 CST m=+0.02"）→ 带偏移，无歧义
-//   - RFC3339（任意偏移）→ 无歧义
-//   - 无时区的裸字符串（种子 SQL 手写的 "2026-08-30 09:38:30"）→ 按**服务器本地时区**
-//     解释（那些值是人按本地墙钟写的），这是唯一一处依赖时区的转换，只此一次。
-//
-// 所有库升级完成后（v1）可以连同这个函数一起删掉。
-func (s *Service) normalizeLegacyTimes(ctx context.Context) error {
-	changed := 0
-	for _, col := range timeColumns {
-		rows, err := s.db.WithCtx(ctx).Add(
-			`SELECT rowid AS row_id, quote(` + col.column + `) AS raw FROM ` + col.table + ` WHERE ` + col.column + ` IS NOT NULL`).
-			FetchList[struct {
-			RowID int64  `db:"row_id"`
-			Raw   string `db:"raw"`
-		}]()
+// timeColumn 是一个时间列的定位。
+type timeColumn struct{ table, column string }
+
+// discoverTimeColumns 找出库里所有声明为时间类型的列（跳过 goose 与 sqlite 内部表）。
+func discoverTimeColumns(ctx context.Context, db *dba.SQL) ([]timeColumn, error) {
+	tables, err := db.WithCtx(ctx).Add(
+		`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'migr_%'`).
+		FetchList[string]()
+	if err != nil {
+		return nil, fmt.Errorf("core: time gate: list tables: %w", err)
+	}
+	var out []timeColumn
+	for _, table := range tables {
+		columns, err := db.WithCtx(ctx).Add(
+			`SELECT name FROM pragma_table_info(#{1}) WHERE type IN ('TIMESTAMP', 'DATETIME')`, table).
+			FetchList[string]()
 		if err != nil {
-			return fmt.Errorf("core: normalize %s.%s: %w", col.table, col.column, err)
+			return nil, fmt.Errorf("core: time gate: %s columns: %w", table, err)
 		}
-		for _, row := range rows {
-			raw := strings.Trim(row.Raw, "'")
-			parsed, err := parseLegacyTime(raw)
-			if err != nil {
-				return fmt.Errorf("core: normalize %s.%s row %d: %w", col.table, col.column, row.RowID, err)
-			}
-			canonical := parsed.String()
-			if canonical == raw {
-				continue
-			}
-			if _, err := s.db.WithCtx(ctx).Add(
-				`UPDATE `+col.table+` SET `+col.column+` = #{1} WHERE rowid = #{2}`, canonical, row.RowID).Exec(); err != nil {
-				return fmt.Errorf("core: normalize %s.%s row %d: %w", col.table, col.column, row.RowID, err)
-			}
-			changed++
+		for _, column := range columns {
+			out = append(out, timeColumn{table: table, column: column})
 		}
 	}
-	if changed > 0 {
-		slog.Info("core: legacy time values normalized", "rows", changed)
-	}
-	return nil
-}
-
-// parseLegacyTime 解析历史值；无时区的裸字符串按服务器本地时区解释（迁移专用）。
-func parseLegacyTime(raw string) (Time, error) {
-	trimmed := strings.TrimSpace(raw)
-	if strings.Index(trimmed, "Z") >= 0 || strings.Contains(trimmed, "+") || strings.Contains(trimmed, "-0700") {
-		return ParseTime(trimmed)
-	}
-	for _, layout := range []string{"2006-01-02 15:04:05.999999999", "2006-01-02 15:04:05", "2006-01-02"} {
-		if t, err := time.ParseInLocation(layout, trimmed, time.Local); err == nil {
-			return TimeOf(t), nil
-		}
-	}
-	return ParseTime(trimmed)
+	return out, nil
 }

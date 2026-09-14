@@ -167,4 +167,15 @@ after those site migrations. The old `FullFields` API is replaced by `FullNode`/
 
 Composite fields (`array` / `object`) must not contain `ref` or `ref[]` sub-fields. Such a declaration used to load successfully and store raw node IDs inside `fields` JSON, so it had no edge, no cardinality, no delete policy, and was invisible to `CheckRelations`. Types that used this shape must be remodelled as a relation Node; the Schema loader now rejects them with a `kind ref cannot be nested in array/object` error.
 
+### 时间格式（v0.9.3）
+
+时间列与 `timestamp` 字段值统一为 `…Z`（UTC + RFC3339 + 秒精度）。老库里的历史写法
+（驱动默认的 `time.Time.String()`、种子 SQL 的无时区墙钟、Unix 秒数字）由一次性命令转换：
+
+```bash
+go run ./tools/legacy-time -db gcm.sqlite -types types.yaml [-dry-run]
+```
+
+停服 → 跑工具 → 启动新版。没跑的库会在启动时失败并提示这条命令（内核不做兼容）。
+
 Public `DELETE /api/nodes/{type}/{id}` permanently deletes (running the fields' `on_delete` handlers for incoming references), and so does `DELETE /admin/nodes/{id}`, which can return HTTP 409 for restricted references. The archive/restore API and the `archived_at` column were **removed in v0.9.3**: soft delete belongs to the project layer (use a state field of your own types), and there is no recycle bin in the kernel.
