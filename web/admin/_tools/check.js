@@ -61,7 +61,7 @@ function loadRuntime() {
         addStyle() {},
         log(type, scope, message) { if (type === 'error') console.error('   [' + scope + ']', message) },
     })
-    return { Vue, loadComponent: (rel) => loadModule(rel, options()) }
+    return { Vue, sandbox, loadComponent: (rel) => loadModule(rel, options()) }
 }
 
 function pageList() {
@@ -136,7 +136,7 @@ function makeRenderer(Vue) {
 function walk(n, out = []) { out.push(n); (n.children || []).forEach(c => walk(c, out)); return out }
 
 async function checkRender() {
-    const { Vue, loadComponent } = loadRuntime()
+    const { Vue, sandbox, loadComponent } = loadRuntime()
     const { renderer, node, stub, stubs } = makeRenderer(Vue)
     let failed = 0
     const fail = (msg) => { failed++; console.log('  FAIL ' + msg) }
@@ -205,6 +205,33 @@ async function checkRender() {
     }, stubs.concat(['el-drawer']))
     if (renderErrors.length) fail('NodeEditDialog 在 node=null + isEdit=true 下渲染报错: ' + renderErrors[0])
     else pass('NodeEditDialog 在 node=null + isEdit=true 下不报错（nodes.vue 的真实用法）')
+
+    // ③b FieldRenderer 的引用预载：首次打开下拉拉一批；之后（包括用户搜过之后）不再拉 ——
+    //     否则打字搜出来的几条会在下次打开时被预载结果覆盖掉。
+    const FR = await loadComponent('/pages/FieldRenderer.vue')
+    const frMethods = (FR.default || FR).methods
+    const searchCalls = []
+    sandbox.$api = {
+        refLabel: (n) => n.display || ('#' + n.id),
+        search: async (params) => { searchCalls.push(params); return { items: [] } },
+    }
+    const fctx = { refLoaded: {}, refLoading: {}, refOptions: {}, refPreset: {}, defs: {} }
+    for (const name of Object.keys(frMethods)) fctx[name] = frMethods[name].bind(fctx)
+    const refField = { name: 'category', to: 'category', kind: 'ref' }
+    await fctx.preloadRef(refField)
+    await fctx.preloadRef(refField)
+    await fctx.searchRef(refField, '新闻')
+    await fctx.preloadRef(refField)
+    const searched = searchCalls.map(c => ({ q: c.q, sort: c.sort || '', type: c.type }))
+    console.log('       引用控件调用: ' + JSON.stringify(searched))
+    if (searchCalls.length !== 2) fail('引用预载调用次数 = ' + searchCalls.length + '（期望 2: 预载一次 + 打字一次）')
+    else if (searched[0].q !== '' || searched[0].sort !== '-id' || searched[0].type !== 'category') {
+        fail('预载应带空 q + sort=-id + 目标类型: ' + JSON.stringify(searched[0]))
+    } else if (searched[1].q !== '新闻' || searched[1].sort !== '') {
+        fail('打字搜索不该带 sort: ' + JSON.stringify(searched[1]))
+    } else {
+        pass('引用预载: 首次打开拉一批、之后不重复、打字搜索不受影响')
+    }
 
     // ④ nodes.vue 引用筛选: 每个 ref 字段一项。树目标选分类（含子树）、其他目标搜索选节点;
     //    选中/清除都要显式 setCurrentKey（el-tree 只在初始化读 current-node-key），多字段 AND 组合。

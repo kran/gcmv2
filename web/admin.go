@@ -980,7 +980,7 @@ func (b *backend) rebuildSearch(ctx *CmsCtx) {
 
 // ── 实体搜索（引用编辑器用）──────────────────────
 
-// search 按 display 模糊搜索节点（type 可选过滤）。
+// search 按 display 模糊搜索节点（type 可选过滤, sort 可选排序）。
 func (b *backend) search(ctx *CmsCtx) {
 	q := strings.TrimSpace(ctx.Query("q"))
 	typ := ctx.Query("type")
@@ -990,13 +990,27 @@ func (b *backend) search(ctx *CmsCtx) {
 	if q != "" {
 		where = gquery.Contains(gquery.System("display"), q)
 	}
+	// sort 只在指定 type 时有意义：不带 type 是跨类型汇总，固定按更新时间排。
+	// 传了 sort 却不带 type 属于用错，直接报错而不是悄悄忽略。
+	sortRaw := strings.TrimSpace(ctx.Query("sort"))
+	if sortRaw != "" && typ == "" {
+		b.fail(ctx, BadRequest("sort requires type"))
+		return
+	}
+	sortFields, err := parseSort(sortRaw)
+	if err != nil {
+		b.fail(ctx, err)
+		return
+	}
 	if typ != "" {
 		list, total, err := b.eng.QueryPage(ctx.R.Context(), core.ListQuery{
-			Type: typ, Where: where, Scope: core.BypassPolicy(),
+			Type: typ, Where: where, Scope: core.BypassPolicy(), Sort: sortFields,
 			Page: gquery.Page{Number: page, Size: size},
 		})
 		if err != nil {
-			b.internal(ctx, err)
+			// 查询错误走 fail（→ 422），不是 internal（→ 500）：和 listNodes/queryNodes 一致。
+			// 排序字段不可排（kind 没声明 Sortable）就属于这类客户端错误。
+			b.fail(ctx, err)
 			return
 		}
 		_ = ctx.Json(http.StatusOK, map[string]any{"items": list, "total": total})
@@ -1011,7 +1025,7 @@ func (b *backend) search(ctx *CmsCtx) {
 			Page: gquery.Page{Number: page, Size: size},
 		})
 		if err != nil {
-			b.internal(ctx, err)
+			b.fail(ctx, err)
 			return
 		}
 		items = append(items, list...)

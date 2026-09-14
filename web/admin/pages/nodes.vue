@@ -281,7 +281,7 @@ export default {
         async searchFilterRef(f, q) {
             f.loading = true
             try {
-                const res = await window.$api.search({ q: q || '', type: f.to, page: 1, size: 50 })
+                const res = await window.$api.search({ q: q || '', type: f.to, page: 1, size: 50, sort: '-id' })
                 f.options = (res.items || []).map(n => ({ id: n.id, label: this.titleOf(n) + ' #' + n.id }))
                 f.loaded = true
             } catch (_) {

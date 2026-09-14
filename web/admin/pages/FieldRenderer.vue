@@ -33,7 +33,8 @@
                     <el-select :model-value="get(f.name)" filterable remote clearable
                                :remote-method="(q) => searchRef(f, q)"
                                :loading="refLoading[f.name]" placeholder="搜索并选择节点"
-                               style="width:100%" @update:model-value="set(f.name, $event)">
+                               style="width:100%" @visible-change="(open) => open && preloadRef(f)"
+                               @update:model-value="set(f.name, $event)">
                         <el-option v-for="o in allRefOptions[f.name] || []" :key="o.id"
                                    :label="o.label" :value="o.id" />
                     </el-select>
@@ -42,7 +43,8 @@
                     <el-select :model-value="get(f.name) || []" multiple filterable remote
                                :remote-method="(q) => searchRef(f, q)"
                                :loading="refLoading[f.name]" placeholder="搜索并选择多个节点"
-                               style="width:100%" @update:model-value="set(f.name, $event)">
+                               style="width:100%" @visible-change="(open) => open && preloadRef(f)"
+                               @update:model-value="set(f.name, $event)">
                         <el-option v-for="o in allRefOptions[f.name] || []" :key="o.id"
                                    :label="o.label" :value="o.id" />
                     </el-select>
@@ -135,7 +137,7 @@ export default {
     },
     emits: ['update:modelValue'],
     data() {
-        return { refOptions: {}, refLoading: {}, extraWidgets: {} }
+        return { refOptions: {}, refLoading: {}, refLoaded: {}, extraWidgets: {} }
     },
     mounted() { this.resolveExtraWidgets() },
     watch: {
@@ -206,12 +208,21 @@ export default {
             const els = this.$refs['file-' + name]
             if (els && els[0]) els[0].click()
         },
-        // 引用编辑: 实体搜索（$api.search, 按 f.to 类型过滤）
-        async searchRef(f, q) {
-            if (!q) return
+        // 打开下拉先给一批候选（空查询 = 取一批，不带 display 条件）——
+        // 只在"这个字段还没查过"时拉：否则用户搜出几条后关掉再打开，列表会被预载结果覆盖。
+        preloadRef(f) {
+            if (this.refLoaded[f.name]) return
+            this.searchRef(f, '', '-id') // 新的在前: 刚建的活动/会员最可能要被选
+        },
+        // 引用编辑: 实体搜索（$api.search, 按 f.to 类型过滤）。
+        // 空 q 合法 —— 就是"取一批"；sort 只有预载会传（打字搜索保持默认顺序）。
+        async searchRef(f, q, sort) {
+            this.refLoaded = { ...(this.refLoaded || {}), [f.name]: true } // 搜过就不再预载
             this.refLoading = { ...(this.refLoading || {}), [f.name]: true }
+            const params = { q: q || '', type: f.to, page: 1, size: 50 }
+            if (sort) params.sort = sort
             try {
-                const res = await window.$api.search({ q: q, type: f.to, page: 1, size: 50 })
+                const res = await window.$api.search(params)
                 this.refOptions = { ...(this.refOptions || {}), [f.name]:
                     (res.items || []).map(n => ({ id: n.id, label: window.$api.refLabel(n, this.defs[n.type] || null) + ' #' + n.id })) }
             } catch (_) {

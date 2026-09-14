@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -295,28 +296,33 @@ func TestAdminSettings(t *testing.T) {
 	}
 }
 
+// adminCookie 设固定密码并登录，返回管理端会话 cookie。
+func adminCookie(t *testing.T, s *Site) *http.Cookie {
+	t.Helper()
+	if err := NewService(s.DB()).SetPassword("cmx12345"); err != nil {
+		t.Fatal(err)
+	}
+	w := do(s, "POST", "/admin/login", map[string]any{"username": "admin", "password": "cmx12345"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("admin login = %d: %s", w.Code, w.Body.String())
+	}
+	for _, c := range w.Result().Cookies() {
+		if c.Name == cookieName {
+			return c
+		}
+	}
+	t.Fatal("admin login: no cookie")
+	return nil
+}
+
 // TestAdminNodesRefFilterAndExpand 后台列表对 ref 字段的两件事：
 //
 //	① 按任意引用字段筛选（lisp 的 in ->field [ids]，活动报名按活动筛名单就是它）
 //	② 列表批量展开一层出边，前端才有显示名可渲染（ref 的值不在 fields 里）
 func TestAdminNodesRefFilterAndExpand(t *testing.T) {
 	s := testSiteWithTemplates(t)
-	if err := NewService(s.DB()).SetPassword("cmx12345"); err != nil {
-		t.Fatal(err)
-	}
-	w := do(s, "POST", "/admin/login", map[string]any{"username": "admin", "password": "cmx12345"})
-	if w.Code != http.StatusOK {
-		t.Fatalf("login = %d", w.Code)
-	}
-	var ck *http.Cookie
-	for _, c := range w.Result().Cookies() {
-		if c.Name == cookieName {
-			ck = c
-		}
-	}
-	if ck == nil {
-		t.Fatal("no admin cookie")
-	}
+	ck := adminCookie(t, s)
+	var w *httptest.ResponseRecorder
 
 	mkCategory := func(display string, parent int64) int64 {
 		t.Helper()
@@ -436,5 +442,60 @@ func TestAdminNodesRefFilterAndExpand(t *testing.T) {
 	w = do(s, "GET", "/admin/nodes?type=article&filter="+url.QueryEscape("(in ->nope [1])"), nil, ck)
 	if w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("非法 filter = %d, want 422: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestAdminSearchSort 引用选择器预载用的排序：sort 只在带 type 时可用。
+// 不带 type 的搜索是跨类型汇总、固定按更新时间排 —— 传了 sort 属于用错，报错而不是悄悄忽略。
+func TestAdminSearchSort(t *testing.T) {
+	s := testSiteWithTemplates(t)
+	ck := adminCookie(t, s)
+
+	var newest int64
+	for _, display := range []string{"文章一", "文章二", "文章三"} {
+		id, err := s.Engine().CreateNode(t.Context(), &core.Node{Type: "article", Display: display,
+			Fields: core.Fields{"publication_state": "published"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		newest = id
+	}
+
+	type searchResp struct {
+		Items []struct {
+			ID      int64  `json:"id"`
+			Display string `json:"display"`
+		} `json:"items"`
+		Total int64 `json:"total"`
+	}
+	fetch := func(query string) searchResp {
+		t.Helper()
+		w := do(s, "GET", "/admin/search?"+query, nil, ck)
+		if w.Code != http.StatusOK {
+			t.Fatalf("search %s = %d: %s", query, w.Code, w.Body.String())
+		}
+		var got searchResp
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+
+	// 不传 sort：行为不变（默认顺序），不能因为加了排序参数就报错
+	if got := fetch("type=article&size=3"); len(got.Items) != 3 {
+		t.Fatalf("不带 sort = %d 条, want 3", len(got.Items))
+	}
+	// 预载的排序：新的在前
+	got := fetch("type=article&size=3&sort=" + url.QueryEscape("-id"))
+	if len(got.Items) != 3 || got.Items[0].ID != newest {
+		t.Fatalf("sort=-id 首条 = %+v, want id %d", got.Items[0], newest)
+	}
+	// sort 不带 type：用错，fail-loud
+	if w := do(s, "GET", "/admin/search?sort="+url.QueryEscape("-id"), nil, ck); w.Code != http.StatusBadRequest {
+		t.Fatalf("sort 不带 type = %d, want 400: %s", w.Code, w.Body.String())
+	}
+	// 声明了不可排序的字段 → 编译期就拦住（不是静默不排序）
+	if w := do(s, "GET", "/admin/search?type=article&sort=body", nil, ck); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("sort=body = %d, want 422: %s", w.Code, w.Body.String())
 	}
 }
