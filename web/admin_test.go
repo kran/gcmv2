@@ -405,6 +405,33 @@ func TestAdminNodesRefFilterAndExpand(t *testing.T) {
 		t.Fatalf("展开了 %d 条, want 2", expanded)
 	}
 
+	// ③ 结构化入口（QuerySpec）必须和列表端点给同一种形状：它也展开一层出边 ——
+	// 否则拿它做的界面里, 引用列只能是空的（spec 的 in/ref 跟 lisp 的 (in ->f [ids])
+	// 是同一套 AST, 差别只在输出形状）。
+	w = do(s, "POST", "/admin/query/article", map[string]any{
+		"where": map[string]any{"op": "in", "ref": "category", "values": []any{sub}},
+		"page":  map[string]any{"number": 1, "size": 20},
+	}, ck)
+	if w.Code != http.StatusOK {
+		t.Fatalf("结构化查询 = %d: %s", w.Code, w.Body.String())
+	}
+	var specResp struct {
+		Items []struct {
+			Display string         `json:"display"`
+			Expand  map[string]any `json:"expand"`
+		} `json:"items"`
+		Total int64 `json:"total"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &specResp); err != nil {
+		t.Fatal(err)
+	}
+	if specResp.Total != 1 || len(specResp.Items) != 1 || specResp.Items[0].Display != "挂在子分类下" {
+		t.Fatalf("结构化查询命中 = %d 条 %v", specResp.Total, specResp.Items)
+	}
+	if ref, ok := specResp.Items[0].Expand["category"].(map[string]any); !ok || ref["display"] != "行业动态" {
+		t.Fatalf("结构化查询没展开 category: %#v", specResp.Items[0].Expand)
+	}
+
 	// ③ 非法 filter 要 fail-loud（前端靠这个报错，而不是悄悄返回全量）
 	w = do(s, "GET", "/admin/nodes?type=article&filter="+url.QueryEscape("(in ->nope [1])"), nil, ck)
 	if w.Code != http.StatusUnprocessableEntity {

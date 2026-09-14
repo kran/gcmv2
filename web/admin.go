@@ -564,8 +564,15 @@ func (b *backend) queryNodes(ctx *CmsCtx) {
 		b.fail(ctx, err)
 		return
 	}
+	// 与列表端点同一种形状：批量展开一层出边 ref。不展开的话调用方拿到的是裸 id，
+	// 界面上引用列只能是空的。
+	items, err := b.expandMany(ctx.R.Context(), list)
+	if err != nil {
+		b.internal(ctx, err)
+		return
+	}
 	_ = ctx.Json(http.StatusOK, map[string]any{
-		"items": list, "total": total, "page": page.Number, "size": page.Size,
+		"items": items, "total": total, "page": page.Number, "size": page.Size,
 	})
 }
 
