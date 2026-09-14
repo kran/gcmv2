@@ -55,7 +55,7 @@ func (c *CmsCtx) UpdateNode(id int64, patch *core.NodePatch) (*core.Node, error)
 	if patch == nil {
 		return nil, fmt.Errorf("web: update needs a patch")
 	}
-	existing, err := c.site.engine.GetNodeById(c.R.Context(), id)
+	existing, err := c.site.engine.GetNodeByID(c.R.Context(), id)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +86,7 @@ func (c *CmsCtx) UpdateNode(id int64, patch *core.NodePatch) (*core.Node, error)
 // 不能让匿名访客据此区分"节点是否存在"的场景（比如通用路由），应该先用路径上的
 // 类型 Fire 一次写规则做 gate —— 公共 DELETE 路由就是这么做的。
 func (c *CmsCtx) DeleteNode(id int64) error {
-	existing, err := c.site.engine.GetNodeById(c.R.Context(), id)
+	existing, err := c.site.engine.GetNodeByID(c.R.Context(), id)
 	if err != nil {
 		return err
 	}
@@ -123,7 +123,7 @@ func assertAllowed(action WriteAction, typeName string, allowed *core.List[strin
 // readBack 写响应里的节点按 ReadView 规则裁字段 —— "注册规则 ⇒ 输出已裁"对写响应
 // 同样成立。
 func (c *CmsCtx) readBack(id int64) (*core.Node, error) {
-	node, err := c.site.engine.GetNodeById(c.R.Context(), id)
+	node, err := c.site.engine.GetNodeByID(c.R.Context(), id)
 	if err != nil || node == nil {
 		return nil, err
 	}

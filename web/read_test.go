@@ -8,7 +8,7 @@ import (
 	gquery "github.com/kran/gcmv2/query"
 )
 
-// 读入口（CmsCtx.ReadPage / ReadOne / ReadAddress / ReadFull / SearchPage）：
+// 读入口（CmsCtx.ReadPage / ReadOne / ReadAddress / ReadFull / ReadSearch）：
 // 解析读规则 → 调引擎 → 裁字段，一步到位；调用方不能自带 Scope。
 
 // 站点自定义读动作：同一个类型在不同入口用不同规则（association 的 my_content）。
@@ -136,8 +136,8 @@ func TestReadFullIncludesRefsAndMasks(t *testing.T) {
 	_ = target
 }
 
-// SearchPage：每个类型各自解析 ReadSearch，结果按节点类型裁字段。
-func TestSearchPageMasksPerType(t *testing.T) {
+// ReadSearch：每个类型各自解析 ReadSearch，结果按节点类型裁字段。
+func TestReadSearchMasksPerType(t *testing.T) {
 	site, _ := maskTestSite(t)
 	ctx := maskCtx(site)
 	if _, err := site.Engine().CreateNode(t.Context(), &core.Node{
@@ -146,7 +146,7 @@ func TestSearchPageMasksPerType(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	nodes, total, err := ctx.SearchPage(core.SearchQuery{
+	nodes, total, err := ctx.ReadSearch(core.SearchQuery{
 		Text: "张三", Page: gquery.Page{Size: 10},
 	}, "")
 	if err != nil {
@@ -162,10 +162,10 @@ func TestSearchPageMasksPerType(t *testing.T) {
 		t.Fatalf("检索结果未裁字段: %#v", nodes[0].Fields)
 	}
 	// 限定类型
-	if _, _, err := ctx.SearchPage(core.SearchQuery{Text: "张三", Page: gquery.Page{Size: 10}}, "member"); err != nil {
+	if _, _, err := ctx.ReadSearch(core.SearchQuery{Text: "张三", Page: gquery.Page{Size: 10}}, "member"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := ctx.SearchPage(core.SearchQuery{Text: "张三", Page: gquery.Page{Size: 10}}, "ghost"); err == nil {
+	if _, _, err := ctx.ReadSearch(core.SearchQuery{Text: "张三", Page: gquery.Page{Size: 10}}, "ghost"); err == nil {
 		t.Fatal("未知类型应报错")
 	}
 }

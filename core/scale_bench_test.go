@@ -212,7 +212,7 @@ func (f *scaleFixture) loadBulk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = f.service.SyncRelationSchema()
+	err = f.service.SyncRelationSchema(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +321,7 @@ func (f *scaleFixture) reportWrites(t *testing.T, ctx context.Context) {
 	samples := f.sampleIDs(min(200, len(f.articleIDs)))
 	var update, publish []time.Duration
 	for i, id := range samples {
-		node, err := f.service.GetNodeById(ctx, id)
+		node, err := f.service.GetNodeByID(ctx, id)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -467,7 +467,7 @@ func (f *scaleFixture) reportReads(t *testing.T, ctx context.Context) {
 	})
 
 	measure(t, "主键详情", iterations, func() {
-		_, err := f.service.GetNodeById(ctx, f.articleIDs[rand.Intn(len(f.articleIDs))])
+		_, err := f.service.GetNodeByID(ctx, f.articleIDs[rand.Intn(len(f.articleIDs))])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -726,7 +726,7 @@ func (f *scaleFixture) reportConcurrent(t *testing.T, ctx context.Context) {
 			default:
 			}
 			id := f.articleIDs[i%len(f.articleIDs)]
-			node, err := f.service.GetNodeById(ctx, id)
+			node, err := f.service.GetNodeByID(ctx, id)
 			if err != nil {
 				writeErr = err
 				return

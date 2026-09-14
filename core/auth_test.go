@@ -42,7 +42,7 @@ func TestRegisterAuth(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 节点存在 + 类型正确
-	n, err := s.GetNodeById(t.Context(), id)
+	n, err := s.GetNodeByID(t.Context(), id)
 	if err != nil || n == nil {
 		t.Fatalf("node = %v, %v", n, err)
 	}
@@ -188,7 +188,7 @@ func TestArchiveAuthNodeRevokesSessions(t *testing.T) {
 	s := newAuthService(t)
 	id, _ := s.RegisterAuth(t.Context(), "user", "email", "a@x.com", Fields{"credential": "x"}, &Node{Display: "a"})
 	token, _ := s.CreateSession(t.Context(), "members", id)
-	node, _ := s.GetNodeById(t.Context(), id)
+	node, _ := s.GetNodeByID(t.Context(), id)
 	if err := s.ArchiveNode(t.Context(), id, node.Revision); err != nil {
 		t.Fatal(err)
 	}
@@ -199,11 +199,11 @@ func TestArchiveAuthNodeRevokesSessions(t *testing.T) {
 	if _, err := s.CreateSession(t.Context(), "members", id); !errors.Is(err, ErrNodeArchived) {
 		t.Fatalf("session for archived node = %v", err)
 	}
-	archived, _ := s.GetNodeById(t.Context(), id)
+	archived, _ := s.GetNodeByID(t.Context(), id)
 	if err := s.RestoreNode(t.Context(), id, archived.Revision); err != nil {
 		t.Fatal(err)
 	}
-	restored, _ := s.GetNodeById(t.Context(), id)
+	restored, _ := s.GetNodeByID(t.Context(), id)
 	if restored.ArchivedAt != nil {
 		t.Fatalf("restored node = %#v", restored)
 	}

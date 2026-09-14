@@ -386,7 +386,7 @@ err := ctx.DeleteNode(id)   // 走 WriteDelete 规则; 永久删除（按字段 
 
 - 行范围只能由规则算：`ReadPage`/`ReadOne`/... 收到非零 `QueryScope` 直接报错
   （`QueryScope.IsZero()`），不会静默覆盖成"更宽的范围"。
-- `engine.Query / GetNodeById / FullNode / PatchNode / ...` 是显式的可信调用：后台、插件、
+- `engine.Query / GetNodeByID / FullNode / PatchNode / ...` 是显式的可信调用：后台、插件、
   迁移、"系统自己要看/要改"的代码走这里。**"客户端发起的写"没被入口覆盖时（多节点事务），
   自己 Fire 写规则再用引擎落库，而不是把身份判断在 handler 里手写一遍。**
 
@@ -652,6 +652,39 @@ Admin/Core permanent delete
 
 ---
 
+### 4.8 命名与出口规则
+
+接口面大了以后，靠印象判断"该叫什么、该走哪个出口"就会开始漂。规则写在这里，改动时对着看：
+
+**命名**
+
+- 标识符里的 `ID` 一律大写：`RefID`、`RefIDs`、`nodeID`、`GetNodeByID`。不要写 `Id`。
+- 策略层（`web.CmsCtx`）的读入口一律 `Read*`：`ReadPage`、`ReadOne`、`ReadAddress`、`ReadFull`、`ReadTree`、`ReadSearch`；写入口是 `CreateNode`、`UpdateNode`、`DeleteNode`（动作即方法名，不重复带前缀）。
+- 引擎层（`core`）保留历史的 `Get*` 前缀（`GetNodeByID`、`GetNodeByAddress`、`GetSetting`）——**存量不动，新方法不再加**。
+- 动词前缀只在真有歧义时用：`Search`/`Query`/`RebuildSearch` 各自对应不同的东西（全文检索 / AST 查询 / 重建索引），不是同义词。
+
+**出口**
+
+- `CmsCtx.Fail(err)`：通用出口。`*Error` 原样输出，Core 错误映射，其余按 500 记日志。
+- `CmsCtx.Reject(err)`：Hook / 写规则的拒绝出口。`*Error` 原样输出，其余按 403 输出（**不是 500**）。
+- 一句话：**规则/Hook 里返回的错误用 `Reject`，其余一律 `Fail`**。
+
+**ctx**
+
+- 引擎里凡是碰数据库或外部 I/O 的方法都收 `context.Context`，无一例外。
+- 唯一例外是构造期（`core.Open`）：那时还没有 ctx 可传，启动 DDL 用 `context.Background()`。
+  对外的同类方法（如 `SyncRelationSchema`）仍然收 ctx，别为了统一把 ctx 去掉。
+
+**容易混淆的成对入口**
+
+| 入口 | 什么时候用 |
+|---|---|
+| `core.Query` / `core.QueryPage` | 同一个查询模型；要总数用 `QueryPage`，不要总数（省一次 COUNT）用 `Query` |
+| `core.Traverse` / `core.Subtree` / `core.Ancestors` | 前两个返回 **id**，方向相反：`Traverse` 沿字段**正向**追（child → parent），`Subtree` 走**入边**收后代。`Ancestors` 是这三个里唯一返回节点对象的（面包屑要 `display`），顺序是根 → 叶 |
+| `core.FullNode` / `core.FullNodes` | "节点 + 它的引用"（可编辑形态）；单条用前者，列表用后者（避免 N+1） |
+| `GET /admin/nodes` / `POST /admin/query/{type}` | 前者 = 后台列表（分页 + 简单条件），后者 = 结构化查询（AST 过滤）。两者返回**同一种形状**；后台 UI 目前只走 `/admin/nodes`，`/admin/query` 留给脚本或自定义条件 |
+| `GET /admin/search` / `GET /admin/tree` | 前者 = 跨类型全文检索汇总，后者 = 某类型的树 |
+
 ## 5. 已实现状态
 
 ### 5.1 ADR-001：Node、Schema、Capability
@@ -738,7 +771,7 @@ Admin/Core permanent delete
 - 公开内容 Policy Scope。
 - association 查询迁移到 Go Query Builder。
 - 编辑和鉴权改用 `FullNode(...).Values`。
-- 站点 SQL migration 后调用 `SyncRelationSchema()`。
+- 站点 SQL migration 后调用 `SyncRelationSchema(ctx)`。
 - 实际数据库已升级至 core v11、site v3。
 - `PRAGMA integrity_check` 为 `ok`，`foreign_key_check` 无异常，关系完整性问题为 0。
 - 迁移前备份：`backups/pre-v09-relation-integrity-20260910-091443.db`。
@@ -754,7 +787,7 @@ Admin/Core permanent delete
 已贯穿全部数据库与外部 I/O 入口，没有“带/不带 Context”的双轨：
 
 - 写：CreateNode / PatchNode / Archive / Restore / DeleteNode / AddEdge / RemoveEdge
-- 读：Query / QueryPage / GetNodeById / GetNodeByAddress / LoadTree
+- 读：Query / QueryPage / GetNodeByID / GetNodeByAddress / LoadTree
 - 图：Traverse / Subtree / Ancestors / EquivalenceClass / OutEdges / InEdges
 - 关系：RefID / RefIDs / HasRef / FullNode / FullNodes / CheckRelations / PreviewMerge
 - 检索：Search / SearchIndex.Rebuild / RebuildSearch
@@ -909,7 +942,7 @@ v0.9 当前包含三项核心迁移：
 1. 备份数据库。
 2. 使用新 `types.yaml` 启动并应用 Core migration。
 3. 执行 Site migration，搬迁旧字段或插入业务数据。
-4. 若 Site migration 直接写入 Edge，调用 `SyncRelationSchema()`。
+4. 若 Site migration 直接写入 Edge，调用 `SyncRelationSchema(ctx)`。
 5. 重建 Search Index。
 6. 执行 `CheckRelations()`。
 7. 执行 `PRAGMA integrity_check` 和 `PRAGMA foreign_key_check`。

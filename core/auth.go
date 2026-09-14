@@ -102,7 +102,7 @@ func (s *Service) AddAuthMethod(ctx context.Context, nodeType string, nodeID int
 	if !ok || !td.Capabilities.Authentication {
 		return fmt.Errorf("core: auth: type %q is not auth-enabled", nodeType)
 	}
-	node, err := s.GetNodeById(ctx, nodeID)
+	node, err := s.GetNodeByID(ctx, nodeID)
 	if err != nil {
 		return err
 	}
@@ -151,7 +151,7 @@ func (s *Service) CreateSession(ctx context.Context, realm string, nodeID int64)
 	if realm == "" {
 		return "", errors.New("core: auth: session realm required")
 	}
-	node, err := s.GetNodeById(ctx, nodeID)
+	node, err := s.GetNodeByID(ctx, nodeID)
 	if err != nil {
 		return "", err
 	}

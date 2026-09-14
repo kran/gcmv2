@@ -117,7 +117,7 @@ func (s *Site) apiUpdateNode(ctx *CmsCtx) {
 		ctx.Fail(err)
 		return
 	}
-	existing, err := s.engine.GetNodeById(ctx.R.Context(), id)
+	existing, err := s.engine.GetNodeByID(ctx.R.Context(), id)
 	if err != nil {
 		ctx.Fail(err)
 		return
@@ -176,7 +176,7 @@ func (s *Site) apiDeleteNode(ctx *CmsCtx) {
 		ctx.Fail(err)
 		return
 	}
-	existing, err := s.engine.GetNodeById(ctx.R.Context(), id)
+	existing, err := s.engine.GetNodeByID(ctx.R.Context(), id)
 	if err != nil {
 		ctx.Fail(err)
 		return

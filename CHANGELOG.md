@@ -8,6 +8,7 @@
 
 - `searchable.fields` takes type fields only. `display` is a node column that is always indexed (its own FTS column, highest bm25 weight), so listing it was a no-op that mostly taught the wrong thing; it is now rejected by the usual "field is not defined" check. Remove it from every `types.yaml`.
 - Public `DELETE /api/nodes/{type}/{id}` and `CmsCtx.DeleteNode` permanently delete again (both archived for a while, per the old "公共 DELETE = 归档" rule). Deleting a node that something references with a required ref fails with HTTP 409 (`restrict`, unchanged). Archiving is now the explicit operation: `POST /admin/nodes/{id}/archive` (+ `/restore`) in the admin API, or `engine.ArchiveNode` for a site that wants a reversible 下架. The rule fired is still `WriteDelete` (`web.write.delete.<type>`).
+- `GetNodeById` is now `GetNodeByID` (the only `Id` left in the public surface, next to `RefID`/`RefIDs`/`nodeID`), `CmsCtx.SearchPage` is now `CmsCtx.ReadSearch` (every read entry is `Read*`), and `Service.SyncRelationSchema` takes a `context.Context` (it runs DDL, so it was the one I/O entry without one).
 - `web.ReadRule` takes a fourth parameter, `*core.List[string]`: a read rule now declares both the row range and the fields the actor must not see. Existing rules add one ignored parameter.
 
 ### Added
@@ -81,7 +82,7 @@ See `docs/scaling.md` for measured throughput, latency and storage from 1k to 1M
 - `LoadTree(typeName)` becomes `LoadTree(ctx, typeName, scope)`; Core no longer requires publication or filters published Nodes itself.
 - `TypeDef.TemplateCandidates` is removed; template candidates belong to the web layer.
 - The generic `/api/nodes/mine` endpoint is removed. Owner-scoped content listing is site business API (association: `GET /api/me/content`).
-- Every database or external I/O entry point now takes a `context.Context`: `CreateNode`, `PatchNode`, `DeleteNode`, `AddEdge`, `RemoveEdge`, `GetNodeById`, `GetNodeByAddress`, `Traverse`, `Subtree`, `Ancestors`, `EquivalenceClass`, `OutEdges`, `InEdges`, `RegisterAuth`, `FindAuth`, `AddAuthMethod`, `RemoveAuthMethod`, `CreateSession`, `ValidSession`, `DeleteSession`, `DeleteNodeSessions`, `GetSetting`, `SetSetting`, `ListSettings`, `DeleteSetting`, `RebuildSearch`, `Migrator.Up/UpDir` and `Render.Render`.
+- Every database or external I/O entry point now takes a `context.Context`: `CreateNode`, `PatchNode`, `DeleteNode`, `AddEdge`, `RemoveEdge`, `GetNodeByID`, `GetNodeByAddress`, `Traverse`, `Subtree`, `Ancestors`, `EquivalenceClass`, `OutEdges`, `InEdges`, `RegisterAuth`, `FindAuth`, `AddAuthMethod`, `RemoveAuthMethod`, `CreateSession`, `ValidSession`, `DeleteSession`, `DeleteNodeSessions`, `GetSetting`, `SetSetting`, `ListSettings`, `DeleteSetting`, `RebuildSearch`, `Migrator.Up/UpDir` and `Render.Render`.
 - `SearchIndex.Rebuild` takes a `context.Context`.
 - `web.New`/`core.New` keep the panic convenience path; `web.Open`/`core.Open` return the initialization error instead.
 - Error responses now carry a stable `code` next to `error`; clients must branch on `code` instead of matching message text.

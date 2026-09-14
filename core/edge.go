@@ -203,7 +203,7 @@ func (s *Service) fieldOnType(typeName, field string) (types.FieldDef, bool, err
 
 // AddEdge manually inserts one schema-validated reference.
 func (s *Service) AddEdge(ctx context.Context, from, to int64, fieldName string, sort int) (int64, error) {
-	fromNode, err := s.GetNodeById(ctx, from)
+	fromNode, err := s.GetNodeByID(ctx, from)
 	if err != nil {
 		return 0, err
 	}

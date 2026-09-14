@@ -12,11 +12,11 @@ import (
 //
 // Web 层的读有两个层次，别混：
 //
-//	CmsCtx.ReadPage / ReadOne / ReadAddress / ReadFull / SearchPage
+//	CmsCtx.ReadPage / ReadOne / ReadAddress / ReadFull / ReadSearch
 //	    解析读规则（行范围 + 字段掩码）→ 调引擎 → 套字段掩码。数据跨出进程前
 //	    最后一步由这里保证：调用方不需要自己拼 Scope，也不需要自己调 MaskNode。
 //
-//	engine.Query / GetNodeById / FullNode / ...
+//	engine.Query / GetNodeByID / FullNode / ...
 //	    内核原语：没有身份、没有策略。后台、插件、迁移以及"系统自己要看"的代码
 //	    走这里 —— 那是显式的可信调用，不是这里的替代品。
 //
@@ -45,7 +45,7 @@ func (c *CmsCtx) ReadPage(action ReadAction, q core.ListQuery) ([]core.Node, int
 
 // ReadOne 按 id 取单节点（不可见 → nil）。
 func (c *CmsCtx) ReadOne(action ReadAction, id int64) (*core.Node, error) {
-	node, err := c.site.engine.GetNodeById(c.R.Context(), id)
+	node, err := c.site.engine.GetNodeByID(c.R.Context(), id)
 	if err != nil || node == nil {
 		return nil, err
 	}
@@ -102,9 +102,9 @@ func (c *CmsCtx) ReadTree(action ReadAction, typeName string) ([]*core.TreeNode,
 	return MaskTree(c, action, tree.JsonNodes())
 }
 
-// SearchPage 全文检索。typeName 为空 = 所有 searchable 类型；每个类型各自解析
+// ReadSearch 全文检索。typeName 为空 = 所有 searchable 类型；每个类型各自解析
 // ReadSearch 读规则（范围 + 掩码），结果按节点自己的类型裁字段。
-func (c *CmsCtx) SearchPage(q core.SearchQuery, typeName string) ([]core.Node, int64, error) {
+func (c *CmsCtx) ReadSearch(q core.SearchQuery, typeName string) ([]core.Node, int64, error) {
 	targets, err := c.searchTargets(typeName)
 	if err != nil {
 		return nil, 0, err

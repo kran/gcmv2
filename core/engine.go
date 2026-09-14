@@ -25,7 +25,7 @@ type Engine interface {
 	// ── 读 ──
 	QueryPage(ctx context.Context, q ListQuery) ([]Node, int64, error)
 	Query(ctx context.Context, q ListQuery) ([]Node, error)
-	GetNodeById(ctx context.Context, id int64) (*Node, error)
+	GetNodeByID(ctx context.Context, id int64) (*Node, error)
 	GetNodeByAddress(ctx context.Context, address string) (*Node, error)
 	RefID(ctx context.Context, nodeID int64, field string) (int64, bool, error)
 	RefIDs(ctx context.Context, nodeID int64, field string) ([]int64, error)
@@ -33,8 +33,10 @@ type Engine interface {
 	FullNode(ctx context.Context, id int64) (*EditableNode, error)
 	FullNodes(ctx context.Context, ids []int64) ([]*EditableNode, error)
 	CheckRelations(ctx context.Context) (RelationReport, error)
-	SyncRelationSchema() error
 	PreviewMerge(ctx context.Context, sourceID, targetID int64) (*MergePreview, error)
+
+	// ── Schema 同步（启动/运维；做 DDL，不是读） ──
+	SyncRelationSchema(ctx context.Context) error
 
 	// ── 图原语 ──
 	LoadTree(ctx context.Context, typeName string, scope QueryScope) (*Tree, error)

@@ -67,21 +67,21 @@ func TestDeletePolicies(t *testing.T) {
 	if !errors.As(err, &restricted) || len(restricted.References) != 1 || restricted.References[0].SourceID != contract {
 		t.Fatalf("restricted details = %#v", restricted)
 	}
-	if node, _ := service.GetNodeById(t.Context(), account); node == nil {
+	if node, _ := service.GetNodeByID(t.Context(), account); node == nil {
 		t.Fatal("restricted delete must roll back")
 	}
 
 	if err := service.DeleteNode(t.Context(), contract); err != nil {
 		t.Fatal(err)
 	}
-	noteBefore, _ := service.GetNodeById(t.Context(), note)
+	noteBefore, _ := service.GetNodeByID(t.Context(), note)
 	if err := service.DeleteNode(t.Context(), account); err != nil {
 		t.Fatal(err)
 	}
-	if node, _ := service.GetNodeById(t.Context(), employment); node != nil {
+	if node, _ := service.GetNodeByID(t.Context(), employment); node != nil {
 		t.Fatal("cascade relation node must be deleted")
 	}
-	if node, _ := service.GetNodeById(t.Context(), note); node == nil {
+	if node, _ := service.GetNodeByID(t.Context(), note); node == nil {
 		t.Fatal("set_null source must remain")
 	} else if node.Revision != noteBefore.Revision+1 {
 		t.Fatalf("set_null source revision = %d, want %d", node.Revision, noteBefore.Revision+1)
@@ -95,7 +95,7 @@ func TestArchivePreservesEdgesAndRestore(t *testing.T) {
 	service := newDeletePolicyService(t)
 	account, _ := service.CreateNode(t.Context(), &Node{Type: "account", Display: "account", Fields: Fields{"name": "account"}})
 	contract, _ := service.CreateNode(t.Context(), &Node{Type: "contract", Display: "contract", Fields: Fields{"name": "contract", "account": account}})
-	node, _ := service.GetNodeById(t.Context(), account)
+	node, _ := service.GetNodeByID(t.Context(), account)
 	if err := service.ArchiveNode(t.Context(), account, node.Revision); err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestArchivePreservesEdgesAndRestore(t *testing.T) {
 	if !hasRelationIssue(report, RelationArchivedRequired) {
 		t.Fatalf("missing archived required issue: %#v", report)
 	}
-	archived, _ := service.GetNodeById(t.Context(), account)
+	archived, _ := service.GetNodeByID(t.Context(), account)
 	if err := service.RestoreNode(t.Context(), account, archived.Revision); err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestRelationIntegrityDetectsCorruption(t *testing.T) {
 			t.Fatalf("missing %s in %#v", kind, report)
 		}
 	}
-	if err := service.SyncRelationSchema(); err == nil {
+	if err := service.SyncRelationSchema(t.Context()); err == nil {
 		t.Fatal("schema synchronization must reject corrupt single-ref data")
 	}
 }

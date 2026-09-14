@@ -35,8 +35,8 @@ func invalidFields(err error) error {
 
 // ── 读 ────────────────────────────────────────
 
-// GetNodeById 按 id 取节点; 不存在返回 (nil, nil)。
-func (s *Service) GetNodeById(ctx context.Context, id int64) (*Node, error) {
+// GetNodeByID 按 id 取节点; 不存在返回 (nil, nil)。
+func (s *Service) GetNodeByID(ctx context.Context, id int64) (*Node, error) {
 	n, err := s.db.WithCtx(ctx).Select("nodes", `id = #{1}`, id).FetchOne[Node]()
 	if err != nil {
 		return nil, err
@@ -165,7 +165,7 @@ func (s *Service) PatchNode(ctx context.Context, id int64, patch *NodePatch) err
 	if patch == nil {
 		return errors.New("core: patch: nil patch")
 	}
-	existing, err := s.GetNodeById(ctx, id)
+	existing, err := s.GetNodeByID(ctx, id)
 	if err != nil {
 		return err
 	}

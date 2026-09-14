@@ -170,7 +170,7 @@ func TestWriteAndGraphHonorCanceledContext(t *testing.T) {
 		t.Fatalf("CreateNode error = %v, want context.Canceled", err)
 	}
 	display := "patched"
-	current, _ := s.GetNodeById(t.Context(), child)
+	current, _ := s.GetNodeByID(t.Context(), child)
 	if err := s.PatchNode(ctx, child, &NodePatch{Revision: &current.Revision, Display: &display}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("PatchNode error = %v, want context.Canceled", err)
 	}
@@ -183,8 +183,8 @@ func TestWriteAndGraphHonorCanceledContext(t *testing.T) {
 	if _, err := s.Traverse(ctx, "category", child, "parent", 5); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Traverse error = %v, want context.Canceled", err)
 	}
-	if _, err := s.GetNodeById(ctx, child); !errors.Is(err, context.Canceled) {
-		t.Fatalf("GetNodeById error = %v, want context.Canceled", err)
+	if _, err := s.GetNodeByID(ctx, child); !errors.Is(err, context.Canceled) {
+		t.Fatalf("GetNodeByID error = %v, want context.Canceled", err)
 	}
 	if err := s.RebuildSearch(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("RebuildSearch error = %v, want context.Canceled", err)

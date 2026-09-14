@@ -67,7 +67,7 @@ func (s *Service) Ancestors(ctx context.Context, typeName string, start int64, f
 	}
 	nodes := make([]*Node, 0, len(ids))
 	for _, id := range ids {
-		node, err := s.GetNodeById(ctx, id)
+		node, err := s.GetNodeByID(ctx, id)
 		if err != nil {
 			return nil, err
 		}
@@ -118,7 +118,7 @@ func (s *Service) validateTraversal(ctx context.Context, typeName string, start 
 	} else if !field.Transitive && !isTreeField(s.types, typeName, fieldName) {
 		return fmt.Errorf("core: field %s.%s is not transitive", typeName, fieldName)
 	}
-	node, err := s.GetNodeById(ctx, start)
+	node, err := s.GetNodeByID(ctx, start)
 	if err != nil {
 		return err
 	}

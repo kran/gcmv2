@@ -51,7 +51,8 @@ func Open(db *dba.SQL, ts *types.Types) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("core: migrate: %w", err)
 	}
-	if err = s.syncEdgeMetadata(); err != nil {
+	// 构造期没有 ctx：这里是启动 DDL，不能取消（对外方法 SyncRelationSchema 收 ctx）。
+	if err = s.syncEdgeMetadata(context.Background()); err != nil {
 		return nil, fmt.Errorf("core: edge metadata: %w", err)
 	}
 	if err = s.syncSchemaIndexes(); err != nil {

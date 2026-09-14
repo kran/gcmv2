@@ -21,7 +21,7 @@ func (s *Site) nodeHandler(ctx *CmsCtx) {
 	var n *core.Node
 	var err error
 	if id, e := strconv.ParseInt(raw, 10, 64); e == nil {
-		n, err = s.engine.GetNodeById(ctx.R.Context(), id)
+		n, err = s.engine.GetNodeByID(ctx.R.Context(), id)
 	} else {
 		n, err = s.engine.GetNodeByAddress(ctx.R.Context(), raw)
 	}

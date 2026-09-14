@@ -113,7 +113,7 @@ func (e *Render) queryFuncs(c *CmsCtx) template.FuncMap {
 		},
 		// search: 全文检索（每个目标类型各自解析 ReadSearch 读规则）。
 		"search": func(q, typ string, page, size int) []core.Node {
-			list, _, err := c.SearchPage(core.SearchQuery{
+			list, _, err := c.ReadSearch(core.SearchQuery{
 				Text: q, Page: gquery.Page{Number: page, Size: size},
 			}, typ)
 			fail(err)
@@ -123,7 +123,7 @@ func (e *Render) queryFuncs(c *CmsCtx) template.FuncMap {
 		// 字段掩码按各节点自己的类型套用（与 get 同源）。
 		"outRefs": func(from int64, field string, page, size int) []core.Node {
 			return e.targets(c, true, func() ([]core.Edge, int64, error) {
-				n, err := eng.GetNodeById(c.R.Context(), from)
+				n, err := eng.GetNodeByID(c.R.Context(), from)
 				if err != nil || n == nil {
 					return nil, 0, fmt.Errorf("outRefs: node %d not found", from)
 				}
@@ -224,7 +224,7 @@ func expandTemplateNodes(c *CmsCtx, eng core.Engine, expression string, ids []in
 	var paths []gquery.ExpandPath
 	var err error
 	if strings.TrimSpace(expression) == "" || strings.TrimSpace(expression) == "*" {
-		node, getErr := eng.GetNodeById(c.R.Context(), ids[0])
+		node, getErr := eng.GetNodeByID(c.R.Context(), ids[0])
 		fail(getErr)
 		if node == nil {
 			fail(core.ErrNotFound)
@@ -262,7 +262,7 @@ func nodeIDs(nodes []core.Node) []int64 {
 // wantTo: 取 to_node（出边目标）; false 取 from_node（入边来源）。
 // graph 模板函数桥: 查节点类型（模板场景只有 id）后转发图原语。
 func (e *Render) graph(c *CmsCtx, start int64, field string, maxHops int, fn func(context.Context, string, int64, string, int) ([]int64, error)) []int64 {
-	n, err := e.eng.GetNodeById(c.R.Context(), start)
+	n, err := e.eng.GetNodeByID(c.R.Context(), start)
 	if err != nil || n == nil {
 		fail(fmt.Errorf("graph: node %d not found", start))
 		return nil
@@ -281,7 +281,7 @@ func (e *Render) targets(c *CmsCtx, wantTo bool, q func() ([]core.Edge, int64, e
 		if wantTo {
 			id = ed.ToNode
 		}
-		n, err := e.eng.GetNodeById(c.R.Context(), id)
+		n, err := e.eng.GetNodeByID(c.R.Context(), id)
 		fail(err)
 		if n == nil {
 			continue

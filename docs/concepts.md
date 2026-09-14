@@ -275,7 +275,8 @@ ErrInvalidQuery · ErrInvalidField · ErrInvalidOperator · ErrInvalidValue · E
 |---|---|
 | `Error` | Status + Code + Message + Details |
 | `Code`（12 个） | invalid_request / invalid_value / invalid_query / query_too_complex / unauthorized / forbidden / not_found / conflict / delete_restricted / upload_invalid / internal / unavailable |
-| `Fail` / `Reject` | 统一出口：结构化错误映射，未知错误 500 + 日志 |
+| `Fail` | 通用错误出口：`*Error` 原样输出，Core 错误映射，**未知错误 500 + 日志** |
+| `Reject` | Hook/规则拒绝出口：`*Error` 原样输出，Core 错误映射，**未知错误按 403 输出**（不是 500）|
 
 ### 6.5 运维
 

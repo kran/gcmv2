@@ -79,7 +79,7 @@ func AuthSession(ctx *CmsCtx, realm AuthRealm, nodeID int64) (string, error) {
 	if !ok || configured.NodeType != realm.NodeType {
 		return "", fmt.Errorf("web: auth realm %q is not configured", realm.Name)
 	}
-	node, err := ctx.site.engine.GetNodeById(ctx.R.Context(), nodeID)
+	node, err := ctx.site.engine.GetNodeByID(ctx.R.Context(), nodeID)
 	if err != nil {
 		return "", err
 	}

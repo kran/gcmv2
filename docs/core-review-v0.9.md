@@ -152,7 +152,7 @@ array/object 仍保留为结构语法（不进 kinds 注册表），但容器只
 都接收 Context，且没有保留旧的无 Context 重载：
 
 - 写入：CreateNode / PatchNode / Archive / Restore / DeleteNode / AddEdge / RemoveEdge
-- 读取与图：Query / GetNodeById / GetNodeByAddress / LoadTree / Traverse / Subtree / Ancestors /
+- 读取与图：Query / GetNodeByID / GetNodeByAddress / LoadTree / Traverse / Subtree / Ancestors /
   EquivalenceClass / OutEdges / InEdges
 - 认证与配置：RegisterAuth / FindAuth / AddAuthMethod / RemoveAuthMethod / Session 全套 / Settings 全套
 - 迁移与检索：Migrator.Up / UpDir / SearchIndex.Rebuild

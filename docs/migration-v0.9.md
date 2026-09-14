@@ -103,7 +103,7 @@ web.New(dir)                             -> web.Open(dir) (*Site, error)
 core.New(db, ts)                         -> core.Open(db, ts) (*Service, error)
 site.DB().Pool().Close()                 -> site.Close()
 CreateNode/PatchNode/DeleteNode          -> ...(ctx, ...)
-GetNodeById/GetNodeByAddress             -> ...(ctx, ...)
+GetNodeByID/GetNodeByAddress             -> ...(ctx, ...)
 Traverse/Subtree/Ancestors/EquivalenceClass -> ...(ctx, ...)
 OutEdges/InEdges/AddEdge/RemoveEdge      -> ...(ctx, ...)
 RegisterAuth/FindAuth/AddAuthMethod      -> ...(ctx, ...)
@@ -160,7 +160,7 @@ Defaults are `restrict` for required references and `set_null` for optional refe
 Applications that insert edges through raw SQL migrations must run:
 
 ```go
-err := site.Engine().SyncRelationSchema()
+err := site.Engine().SyncRelationSchema(ctx)
 ```
 
 after those site migrations. The old `FullFields` API is replaced by `FullNode`/`FullNodes`, whose `EditableNode.Values` explicitly contains scalar values plus ref IDs. Existing direct `Merge` calls must be removed; `PreviewMerge` is read-only until conflict resolution and audit-backed merge execution are implemented.

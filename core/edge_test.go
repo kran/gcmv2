@@ -174,7 +174,7 @@ func TestPreviewMergeReportsConflictsWithoutMutation(t *testing.T) {
 	if !preview.RequiresResolution || len(preview.FieldConflicts) == 0 || len(preview.IncomingEdges) != 1 {
 		t.Fatalf("preview = %#v", preview)
 	}
-	if node, _ := s.GetNodeById(t.Context(), personA); node == nil {
+	if node, _ := s.GetNodeByID(t.Context(), personA); node == nil {
 		t.Fatal("preview must not mutate source")
 	}
 }
@@ -227,14 +227,14 @@ types:
 	if _, err := s.AddEdge(t.Context(), first, second, "partner", 0); !errors.Is(err, ErrRelationCardinality) {
 		t.Fatalf("symmetric single ref error = %v", err)
 	}
-	firstNode, _ := s.GetNodeById(t.Context(), first)
+	firstNode, _ := s.GetNodeByID(t.Context(), first)
 	if err := s.ArchiveNode(t.Context(), first, firstNode.Revision); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.AddEdge(t.Context(), article, first, "reviewers", 0); !errors.Is(err, ErrNodeArchived) {
 		t.Fatalf("archived target error = %v", err)
 	}
-	articleNode, _ := s.GetNodeById(t.Context(), article)
+	articleNode, _ := s.GetNodeByID(t.Context(), article)
 	if err := s.ArchiveNode(t.Context(), article, articleNode.Revision); err != nil {
 		t.Fatal(err)
 	}

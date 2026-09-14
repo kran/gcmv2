@@ -650,7 +650,7 @@ func (b *backend) updateNode(ctx *CmsCtx) {
 		ctx.Fail(BadRequest("invalid id"))
 		return
 	}
-	existing, err := b.eng.GetNodeById(ctx.R.Context(), id)
+	existing, err := b.eng.GetNodeByID(ctx.R.Context(), id)
 	if err != nil {
 		b.internal(ctx, err)
 		return
@@ -813,7 +813,7 @@ func (b *backend) inbound(ctx *CmsCtx) {
 	ids := []int64{nodeID}
 	if ctx.Query("subtree") == "1" {
 		// 分支节点类型 → Subtree（图原语）
-		n, err := b.eng.GetNodeById(ctx.R.Context(), nodeID)
+		n, err := b.eng.GetNodeByID(ctx.R.Context(), nodeID)
 		if err != nil || n == nil {
 			ctx.Fail(NotFound("node not found"))
 			return
@@ -878,7 +878,7 @@ func (b *backend) expand(ctx *CmsCtx) {
 		ctx.Fail(BadRequest("node required"))
 		return
 	}
-	node, err := b.eng.GetNodeById(ctx.R.Context(), nodeID)
+	node, err := b.eng.GetNodeByID(ctx.R.Context(), nodeID)
 	if err != nil {
 		b.internal(ctx, err)
 		return

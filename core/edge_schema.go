@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/kran/dba"
@@ -9,15 +10,15 @@ import (
 
 // SyncRelationSchema reconciles persisted Edge metadata with the loaded Schema.
 // Call it after trusted raw-SQL imports or site migrations that insert edges.
-func (s *Service) SyncRelationSchema() error {
-	return s.syncEdgeMetadata()
+func (s *Service) SyncRelationSchema(ctx context.Context) error {
+	return s.syncEdgeMetadata(ctx)
 }
 
 // syncEdgeMetadata derives storage-only cardinality/algebra flags from the
 // loaded Schema, normalizes undirected endpoints, and recreates the partial
 // unique indexes that protect single refs under concurrent writes.
-func (s *Service) syncEdgeMetadata() error {
-	return s.db.Transaction(func(tx *dba.SQL) error {
+func (s *Service) syncEdgeMetadata(ctx context.Context) error {
+	return s.db.WithCtx(ctx).Transaction(func(tx *dba.SQL) error {
 		_, err := tx.Add(`DROP TRIGGER IF EXISTS edges_symmetric_single_insert`).Exec()
 		if err != nil {
 			return err
