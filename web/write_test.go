@@ -131,7 +131,20 @@ func TestUpdateAndDeleteEntry(t *testing.T) {
 		t.Fatalf("规则未加工 patch: %#v", updated.Display)
 	}
 
-	_ = ctx
+	if err := ctx.DeleteNode(999999); err == nil {
+		t.Fatal("删除不存在的节点应报错")
+	}
+	if err := ctx.DeleteNode(id); err != nil {
+		t.Fatal(err)
+	}
+	// 断言必须能区分归档和永久删除（两者都让公开读取拿不到），所以直接查 archived_at。
+	row, err := site.DB().WithCtx(t.Context()).Select("nodes", `id = #{1}`, id).FetchOne[core.Node]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row == nil || row.ArchivedAt == nil {
+		t.Fatalf("写入口的删除应当只是归档（行还在 + archived_at 已写）: %#v", row)
+	}
 }
 
 // 公共删除（DELETE /api/nodes/{type}/{id}）= Fire WriteDelete 规则 + ArchiveNode。

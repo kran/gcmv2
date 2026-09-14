@@ -379,8 +379,7 @@ page, total, err := ctx.ReadPage(actionMyContent, q) // 站点自定义读动作
 // 写（"客户端发起的写"：Fire 写规则 → 引擎 → 返回裁剪过的节点）
 node, err := ctx.CreateNode(&core.Node{...})
 node, err := ctx.UpdateNode(id, &core.NodePatch{...})
-// 删除没有 CmsCtx 入口：公共 DELETE 路由先 Fire WriteDelete 规则，再 ArchiveNode（归档）。
-// 永久删除属于后台（engine.DeleteNode，按字段 on_delete 处理）。
+err := ctx.DeleteNode(id)   // 走 WriteDelete 规则; 结果是归档（永久删除走 engine.DeleteNode）
 ```
 
 两条硬规则：

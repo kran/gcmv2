@@ -167,6 +167,10 @@ func (s *Site) apiDeleteNode(ctx *CmsCtx) {
 		ctx.Fail(BadRequest("invalid id"))
 		return
 	}
+	// 顺序有讲究：先用"路径上的类型"过一遍写规则（gate），再读节点。
+	// 反过来的话，匿名请求打一个不存在的 id 会拿到 404 而不是 401 —— 泄露了
+	// "这个节点存不存在"。CmsCtx.DeleteNode 只有 id、要先读节点才知道类型，
+	// 所以它是"先读后过规则"的顺序，通用路由不能直接用它（别把这段去重掉）。
 	event, err := ctx.writeEvent(WriteDelete, typ)
 	if err != nil {
 		ctx.Fail(err)
