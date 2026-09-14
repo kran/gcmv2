@@ -3,19 +3,18 @@ package core
 import (
 	"context"
 	"errors"
-	"time"
 )
 
 // Edge 引用（edges 表的行 — 类型系统不可见, 用户只见"引用字段"）。
 type Edge struct {
-	ID        int64     `db:"id,omitempty" json:"id"`
-	FromNode  int64     `db:"from_node" json:"from_node"`
-	Field     string    `db:"field" json:"field"`
-	ToNode    int64     `db:"to_node" json:"to_node"`
-	Sort      int       `db:"sort" json:"sort"`
-	SingleRef bool      `db:"single_ref" json:"-"`
-	Symmetric bool      `db:"symmetric" json:"-"`
-	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	ID        int64  `db:"id,omitempty" json:"id"`
+	FromNode  int64  `db:"from_node" json:"from_node"`
+	Field     string `db:"field" json:"field"`
+	ToNode    int64  `db:"to_node" json:"to_node"`
+	Sort      int    `db:"sort" json:"sort"`
+	SingleRef bool   `db:"single_ref" json:"-"`
+	Symmetric bool   `db:"symmetric" json:"-"`
+	CreatedAt Time   `db:"created_at" json:"created_at"`
 }
 
 // OutEdges 出边（分页）。symmetric 字段: 双向展开（存一条查两向）。

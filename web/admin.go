@@ -48,9 +48,9 @@ type Admin struct {
 	Username         string     `db:"username"`
 	PasswordHash     string     `db:"password_hash"`
 	SessionKey       string     `db:"session_key"`
-	SessionExpiresAt *time.Time `db:"session_expires_at"`
-	CreatedAt        time.Time  `db:"created_at"`
-	UpdatedAt        time.Time  `db:"updated_at"`
+	SessionExpiresAt *core.Time `db:"session_expires_at"`
+	CreatedAt        core.Time  `db:"created_at"`
+	UpdatedAt        core.Time  `db:"updated_at"`
 }
 
 // AdminService 账号服务 — 每站点一个实例, 绑定本站 db。
@@ -127,7 +127,7 @@ func (s *AdminService) Create(username, password string) (*Admin, error) {
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now()
+	now := core.TimeOf(time.Now())
 	account := &Admin{Username: username, PasswordHash: string(hash), CreatedAt: now, UpdatedAt: now}
 	if _, err := s.db.Insert("accounts", account).Exec(); err != nil {
 		return nil, err
@@ -154,7 +154,7 @@ func (s *AdminService) NewSession(id int64) (string, error) {
 		return "", err
 	}
 	res, err := s.db.Update("accounts", dba.H{
-		"session_key": key, "session_expires_at": time.Now().Add(sessionTTL), "updated_at": time.Now(),
+		"session_key": key, "session_expires_at": core.TimeOf(time.Now().Add(sessionTTL)), "updated_at": core.TimeOf(time.Now()),
 	}, "id = #{1}", id).Exec()
 	if err != nil {
 		return "", err
@@ -188,7 +188,7 @@ func (s *AdminService) SetPassword(id int64, password string) error {
 	}
 	res, err := s.db.Update("accounts", dba.H{
 		"password_hash": string(hash), "session_key": "", "session_expires_at": nil,
-		"updated_at": time.Now(),
+		"updated_at": core.TimeOf(time.Now()),
 	}, "id = #{1}", id).Exec()
 	if err != nil {
 		return err
@@ -202,7 +202,7 @@ func (s *AdminService) SetPassword(id int64, password string) error {
 // InvalidateSession 清指定管理员的会话（登出）。
 func (s *AdminService) InvalidateSession(id int64) error {
 	_, err := s.db.Update("accounts", dba.H{
-		"session_key": "", "session_expires_at": nil, "updated_at": time.Now(),
+		"session_key": "", "session_expires_at": nil, "updated_at": core.TimeOf(time.Now()),
 	}, "id = #{1}", id).Exec()
 	return err
 }
@@ -1048,7 +1048,7 @@ func (b *backend) search(ctx *CmsCtx) {
 		items = append(items, list...)
 		total += count
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
+	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.Time.After(items[j].UpdatedAt.Time) })
 	if len(items) > size {
 		items = items[:size]
 	}

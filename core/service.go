@@ -54,6 +54,14 @@ func Open(db *dba.SQL, ts *types.Types) (*Service, error) {
 	if err = s.syncSchemaIndexes(); err != nil {
 		return nil, fmt.Errorf("core: schema indexes: %w", err)
 	}
+	// 时间格式：先把历史写法归一化，再用闸门确认全库都是统一格式
+	// （dba.H / 手写 SQL 绕过类型系统，只有这里能抓住）。
+	if err = s.normalizeLegacyTimes(context.Background()); err != nil {
+		return nil, fmt.Errorf("core: normalize legacy times: %w", err)
+	}
+	if err = s.checkTimeFormats(context.Background()); err != nil {
+		return nil, err
+	}
 	if err = s.dropLegacyArchive(context.Background()); err != nil {
 		return nil, fmt.Errorf("core: drop legacy archive: %w", err)
 	}

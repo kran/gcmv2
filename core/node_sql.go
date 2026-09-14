@@ -105,7 +105,7 @@ func (s *Service) CreateNode(ctx context.Context, n *Node) (int64, error) {
 	m.ID = 0
 	m.Fields = Fields(fields)
 	m.Revision = 1
-	now := time.Now()
+	now := TimeOf(time.Now())
 	m.CreatedAt = now
 	m.UpdatedAt = now
 
@@ -220,7 +220,7 @@ func (s *Service) PatchNode(ctx context.Context, id int64, patch *NodePatch) err
 			return nil
 		}
 
-		cols["updated_at"] = time.Now()
+		cols["updated_at"] = TimeOf(time.Now())
 		cols["revision"] = dba.Expr(`revision + 1`)
 		result, err := tx.Update("nodes", cols, `id = #{1} AND revision = #{2}`, id, *patch.Revision).Exec()
 		if err != nil {

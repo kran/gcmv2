@@ -151,7 +151,7 @@ Lisp 只是受限文本前端，不直接生成 SQL，也不是公网业务参�
 所有业务实体的统一记录。当前固定系统列为：
 
 ```text
-id / type / display / revision / fields / created_at / updated_at
+id / type / display / revision / fields / created_at / updated_at（时间统一为 `core.Time`：UTC + RFC3339 + 秒精度 + `…Z`）
 ```
 
 - `ID`：稳定身份，创建后不可修改。

@@ -89,7 +89,7 @@ func (s *Service) deleteNodeTx(tx *dba.SQL, id int64, deleting map[int64]bool) e
 		}
 		_, err = tx.Update("nodes", dba.H{
 			"revision":   dba.Expr("revision + 1"),
-			"updated_at": time.Now(),
+			"updated_at": TimeOf(time.Now()),
 		}, `id = #{1}`, sourceID).Exec()
 		if err != nil {
 			return err

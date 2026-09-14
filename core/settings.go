@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"time"
 
 	"github.com/kran/dba"
 )
@@ -24,12 +23,12 @@ func checkKey(key string) error {
 
 // Setting 站点配置项（key-value, value 为 JSON 解码值）。
 type Setting struct {
-	Key       string    `db:"key" json:"key"`
-	Group     string    `db:"group_name" json:"group"`
-	Type      string    `db:"type" json:"type"`
-	RawValue  string    `db:"value" json:"-"`
-	Value     any       `db:"-" json:"value"`
-	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
+	Key       string `db:"key" json:"key"`
+	Group     string `db:"group_name" json:"group"`
+	Type      string `db:"type" json:"type"`
+	RawValue  string `db:"value" json:"-"`
+	Value     any    `db:"-" json:"value"`
+	UpdatedAt Time   `db:"updated_at" json:"updated_at"`
 }
 
 // GetSetting 取一条; 未找到返回 (nil, nil)。

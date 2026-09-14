@@ -15,23 +15,23 @@ import (
 // AuthMethod binds one credential, owned by a credential plugin, to an
 // authentication-enabled Node. Core stores credential data opaquely.
 type AuthMethod struct {
-	ID         int64     `db:"id,omitempty" json:"id"`
-	NodeType   string    `db:"type" json:"node_type"`
-	NodeID     int64     `db:"node_id" json:"node_id"`
-	Method     string    `db:"method" json:"method"`
-	Identifier string    `db:"identifier" json:"identifier"`
-	Data       Fields    `db:"data" json:"-"`
-	CreatedAt  time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt  time.Time `db:"updated_at" json:"updated_at"`
+	ID         int64  `db:"id,omitempty" json:"id"`
+	NodeType   string `db:"type" json:"node_type"`
+	NodeID     int64  `db:"node_id" json:"node_id"`
+	Method     string `db:"method" json:"method"`
+	Identifier string `db:"identifier" json:"identifier"`
+	Data       Fields `db:"data" json:"-"`
+	CreatedAt  Time   `db:"created_at" json:"created_at"`
+	UpdatedAt  Time   `db:"updated_at" json:"updated_at"`
 }
 
 // Session is a Realm-bound Node session. TokenHash is never sent to clients.
 type Session struct {
-	TokenHash string    `db:"token_hash" json:"-"`
-	Realm     string    `db:"realm" json:"realm"`
-	NodeID    int64     `db:"node_id" json:"node_id"`
-	ExpiresAt time.Time `db:"expires_at" json:"expires_at"`
-	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	TokenHash string `db:"token_hash" json:"-"`
+	Realm     string `db:"realm" json:"realm"`
+	NodeID    int64  `db:"node_id" json:"node_id"`
+	ExpiresAt Time   `db:"expires_at" json:"expires_at"`
+	CreatedAt Time   `db:"created_at" json:"created_at"`
 }
 
 // SessionTTL is the sliding frontend session lifetime.
@@ -69,7 +69,7 @@ func (s *Service) RegisterAuth(ctx context.Context, nodeType, method, identifier
 			return err
 		}
 		nodeID = id
-		now := time.Now()
+		now := TimeOf(time.Now())
 		authMethod := &AuthMethod{
 			NodeType: nodeType, NodeID: id, Method: method, Identifier: identifier,
 			Data: data, CreatedAt: now, UpdatedAt: now,
@@ -119,7 +119,7 @@ func (s *Service) AddAuthMethod(ctx context.Context, nodeType string, nodeID int
 	if existing != nil {
 		return fmt.Errorf("core: auth: %s %q already registered", method, identifier)
 	}
-	now := time.Now()
+	now := TimeOf(time.Now())
 	authMethod := &AuthMethod{
 		NodeType: nodeType, NodeID: nodeID, Method: method, Identifier: identifier,
 		Data: data, CreatedAt: now, UpdatedAt: now,
@@ -166,10 +166,10 @@ func (s *Service) CreateSession(ctx context.Context, realm string, nodeID int64)
 	if err != nil {
 		return "", err
 	}
-	now := time.Now()
+	now := TimeOf(time.Now())
 	session := &Session{
 		TokenHash: sessionTokenHash(token), Realm: realm, NodeID: nodeID,
-		ExpiresAt: now.Add(SessionTTL), CreatedAt: now,
+		ExpiresAt: TimeOf(now.Add(SessionTTL)), CreatedAt: now,
 	}
 	_, err = s.db.WithCtx(ctx).Insert("sessions", session).Exec()
 	if err != nil {
@@ -191,12 +191,12 @@ func (s *Service) ValidSession(ctx context.Context, token string) (*Session, err
 	if record == nil {
 		return nil, nil
 	}
-	if record.ExpiresAt.Before(time.Now()) {
+	if record.ExpiresAt.Time.Before(time.Now()) {
 		_, _ = s.db.WithCtx(ctx).Delete("sessions", `token_hash = #{1}`, hash).Exec()
 		return nil, nil
 	}
-	if time.Until(record.ExpiresAt) < SessionTTL/2 {
-		record.ExpiresAt = time.Now().Add(SessionTTL)
+	if time.Until(record.ExpiresAt.Time) < SessionTTL/2 {
+		record.ExpiresAt = TimeOf(time.Now().Add(SessionTTL))
 		_, _ = s.db.WithCtx(ctx).Update("sessions", dba.H{"expires_at": record.ExpiresAt}, `token_hash = #{1}`, hash).Exec()
 	}
 	return record, nil

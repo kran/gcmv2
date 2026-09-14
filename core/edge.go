@@ -105,7 +105,7 @@ func insertEdge(tx *dba.SQL, ts *types.Types, td types.TypeDef, field types.Fiel
 		"sort":       sort,
 		"single_ref": boolInt(single),
 		"symmetric":  boolInt(undirected),
-		"created_at": time.Now(),
+		"created_at": TimeOf(time.Now()),
 	}).Exec()
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed: edges") ||

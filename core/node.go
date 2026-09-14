@@ -4,7 +4,6 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/spf13/cast"
 )
@@ -86,12 +85,12 @@ func (f Fields) Value() (driver.Value, error) {
 
 // Node 节点 — 值模型（读/模板/JSON/DB 直接可用）。
 type Node struct {
-	ID        int64     `db:"id,omitempty" json:"id"` // omitempty: 插入跳零值走自增
-	Type      string    `db:"type" json:"type"`
-	Display   string    `db:"display" json:"display"`
-	Revision  int64     `db:"revision" json:"revision"`
-	CreatedAt time.Time `db:"created_at" json:"created_at"`
-	UpdatedAt time.Time `db:"updated_at" json:"updated_at"`
+	ID        int64  `db:"id,omitempty" json:"id"` // omitempty: 插入跳零值走自增
+	Type      string `db:"type" json:"type"`
+	Display   string `db:"display" json:"display"`
+	Revision  int64  `db:"revision" json:"revision"`
+	CreatedAt Time   `db:"created_at" json:"created_at"`
+	UpdatedAt Time   `db:"updated_at" json:"updated_at"`
 
 	// 类型字段（Scan/Value 自动 JSON 转换；ref/ref[] 存 edges）
 	Fields Fields `db:"fields" json:"fields"`

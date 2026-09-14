@@ -110,7 +110,7 @@ upload-image    upload-file     gallery
 ### 3.1 表
 
 ```text
-nodes          id/type/display/revision/fields(JSON)/created_at/updated_at
+nodes          id/type/display/revision/fields(JSON)/created_at/updated_at  ← 时间统一 "…Z"
 edges          id/from_node/field/to_node/sort/single_ref/symmetric/created_at
 auth_methods   id/type/node_id/method/identifier/data(JSON, 不透明)/timestamps
 sessions       token_hash/realm/node_id/expires_at/created_at
