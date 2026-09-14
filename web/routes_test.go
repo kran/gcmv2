@@ -25,6 +25,7 @@ types:
       - { name: slug, kind: slug }
       - { name: publication_state, kind: select, options: [draft, published], default: draft }
       - { name: body, kind: richtext }
+      - { name: category, kind: ref, to: category }
   category:
     capabilities:
       publication: { field: publication_state, draft: draft, published: published }

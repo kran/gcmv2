@@ -195,29 +195,58 @@ async function checkRender() {
         else pass('节点表单 display 行与字段行同构（label/kind/必填 + 同一控件）')
     }
 
-    // ② nodes.vue 分类过滤: 选中/清除都要显式 setCurrentKey（el-tree 只在初始化读 current-node-key）
+    // ② nodes.vue 引用筛选: 每个 ref 字段一项。树目标选分类（含子树）、其他目标搜索选节点;
+    //    选中/清除都要显式 setCurrentKey（el-tree 只在初始化读 current-node-key），多字段 AND 组合。
     const NodesPage = await loadComponent('/pages/nodes.vue')
-    const methods = (NodesPage.default || NodesPage).methods
+    const nodesComp = NodesPage.default || NodesPage
+    const methods = nodesComp.methods
     const calls = []
+    // 假上下文以组件自己的 data() 为底 —— 不然 data 里少个字段（比如被注释吃掉一行）
+    // 这里也照样过, 页面却在浏览器里炸。
     const fake = {
-        query: { page: 7 },
-        $refs: { 'tree-category': [{ setCurrentKey(key) { calls.push(key) } }] },
+        ...(typeof nodesComp.data === 'function' ? nodesComp.data() : {}),
+        query: { ...((typeof nodesComp.data === 'function' ? nodesComp.data() : {}).query || {}), page: 7, filter: '' },
+        $refs: {
+            'tree-category': [{ setCurrentKey(key) { calls.push(key) } }],
+            'fp-category': [{ hide() { calls.push('hide') } }],
+        },
         setTreeCurrent: methods.setTreeCurrent,
         collectSubtree: methods.collectSubtree,
-        combineTreeFilters: methods.combineTreeFilters,
+        combineFilters: methods.combineFilters,
+        applyFilters: methods.applyFilters,
+        closeFilterPopover: methods.closeFilterPopover,
         titleOf: () => '新闻',
         refresh() {},
     }
-    const ft = { field: 'category', active: 0, activeLabel: '', _ids: null }
-    fake.filterTrees = [ft]
-    methods.onTreeClick.call(fake, ft, { id: 9, children: [{ id: 10 }] })
-    const selected = { key: calls[0], filter: fake.query.filter, active: ft.active }
-    methods.clearTreeFilter.call(fake, ft)
+    // 假上下文里用到的 data 字段, 必须在组件自己的 data() 里真实存在 ——
+    // 否则测试自己造了一个组件里根本没有的字段, 页面在浏览器里炸了这里却是绿的。
+    const baseData = typeof nodesComp.data === 'function' ? nodesComp.data() : {}
+    for (const key of Object.keys(fake)) {
+        if (key.startsWith('$') || typeof fake[key] === 'function') continue
+        if (!(key in baseData)) throw new Error('nodes.vue 的 data() 缺少 ' + key + '（data() 被改坏了?）')
+    }
+    const ft = { field: 'category', to: 'category', tree: true, active: 0, activeLabel: '', _ids: null }
+    const fr = { field: 'event', to: 'event', tree: false, active: 0, activeLabel: '', _ids: null,
+                 options: [{ id: 83, label: '2026 新能源产业对接会 #83' }] }
+    fake.filters = [ft, fr]
+    methods.pickTreeNode.call(fake, ft, { id: 9, children: [{ id: 10 }] })
+    const selected = { key: calls[0], filter: fake.query.filter, active: ft.active, page: fake.query.page }
+    methods.pickRef.call(fake, fr, 83)
+    const both = fake.query.filter
+    methods.clearFilter.call(fake, ft)
+    methods.pickRef.call(fake, fr, undefined)
     const cleared = { keys: calls.slice(), filter: fake.query.filter, active: ft.active, ids: ft._ids }
-    console.log('       选中: ' + JSON.stringify(selected) + '  清除: ' + JSON.stringify(cleared))
-    if (selected.key !== 9 || selected.filter !== '(in ->category [9 10])') fail('选中分类没有同步 el-tree 高亮/过滤串')
-    else if (cleared.keys[1] !== null || cleared.filter !== '' || cleared.active !== 0 || cleared.ids !== null) fail('点“全部”后旧分类高亮未重置')
-    else pass('分类过滤: 选中与清除都重置了 el-tree 高亮')
+    console.log('       选分类: ' + JSON.stringify(selected) + '\n       再选活动: ' + JSON.stringify(both)
+        + '\n       清空: ' + JSON.stringify(cleared))
+    if (selected.key !== 9 || selected.filter !== '(in ->category [9 10])' || selected.page !== 1) {
+        fail('树目标选中没有同步 el-tree 高亮/过滤串/回到第 1 页')
+    } else if (both !== '(and (in ->category [9 10]) (in ->event [83]))') {
+        fail('多字段引用筛选没有 AND 组合')
+    } else if (!cleared.keys.includes(null) || cleared.filter !== '' || cleared.active !== 0 || cleared.ids !== null) {
+        fail('点“全部”后旧分类高亮未重置')
+    } else {
+        pass('引用筛选: 树目标含子树、其他目标单选节点、多字段 AND、清除后高亮重置')
+    }
 
     // ③ 左侧类型列表: 组内按类型键排序；没填 group 的与站点自命的"未分组"并成同一节，且排最前
     const grouped = methods.buildTypeGroups.call({
