@@ -70,40 +70,115 @@ type DefaultCreated struct {
 }
 
 // EnsureDefaults 为本站库生成默认管理员（admin + 随机 16 位密码）;
-// 已有账号跳过。站点项目启动时调用, 密码打印一次。
+// 库里已有账号就跳过。站点项目启动时调用, 密码只打印一次。
 func EnsureDefaults(db *dba.SQL) (*DefaultCreated, error) {
 	svc := NewService(db)
-	ex, err := svc.Get()
+	count, err := svc.Count()
 	if err != nil {
 		return nil, err
 	}
-	if ex != nil {
+	if count > 0 {
 		return nil, nil
 	}
 	password, err := randomString(16)
 	if err != nil {
 		return nil, err
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return nil, err
-	}
-	key, err := randomString(32)
-	if err != nil {
-		return nil, err
-	}
-	now := time.Now()
-	if _, err := svc.db.Insert("accounts", &Admin{
-		Username: "admin", PasswordHash: string(hash),
-		SessionKey: key, CreatedAt: now, UpdatedAt: now,
-	}).Exec(); err != nil {
+	if _, err := svc.Create("admin", password); err != nil {
 		return nil, err
 	}
 	return &DefaultCreated{Username: "admin", Password: password}, nil
 }
 
-// SetPassword 强制设密（handler 负责先验旧密）。
-func (s *AdminService) SetPassword(password string) error {
+// Count 管理员数量（首次引导用来判断"库里有没有账号"）。
+func (s *AdminService) Count() (int, error) {
+	n, err := s.db.Add(`SELECT COUNT(*) FROM accounts`).FetchOne[int]()
+	if err != nil || n == nil {
+		return 0, err
+	}
+	return *n, nil
+}
+
+// GetByUsername 按用户名取账号（username 上有唯一索引）。
+func (s *AdminService) GetByUsername(username string) (*Admin, error) {
+	if username == "" {
+		return nil, nil
+	}
+	return s.db.Select("accounts", "username = #{1}", username).FetchOne[Admin]()
+}
+
+// GetBySessionKey 按会话键取账号 —— 每个管理员有各自的会话键。
+func (s *AdminService) GetBySessionKey(key string) (*Admin, error) {
+	if key == "" {
+		return nil, nil
+	}
+	return s.db.Select("accounts", "session_key = #{1}", key).FetchOne[Admin]()
+}
+
+// Create 建管理员（首次引导与将来"加管理员"共用）；用户名重复由唯一索引拒绝。
+func (s *AdminService) Create(username, password string) (*Admin, error) {
+	if username == "" {
+		return nil, errors.New("admin: username required")
+	}
+	if len(password) < 8 {
+		return nil, errors.New("admin: password must be at least 8 characters")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	account := &Admin{Username: username, PasswordHash: string(hash), CreatedAt: now, UpdatedAt: now}
+	if _, err := s.db.Insert("accounts", account).Exec(); err != nil {
+		return nil, err
+	}
+	return account, nil
+}
+
+// VerifyPassword 按用户名验密，成功时返回该账号（失败信息一致, 不泄露用户名是否存在）。
+func (s *AdminService) VerifyPassword(username, password string) (*Admin, bool) {
+	account, err := s.GetByUsername(username)
+	if err != nil || account == nil {
+		return nil, false
+	}
+	if bcrypt.CompareHashAndPassword([]byte(account.PasswordHash), []byte(password)) != nil {
+		return nil, false
+	}
+	return account, true
+}
+
+// NewSession 给指定管理员换新 session_key 并返回（cookie 值）。
+func (s *AdminService) NewSession(id int64) (string, error) {
+	key, err := randomString(32)
+	if err != nil {
+		return "", err
+	}
+	res, err := s.db.Update("accounts", dba.H{
+		"session_key": key, "session_expires_at": time.Now().Add(sessionTTL), "updated_at": time.Now(),
+	}, "id = #{1}", id).Exec()
+	if err != nil {
+		return "", err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return "", errors.New("admin: account not found")
+	}
+	return key, nil
+}
+
+// Authenticate 按 cookie 值解析当前管理员；键不存在或会话已过期都返回 (nil, nil)。
+func (s *AdminService) Authenticate(key string) (*Admin, error) {
+	account, err := s.GetBySessionKey(key)
+	if err != nil || account == nil {
+		return nil, err
+	}
+	if account.SessionExpiresAt == nil || !account.SessionExpiresAt.After(time.Now()) {
+		return nil, nil
+	}
+	return account, nil
+}
+
+// SetPassword 改指定管理员的密码，并清掉它的会话（handler 负责先验旧密）。
+func (s *AdminService) SetPassword(id int64, password string) error {
 	if len(password) < 8 {
 		return errors.New("admin: password must be at least 8 characters")
 	}
@@ -114,67 +189,22 @@ func (s *AdminService) SetPassword(password string) error {
 	res, err := s.db.Update("accounts", dba.H{
 		"password_hash": string(hash), "session_key": "", "session_expires_at": nil,
 		"updated_at": time.Now(),
-	}, "1 = 1").Exec()
+	}, "id = #{1}", id).Exec()
 	if err != nil {
 		return err
 	}
-	affected, _ := res.RowsAffected()
-	if affected == 0 {
-		return errors.New("admin: no account")
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return errors.New("admin: account not found")
 	}
 	return nil
 }
 
-// VerifyPassword 验密（用户名+密码同时比对; 失败信息一致不泄露用户名）。
-func (s *AdminService) VerifyPassword(username, password string) bool {
-	a, err := s.Get()
-	if err != nil || a == nil || a.Username != username {
-		return false
-	}
-	return bcrypt.CompareHashAndPassword([]byte(a.PasswordHash), []byte(password)) == nil
-}
-
-// NewSession 登录成功: 换新 session_key 并返回（cookie 值）。
-func (s *AdminService) NewSession() (string, error) {
-	key, err := randomString(32)
-	if err != nil {
-		return "", err
-	}
-	expiresAt := time.Now().Add(sessionTTL)
-	res, err := s.db.Update("accounts", dba.H{
-		"session_key": key, "session_expires_at": expiresAt, "updated_at": time.Now(),
-	}, "1 = 1").Exec()
-	if err != nil {
-		return "", err
-	}
-	affected, _ := res.RowsAffected()
-	if affected == 0 {
-		return "", errors.New("admin: no account")
-	}
-	return key, nil
-}
-
-// ValidSession 校验 cookie 值是否当前 session_key。
-func (s *AdminService) ValidSession(key string) bool {
-	if key == "" {
-		return false
-	}
-	a, err := s.Get()
-	return err == nil && a != nil && a.SessionKey == key &&
-		a.SessionExpiresAt != nil && a.SessionExpiresAt.After(time.Now())
-}
-
-// InvalidateSession 立即使当前后台会话失效。
-func (s *AdminService) InvalidateSession() error {
+// InvalidateSession 清指定管理员的会话（登出）。
+func (s *AdminService) InvalidateSession(id int64) error {
 	_, err := s.db.Update("accounts", dba.H{
 		"session_key": "", "session_expires_at": nil, "updated_at": time.Now(),
-	}, "1 = 1").Exec()
+	}, "id = #{1}", id).Exec()
 	return err
-}
-
-// Get 取本站账号; 未找到返回 (nil, nil)。
-func (s *AdminService) Get() (*Admin, error) {
-	return s.db.Select("accounts", "1 = 1").FetchOne[Admin]()
 }
 
 func randomString(n int) (string, error) {
@@ -419,11 +449,12 @@ func (b *backend) login(ctx *CmsCtx) {
 		b.fail(ctx, err)
 		return
 	}
-	if !b.acct.VerifyPassword(in.Username, in.Password) {
+	account, ok := b.acct.VerifyPassword(in.Username, in.Password)
+	if !ok {
 		ctx.Fail(Unauthorized("invalid credentials"))
 		return
 	}
-	key, err := b.acct.NewSession()
+	key, err := b.acct.NewSession(account.ID)
 	if err != nil {
 		b.internal(ctx, err)
 		return
@@ -437,7 +468,12 @@ func (b *backend) login(ctx *CmsCtx) {
 }
 
 func (b *backend) logout(ctx *CmsCtx) {
-	if err := b.acct.InvalidateSession(); err != nil {
+	account, ok := ctx.adminAccount()
+	if !ok {
+		ctx.Fail(Unauthorized("unauthorized"))
+		return
+	}
+	if err := b.acct.InvalidateSession(account.ID); err != nil {
 		b.internal(ctx, err)
 		return
 	}
@@ -461,16 +497,31 @@ func (b *backend) listPanels(ctx *CmsCtx) {
 // requireAuth 会话校验中间件（cho 类型化中间件: 校验失败短路）。
 func (b *backend) requireAuth(ctx *CmsCtx, next func()) {
 	cookie, err := ctx.R.Cookie(cookieName)
-	if err != nil || !b.acct.ValidSession(cookie.Value) {
+	if err != nil {
 		ctx.Fail(Unauthorized("unauthorized"))
 		return
 	}
+	account, err := b.acct.Authenticate(cookie.Value)
+	if err != nil {
+		b.internal(ctx, err)
+		return
+	}
+	if account == nil {
+		ctx.Fail(Unauthorized("unauthorized"))
+		return
+	}
+	ctx.setAdmin(account)
 	ctx.SetActor(Actor{Kind: ActorAdmin, Scopes: []string{"admin"}})
 	next()
 }
 
 func (b *backend) me(ctx *CmsCtx) {
-	_ = ctx.Json(http.StatusOK, map[string]any{"username": "admin", "actor": ctx.Actor()})
+	account, ok := ctx.adminAccount()
+	if !ok {
+		ctx.Fail(Unauthorized("unauthorized"))
+		return
+	}
+	_ = ctx.Json(http.StatusOK, map[string]any{"username": account.Username, "actor": ctx.Actor()})
 }
 
 // ── 类型定义 ─────────────────────────────────────
@@ -705,11 +756,16 @@ func (b *backend) changePassword(ctx *CmsCtx) {
 		b.fail(ctx, err)
 		return
 	}
-	if !b.acct.VerifyPassword("admin", in.OldPassword) {
+	account, ok := ctx.adminAccount()
+	if !ok {
+		ctx.Fail(Unauthorized("unauthorized"))
+		return
+	}
+	if _, ok := b.acct.VerifyPassword(account.Username, in.OldPassword); !ok {
 		ctx.Fail(Unauthorized("old password incorrect"))
 		return
 	}
-	if err := b.acct.SetPassword(in.NewPassword); err != nil {
+	if err := b.acct.SetPassword(account.ID, in.NewPassword); err != nil {
 		b.fail(ctx, err)
 		return
 	}

@@ -20,6 +20,9 @@ type CmsCtx struct {
 	principal       *core.Node
 	principalLoaded bool
 
+	// admin 是后台中间件在本次请求里解析出的管理员账号（多管理员下各是各的）。
+	admin *Admin
+
 	// readRules 读规则解析结果（范围 + 字段掩码），key = action\x00type。
 	// 生命周期与 actor 一致：SetActor 时作废。
 	readRules map[string]readRule
@@ -27,6 +30,11 @@ type CmsCtx struct {
 
 // Engine 引擎访问（handler 里查数据）。
 func (c *CmsCtx) Engine() core.Engine { return c.site.engine }
+
+// setAdmin / adminAccount 是后台鉴权中间件与 handler 之间的请求内传值（不对外）。
+func (c *CmsCtx) setAdmin(account *Admin) { c.admin = account }
+
+func (c *CmsCtx) adminAccount() (*Admin, bool) { return c.admin, c.admin != nil }
 
 // Render 按候选渲染（node--{type} 级联 → 数据注入）。
 func (c *CmsCtx) Render(candidates []string, data map[string]any) {

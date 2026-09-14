@@ -108,9 +108,7 @@ func TestAdminNodes(t *testing.T) {
 func TestAdminPasswordFlow(t *testing.T) {
 	s := testSite(t)
 	// 设固定密码（模拟 NewSite AdminPass 引导后的状态）
-	if err := NewService(s.DB()).SetPassword("cmx12345"); err != nil {
-		t.Fatal(err)
-	}
+	resetAdminPassword(t, s, "cmx12345")
 	w := do(s, "POST", "/admin/login", map[string]any{"username": "admin", "password": "cmx12345"})
 	if w.Code != http.StatusOK {
 		t.Fatalf("login = %d: %s", w.Code, w.Body.String())
@@ -205,9 +203,7 @@ func TestAdminPasswordFlow(t *testing.T) {
 
 func TestAdminSecureCookie(t *testing.T) {
 	s := testSiteConfigured(t, func(site *Site) { site.SecureCookies(true) })
-	if err := NewService(s.DB()).SetPassword("cmx12345"); err != nil {
-		t.Fatal(err)
-	}
+	resetAdminPassword(t, s, "cmx12345")
 	w := do(s, "POST", "/admin/login", map[string]any{"username": "admin", "password": "cmx12345"})
 	if w.Code != http.StatusOK {
 		t.Fatalf("login = %d: %s", w.Code, w.Body.String())
@@ -221,30 +217,103 @@ func TestAdminSecureCookie(t *testing.T) {
 func TestAdminSessionExpiresServerSide(t *testing.T) {
 	s := testSite(t)
 	service := NewService(s.DB())
-	key, err := service.NewSession()
+	account, err := service.GetByUsername("admin")
+	if err != nil || account == nil {
+		t.Fatalf("admin account = %#v, %v", account, err)
+	}
+	key, err := service.NewSession(account.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !service.ValidSession(key) {
-		t.Fatal("new admin session should be valid")
+	if got, err := service.Authenticate(key); err != nil || got == nil {
+		t.Fatalf("new admin session = %#v, %v", got, err)
 	}
 	_, err = s.DB().Update("accounts", map[string]any{
 		"session_expires_at": time.Now().Add(-time.Minute),
-	}, "1 = 1").Exec()
+	}, "id = #{1}", account.ID).Exec()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if service.ValidSession(key) {
-		t.Fatal("expired admin session should be rejected")
+	if got, err := service.Authenticate(key); err != nil || got != nil {
+		t.Fatalf("expired admin session = %#v, %v", got, err)
+	}
+}
+
+// TestAdminMultipleAccounts 多管理员：会话必须按 cookie 找到"本人"，而不是"表里的那一行"。
+// 旧实现（Select("accounts", "1 = 1") + Go 里比字符串）在这里全错：第二个人登录会顶掉
+// 第一个人的会话，/admin/me 也只会回同一个用户名。
+func TestAdminMultipleAccounts(t *testing.T) {
+	s := testSite(t)
+	svc := NewService(s.DB())
+	account, err := svc.GetByUsername("admin")
+	if err != nil || account == nil {
+		t.Fatalf("admin account = %#v, %v", account, err)
+	}
+	if err := svc.SetPassword(account.ID, "admin12345"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Create("editor", "editor12345"); err != nil {
+		t.Fatal(err)
+	}
+
+	login := func(username, password string) *http.Cookie {
+		t.Helper()
+		w := do(s, "POST", "/admin/login", map[string]any{"username": username, "password": password})
+		if w.Code != http.StatusOK {
+			t.Fatalf("login %s = %d: %s", username, w.Code, w.Body.String())
+		}
+		for _, c := range w.Result().Cookies() {
+			if c.Name == cookieName {
+				return c
+			}
+		}
+		t.Fatalf("login %s: no cookie", username)
+		return nil
+	}
+
+	// 两个人各自登录：/admin/me 必须各回各的用户名。
+	for _, tc := range []struct{ user, pass string }{{"admin", "admin12345"}, {"editor", "editor12345"}} {
+		ck := login(tc.user, tc.pass)
+		w := do(s, "GET", "/admin/me", nil, ck)
+		if w.Code != http.StatusOK {
+			t.Fatalf("me %s = %d: %s", tc.user, w.Code, w.Body.String())
+		}
+		if body := w.Body.String(); !strings.Contains(body, `"username":"`+tc.user+`"`) {
+			t.Fatalf("me %s = %s", tc.user, body)
+		}
+	}
+
+	// 登出一个不能影响另一个。
+	adminCookie := login("admin", "admin12345")
+	editorCookie := login("editor", "editor12345")
+	if w := do(s, "POST", "/admin/logout", nil, editorCookie); w.Code != http.StatusOK {
+		t.Fatalf("logout = %d: %s", w.Code, w.Body.String())
+	}
+	if w := do(s, "GET", "/admin/me", nil, adminCookie); w.Code != http.StatusOK {
+		t.Fatalf("admin session died with editor logout: %d %s", w.Code, w.Body.String())
+	}
+	if w := do(s, "GET", "/admin/me", nil, editorCookie); w.Code != http.StatusUnauthorized {
+		t.Fatalf("logged-out editor still authorized: %d", w.Code)
+	}
+
+	// 改一个人的密码不能踢掉另一个人。
+	adminCookie = login("admin", "admin12345")
+	editorCookie = login("editor", "editor12345")
+	w := do(s, "POST", "/admin/password", map[string]any{
+		"old_password": "editor12345", "new_password": "editor54321",
+	}, editorCookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("change password = %d: %s", w.Code, w.Body.String())
+	}
+	if w := do(s, "GET", "/admin/me", nil, adminCookie); w.Code != http.StatusOK {
+		t.Fatalf("admin session died with editor password change: %d", w.Code)
 	}
 }
 
 // TestAdminSettings 设置 CRUD。
 func TestAdminSettings(t *testing.T) {
 	s := testSite(t)
-	if err := NewService(s.DB()).SetPassword("cmx12345"); err != nil {
-		t.Fatal(err)
-	}
+	resetAdminPassword(t, s, "cmx12345")
 	w := do(s, "POST", "/admin/login", map[string]any{"username": "admin", "password": "cmx12345"})
 	var ck *http.Cookie
 	for _, c := range w.Result().Cookies() {
@@ -278,12 +347,23 @@ func TestAdminSettings(t *testing.T) {
 	}
 }
 
+// resetAdminPassword 把测试夹具里那个默认管理员（EnsureDefaults 造的）密码改掉。
+func resetAdminPassword(t *testing.T, s *Site, password string) {
+	t.Helper()
+	svc := NewService(s.DB())
+	account, err := svc.GetByUsername("admin")
+	if err != nil || account == nil {
+		t.Fatalf("admin account = %#v, %v", account, err)
+	}
+	if err := svc.SetPassword(account.ID, password); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // adminCookie 设固定密码并登录，返回管理端会话 cookie。
 func adminCookie(t *testing.T, s *Site) *http.Cookie {
 	t.Helper()
-	if err := NewService(s.DB()).SetPassword("cmx12345"); err != nil {
-		t.Fatal(err)
-	}
+	resetAdminPassword(t, s, "cmx12345")
 	w := do(s, "POST", "/admin/login", map[string]any{"username": "admin", "password": "cmx12345"})
 	if w.Code != http.StatusOK {
 		t.Fatalf("admin login = %d: %s", w.Code, w.Body.String())
