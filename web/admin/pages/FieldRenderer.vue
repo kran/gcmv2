@@ -152,8 +152,10 @@ export default {
     methods: {
         // 内置控件分支集合（其余 kind → 站点扩展组件动态加载）
         builtinWidgets() {
+            // 模板里有分支的 kind 必须都在这里 —— 否则会去拉 /admin/ui-extras/<kind>.vue
+            // （模板没分支 → 404 → 那个字段渲染成"未知控件"警告块）。
             return ['text', 'slug', 'textarea', 'richtext', 'number', 'timestamp', 'gallery', 'bool',
-                'upload-image', 'upload-file', 'ref', 'ref[]', 'array', 'object']
+                'select', 'upload-image', 'upload-file', 'ref', 'ref[]', 'array', 'object']
         },
         resolveExtraWidgets() {
             const builtin = this.builtinWidgets()

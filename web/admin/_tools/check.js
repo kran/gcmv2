@@ -16,6 +16,11 @@ const fs = require('fs')
 const path = require('path')
 const vm = require('vm')
 
+// KERNEL_KINDS 内核 types 包声明的 kind（改动 types/*.go 时这里要跟着对）——
+// 只用来在检查时提示"哪些 kind 在后台还没有控件"。
+const KERNEL_KINDS = ['array', 'bool', 'gallery', 'number', 'object', 'ref', 'richtext',
+    'select', 'slug', 'strings', 'text', 'textarea', 'timestamp', 'upload-file', 'upload-image']
+
 const ADMIN_DIR = path.join(__dirname, '..')
 const PAGES_DIR = path.join(ADMIN_DIR, 'pages')
 
@@ -210,6 +215,20 @@ async function checkRender() {
     //     否则打字搜出来的几条会在下次打开时被预载结果覆盖掉。
     const FR = await loadComponent('/pages/FieldRenderer.vue')
     const frMethods = (FR.default || FR).methods
+    // ③a 模板里有分支的 kind 必须都登记为内置控件 —— 漏登记的会去拉 ui-extras/<kind>.vue
+    //     然后 404（字段本身还能渲染，所以只有控制台报错，很容易漏掉）。
+    const frComp = FR.default || FR
+    const builtin = frMethods.builtinWidgets.call({})
+    const renderSrc = (frComp.render || (() => ({}))).toString()
+    const templateKinds = new Set()
+    for (const m of renderSrc.matchAll(/kind\s*===\s*['"]([a-z-]+(?:\[\])?)['"]/g)) templateKinds.add(m[1])
+    const missing = [...templateKinds].filter(k => builtin.indexOf(k) < 0)
+    const noWidget = KERNEL_KINDS.filter(k => builtin.indexOf(k) < 0)
+    console.log('       模板 kind: ' + [...templateKinds].sort().join(' '))
+    console.log('       声明了 kind 但没有内置控件（会走 ui-extras 或警告块）: ' + noWidget.join(' '))
+    if (missing.length) fail('模板有分支但未登记为内置控件: ' + missing.join(' '))
+    else pass('模板里的 kind 都登记为内置控件（不会白拉 ui-extras）')
+
     const searchCalls = []
     sandbox.$api = {
         refLabel: (n) => n.display || ('#' + n.id),
