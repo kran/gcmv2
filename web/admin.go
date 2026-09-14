@@ -894,26 +894,26 @@ func (b *backend) expand(ctx *CmsCtx) {
 		ctx.Fail(BadRequest("node required"))
 		return
 	}
-	node, err := b.eng.GetNodeByID(ctx.R.Context(), nodeID)
-	if err != nil {
-		b.internal(ctx, err)
-		return
+	// 空 / "*" = 自动展开：路径取决于节点类型，交给内核读一次节点自己决定 ——
+	// 原来这里先 GetNodeByID 只为拿类型，紧接着 Expand 内部又读了同一行（同一请求同一行两次）。
+	var (
+		root *core.Node
+		err  error
+	)
+	if expr == "" || expr == "*" {
+		root, err = b.eng.ExpandAuto(ctx.R.Context(), nodeID)
+	} else {
+		paths, perr := gquery.ParseExpand(expr)
+		if perr != nil {
+			b.fail(ctx, perr)
+			return
+		}
+		root, err = b.eng.Expand(ctx.R.Context(), nodeID, paths...)
 	}
-	if node == nil {
+	if errors.Is(err, core.ErrNotFound) {
 		ctx.Fail(NotFound("not found"))
 		return
 	}
-	var paths []gquery.ExpandPath
-	if expr == "" || expr == "*" {
-		paths = b.eng.AutoExpand(node.Type)
-	} else {
-		paths, err = gquery.ParseExpand(expr)
-		if err != nil {
-			b.fail(ctx, err)
-			return
-		}
-	}
-	root, err := b.eng.Expand(ctx.R.Context(), nodeID, paths...)
 	if err != nil {
 		b.fail(ctx, err)
 		return

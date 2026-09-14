@@ -1,6 +1,7 @@
 package core
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -175,6 +176,41 @@ func TestExpandPathAuto(t *testing.T) {
 	}
 	if _, ok := n.Expand["categories"]; !ok {
 		t.Fatalf("auto expand must include categories (empty ok): %v", n.Expand)
+	}
+}
+
+// ExpandAuto 是"自动展开"的入口：路径取决于节点类型，由内核读一次节点决定
+// （调用方不必先查一次节点拿类型、再让 Expand 查第二遍）。结果必须与显式写法一致。
+func TestExpandPathAutoEntry(t *testing.T) {
+	ts := newTypes(t, expandPathTypes)
+	s := New(testDB(t), ts)
+	p1, _ := s.CreateNode(t.Context(), &Node{Type: "person", Display: "t", Fields: Fields{"name": "张三"}})
+	art, _ := s.CreateNode(t.Context(), &Node{Type: "article", Display: "t", Fields: Fields{"title": "甲", "authors": []any{p1}}})
+
+	auto, err := s.ExpandAuto(t.Context(), art)
+	if err != nil {
+		t.Fatal(err)
+	}
+	explicit, err := s.Expand(t.Context(), art, s.AutoExpand("article")...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(auto.Expand) != len(explicit.Expand) {
+		t.Fatalf("ExpandAuto = %v, explicit = %v", auto.Expand, explicit.Expand)
+	}
+	for field, want := range explicit.Expand {
+		got, ok := auto.Expand[field]
+		if !ok {
+			t.Fatalf("ExpandAuto 少了 %s", field)
+		}
+		if len(got.([]*Node)) != len(want.([]*Node)) {
+			t.Fatalf("%s: ExpandAuto %d != explicit %d", field, len(got.([]*Node)), len(want.([]*Node)))
+		}
+	}
+
+	// 节点不存在 → ErrNotFound（后台 handler 靠它回 404）。
+	if _, err := s.ExpandAuto(t.Context(), art+9999); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing node = %v", err)
 	}
 }
 

@@ -49,6 +49,7 @@ type Engine interface {
 	RebuildSearch(ctx context.Context) error
 	EquivalenceClass(ctx context.Context, typeName string, start int64, field string, maxHops int) ([]int64, error)
 	Expand(ctx context.Context, id int64, paths ...query.ExpandPath) (*Node, error)
+	ExpandAuto(ctx context.Context, id int64) (*Node, error)
 	ExpandMany(ctx context.Context, ids []int64, paths ...query.ExpandPath) ([]*Node, error)
 	AutoExpand(typeName string) []query.ExpandPath
 

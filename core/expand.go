@@ -56,6 +56,28 @@ func (s *Service) ExpandMany(ctx context.Context, ids []int64, paths ...gquery.E
 	for i := range nodes {
 		roots[i] = &nodes[i]
 	}
+	return s.expandRoots(ctx, roots, paths...)
+}
+
+// ExpandAuto 展开一个节点"自动声明"的全部引用路径。路径取决于节点类型，所以由内核读一次
+// 节点自己决定；调用方不必为了拿类型先查一次节点、再让 Expand 查第二遍。
+func (s *Service) ExpandAuto(ctx context.Context, id int64) (*Node, error) {
+	nodes, err := s.nodesByIDs(ctx, []int64{id})
+	if err != nil {
+		return nil, err
+	}
+	if len(nodes) == 0 {
+		return nil, ErrNotFound
+	}
+	roots, err := s.expandRoots(ctx, []*Node{&nodes[0]}, s.AutoExpand(nodes[0].Type)...)
+	if err != nil {
+		return nil, err
+	}
+	return roots[0], nil
+}
+
+// expandRoots 对已经加载好的根节点套用展开路径（ExpandMany / ExpandAuto 共用）。
+func (s *Service) expandRoots(ctx context.Context, roots []*Node, paths ...gquery.ExpandPath) ([]*Node, error) {
 	if len(paths) == 0 || len(roots) == 0 {
 		return roots, nil
 	}
