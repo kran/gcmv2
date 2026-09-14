@@ -152,9 +152,12 @@ async function checkRender() {
             control: ((row.children || []).find(c => c.tag && c.tag.indexOf('el-') === 0) || {}).tag,
         }
     }
+    // 渲染期抛错必须让用例失败 —— 不然组件在浏览器里报错, 这里照样是绿的。
+    const renderErrors = []
     const mount = (comp, props, components) => {
         const host = node('#root')
         const app = renderer.createApp(comp, props)
+        app.config.errorHandler = (err) => { renderErrors.push(err && err.message ? err.message : String(err)) }
         components.forEach(name => app.component(name, stub(name)))
         app.mount(host)
         return host
@@ -195,7 +198,15 @@ async function checkRender() {
         else pass('节点表单 display 行与字段行同构（label/kind/必填 + 同一控件）')
     }
 
-    // ② nodes.vue 引用筛选: 每个 ref 字段一项。树目标选分类（含子树）、其他目标搜索选节点;
+    // ③ 同上的组件在 nodes.vue 里的真实用法: :is-edit 恒为 true, 而 node 在点开某一行之前是 null。
+    renderErrors.length = 0
+    mount(NodeEditDialog.default || NodeEditDialog, {
+        visible: false, isEdit: true, node: null, typeName: 'article', defs: { article: { fields } },
+    }, stubs.concat(['el-drawer']))
+    if (renderErrors.length) fail('NodeEditDialog 在 node=null + isEdit=true 下渲染报错: ' + renderErrors[0])
+    else pass('NodeEditDialog 在 node=null + isEdit=true 下不报错（nodes.vue 的真实用法）')
+
+    // ④ nodes.vue 引用筛选: 每个 ref 字段一项。树目标选分类（含子树）、其他目标搜索选节点;
     //    选中/清除都要显式 setCurrentKey（el-tree 只在初始化读 current-node-key），多字段 AND 组合。
     const NodesPage = await loadComponent('/pages/nodes.vue')
     const nodesComp = NodesPage.default || NodesPage
@@ -248,7 +259,7 @@ async function checkRender() {
         pass('引用筛选: 树目标含子树、其他目标单选节点、多字段 AND、清除后高亮重置')
     }
 
-    // ③ 左侧类型列表: 组内按类型键排序；没填 group 的与站点自命的"未分组"并成同一节，且排最前
+    // ⑤ 左侧类型列表: 组内按类型键排序；没填 group 的与站点自命的"未分组"并成同一节，且排最前
     const grouped = methods.buildTypeGroups.call({
         typeNames: ['article', 'banner', 'category', 'event', 'industry', 'member', 'page', 'supply'],
         typeDefs: {

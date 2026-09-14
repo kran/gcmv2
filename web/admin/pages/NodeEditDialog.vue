@@ -1,5 +1,5 @@
 <template>
-    <el-drawer append-to-body v-model="visibleModel" :title="isEdit ? '编辑 #' + node.id : '新建 ' + (typeName || '')"
+    <el-drawer append-to-body v-model="visibleModel" :title="title"
                size="60%" :close-on-click-modal="false" :close-on-press-escape="false">
         <el-form>
             <!-- 显示名是节点列, 不是类型字段（不由 schema 渲染），所以这里手写一份行结构 —
@@ -45,6 +45,12 @@ export default {
         return { form: { display: '', revision: 0, fields: {}, refPreset: {} }, saving: false, def: null }
     },
     computed: {
+        // 标题在渲染期就会求值, 而 node 只在点开某一行之后才有 ——
+        // 调用方（nodes.vue）为了省事把 :is-edit 写成恒 true, 这里必须容忍 node 为空。
+        title() {
+            if (!this.isEdit) return '新建 ' + (this.typeName || '')
+            return this.node ? '编辑 #' + this.node.id : '编辑'
+        },
         // v-model:visible 代理 — prop 只读, 内部写走 emit
         visibleModel: {
             get() { return this.visible },
