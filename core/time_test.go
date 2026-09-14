@@ -44,9 +44,6 @@ func TestTimeScanStrict(t *testing.T) {
 			t.Fatalf("Scan(%q) = %q, want %q", tc.raw, got, tc.want)
 		}
 	}
-	if err := got.Scan([]byte("2026-09-14T23:06:41Z")); err != nil || got.String() != "2026-09-14T23:06:41Z" {
-		t.Fatalf("Scan([]byte) = %q, %v", got, err)
-	}
 	if err := got.Scan(time.Date(2026, 9, 14, 23, 6, 41, 0, time.UTC)); err != nil || got.String() != "2026-09-14T23:06:41Z" {
 		t.Fatalf("Scan(time.Time) = %q, %v", got, err)
 	}
@@ -65,6 +62,10 @@ func TestTimeScanStrict(t *testing.T) {
 		if err := got.Scan(raw); err == nil {
 			t.Fatalf("Scan(%q) 应当报错（内核不认非统一格式）", raw)
 		}
+	}
+	// 驱动只对 BLOB 列给 []byte，时间列不会是 BLOB：不认，别静默当字符串收下。
+	if err := got.Scan([]byte("2026-09-14T23:06:41Z")); err == nil {
+		t.Fatal("Scan([]byte) 应当报错")
 	}
 }
 

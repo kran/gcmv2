@@ -37,10 +37,15 @@ func (t Time) Value() (driver.Value, error) {
 	return t.UTC().Truncate(time.Second).Format(TimeFormat), nil
 }
 
-// Scan 实现 sql.Scanner：只认统一格式。
+// Scan 实现 sql.Scanner。收三种形态，都是实测出来的驱动行为：
 //
-// 驱动若把列直接映射成 time.Time（例如开了 _texttotime）也照收并归一化；
-// 其余一律报错 —— 库里出现别的写法说明没跑那个一次性工具，宁可起不来也不要静默读错。
+//   - time.Time：modernc 会把声明为 TIMESTAMP/DATETIME 的列解析成 time.Time 再交过来
+//     （统一格式也走这里）。注意这条路**看不见库里的原始文本** —— 无时区墙钟、带 m=+ 的
+//     怪物格式一样能解析成功，所以 core.Time 自己发现不了它们，只有启动闸门能挡。
+//   - string：驱动解析不了的文本（脏值），以及 TEXT 列。按统一格式严格校验。
+//   - nil：可空列（如 accounts.session_expires_at）。
+//
+// 其余（epoch 数字、[]byte）报错：时间列不是 BLOB，驱动也只对 BLOB 给 []byte。
 func (t *Time) Scan(src any) error {
 	switch v := src.(type) {
 	case nil:
@@ -49,8 +54,6 @@ func (t *Time) Scan(src any) error {
 	case time.Time:
 		*t = TimeOf(v)
 		return nil
-	case []byte:
-		return t.Scan(string(v))
 	case string:
 		parsed, err := ParseTime(v)
 		if err != nil {
