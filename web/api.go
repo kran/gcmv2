@@ -155,10 +155,8 @@ func (s *Site) apiUpdateNode(ctx *CmsCtx) {
 	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
 }
 
-// apiArchiveNode POST /api/nodes/{type}/{id}/archive — 写规则（归属）→ 归档。
-// 路径就叫 archive：客户端只能下线，永久删除只在后台（POST /admin/nodes/{id}/archive
-// 是归档、DELETE /admin/nodes/{id} 才是真删 —— 两者对称）。
-func (s *Site) apiArchiveNode(ctx *CmsCtx) {
+// apiDeleteNode DELETE /api/nodes/{type}/{id} — 写规则（归属）→ ArchiveNode。
+func (s *Site) apiDeleteNode(ctx *CmsCtx) {
 	typ := ctx.PathValue("type")
 	if _, ok := s.engine.Types().Type(typ); !ok {
 		ctx.Fail(NotFound("type not found"))
@@ -171,7 +169,7 @@ func (s *Site) apiArchiveNode(ctx *CmsCtx) {
 	}
 	// 顺序有讲究：先用"路径上的类型"过一遍写规则（gate），再读节点。
 	// 反过来的话，匿名请求打一个不存在的 id 会拿到 404 而不是 401 —— 泄露了
-	// "这个节点存不存在"。CmsCtx.ArchiveNode 只有 id、要先读节点才知道类型，
+	// "这个节点存不存在"。CmsCtx.DeleteNode 只有 id、要先读节点才知道类型，
 	// 所以它是"先读后过规则"的顺序，通用路由不能直接用它（别把这段去重掉）。
 	event, err := ctx.writeEvent(WriteDelete, typ)
 	if err != nil {
@@ -231,7 +229,7 @@ func (s *Site) mountNodeApi(g *cho.Cho[*CmsCtx]) {
 	g.Get("/nodes/{type}/{id}", s.apiViewNode)
 	g.Post("/nodes/{type}", s.apiCreateNode)
 	g.Put("/nodes/{type}/{id}", s.apiUpdateNode)
-	g.Post("/nodes/{type}/{id}/archive", s.apiArchiveNode)
+	g.Delete("/nodes/{type}/{id}", s.apiDeleteNode)
 	// 通用: 上传 / 树数据（"我的内容"属于站点业务语义, 由站点 API 实现）
 	g.Post("/upload", s.apiUpload)
 	g.Get("/tree/{type}", s.apiTree)

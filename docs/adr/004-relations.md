@@ -181,7 +181,7 @@ required ref 默认 restrict。
 - `EditableNode` 和 Ref API 保留已归档目标 ID，供管理和修复
 - required ref 指向归档目标时进入数据完整性报告
 - 恢复目标后引用自动恢复可见
-- 公共 `POST /api/nodes/{type}/{id}/archive` 执行归档（客户端没有真删接口）；Admin 永久删除时才执行 on_delete
+- 公共 DELETE 执行归档；Admin 永久删除时才执行 on_delete
 - 认证 Node 归档时撤销其全部 Session
 
 是否允许新引用指向已归档 Node：不允许。

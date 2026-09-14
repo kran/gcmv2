@@ -10,12 +10,11 @@ import (
 //
 // 与读入口同样的两层分工：
 //
-//	CmsCtx.CreateNode / UpdateNode / ArchiveNode
+//	CmsCtx.CreateNode / UpdateNode / DeleteNode
 //	    "客户端发起的写"：触发 web.write.<action>.<type> 规则（身份判断 + 允许字段
 //	    + 就地加工）→ 调引擎 → 返回裁剪过的节点。
-//	    ArchiveNode 就是归档（和公共接口 POST /api/nodes/{type}/{id}/archive 同一件事）：
-//	    站点自己写 handler 时用它，不必自己 Fire 事件。规则名仍然是 WriteDelete
-//	    （= web.write.delete.<type>），沿用不改，站点的规则注册不用动。
+//	    DeleteNode 的结果是归档（= HTTP DELETE 的语义，见 ADR-004）：站点自己写
+//	    handler 时用它，不必自己 Fire 事件再纠结该归档还是永久删除。
 //
 //	永久删除属于"系统自己的写"：engine.DeleteNode，按字段的 on_delete 处理。
 //
@@ -80,13 +79,13 @@ func (c *CmsCtx) UpdateNode(id int64, patch *core.NodePatch) (*core.Node, error)
 	return c.readBack(id)
 }
 
-// ArchiveNode 走删除规则（WriteDelete），结果是归档。站点自己写 handler 时调它；
-// 永久删除另走 engine.DeleteNode（按字段 on_delete 处理）。
+// DeleteNode 走删除规则，结果是归档（= 公共 DELETE 的语义，ADR-004）。站点自己写
+// handler 时调它；永久删除另走 engine.DeleteNode（按字段 on_delete 处理）。
 //
 // 注意顺序：本入口只有 id，必须先读节点才知道类型，因此是"先读、后 Fire 规则"。
 // 不能让匿名访客据此区分"节点是否存在"的场景（比如通用路由），应该先用路径上的
 // 类型 Fire 一次写规则做 gate —— 公共 DELETE 路由就是这么做的。
-func (c *CmsCtx) ArchiveNode(id int64) error {
+func (c *CmsCtx) DeleteNode(id int64) error {
 	existing, err := c.site.engine.GetNodeById(c.R.Context(), id)
 	if err != nil {
 		return err

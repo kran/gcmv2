@@ -125,7 +125,7 @@ Lisp 只是受限文本前端，不直接生成 SQL，也不是公网业务参�
 
 ### 2.8 默认保守，破坏性操作显式
 
-- 公共 API 只能归档（`POST /api/nodes/{type}/{id}/archive`），没有真删接口。
+- 公共 DELETE 默认归档。
 - 永久删除只通过明确的管理/Core 操作执行。
 - required ref 默认 `restrict`。
 - 可选 ref 默认 `set_null`。
@@ -341,7 +341,7 @@ site.WriteRule(web.WriteDelete, "article", func(*web.CmsCtx, int64) error { ... 
 写: 拒绝（匿名 401 unauthorized / 已认证 403 forbidden）
 ```
 
-**写路径的三个生效点**（POST `/api/nodes/{type}` / PUT `/api/nodes/{type}/{id}` / POST `/api/nodes/{type}/{id}/archive`）：
+**写路径的三个生效点**（POST / PUT / DELETE `/api/nodes/{type}[/{id}]`）：
 
 ```text
 1) 准入    Has(web.write.<action>.<type>)? 没有 → 401/403
@@ -379,7 +379,7 @@ page, total, err := ctx.ReadPage(actionMyContent, q) // 站点自定义读动作
 // 写（"客户端发起的写"：Fire 写规则 → 引擎 → 返回裁剪过的节点）
 node, err := ctx.CreateNode(&core.Node{...})
 node, err := ctx.UpdateNode(id, &core.NodePatch{...})
-err := ctx.ArchiveNode(id)  // 走 WriteDelete 规则; 结果是归档（永久删除走 engine.DeleteNode）
+err := ctx.DeleteNode(id)   // 走 WriteDelete 规则; 结果是归档（永久删除走 engine.DeleteNode）
 ```
 
 两条硬规则：
@@ -872,7 +872,7 @@ Core 与 Admin API 已支持 archive/restore，但当前通用后台列表默认
 19. 读规则解析结果只能缓存在 `CmsCtx` 上（生命周期 = Actor）。禁止缓存到 `Site`/`Engine`/
     `BaseContext`：跨请求复用会把一个角色的字段掩码给另一个角色。
 20. `CmsCtx.Read*` 不接受调用方自带的 `QueryScope`（非零即报错）；行范围只能来自读规则。
-21. 业务端点里"客户端发起的写"走 `CmsCtx.CreateNode/UpdateNode/ArchiveNode`；直接调
+21. 业务端点里"客户端发起的写"走 `CmsCtx.CreateNode/UpdateNode/DeleteNode`；直接调
     `engine.PatchNode` 等属于系统写（或者必须自己 Fire 规则），不能两者都不做。
 
 ---

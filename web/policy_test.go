@@ -361,8 +361,8 @@ func TestWriteRuleWithoutFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w = do(site, http.MethodPost, "/api/nodes/guestbook/"+strconv.FormatInt(id, 10)+"/archive", nil)
+	w = do(site, http.MethodDelete, "/api/nodes/guestbook/"+strconv.FormatInt(id, 10), nil)
 	if w.Code != http.StatusOK {
-		t.Fatalf("archive = %d %s", w.Code, w.Body.String())
+		t.Fatalf("delete = %d %s", w.Code, w.Body.String())
 	}
 }

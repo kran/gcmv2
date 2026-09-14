@@ -131,10 +131,10 @@ func TestUpdateAndDeleteEntry(t *testing.T) {
 		t.Fatalf("规则未加工 patch: %#v", updated.Display)
 	}
 
-	if err := ctx.ArchiveNode(999999); err == nil {
-		t.Fatal("归档不存在的节点应报错")
+	if err := ctx.DeleteNode(999999); err == nil {
+		t.Fatal("删除不存在的节点应报错")
 	}
-	if err := ctx.ArchiveNode(id); err != nil {
+	if err := ctx.DeleteNode(id); err != nil {
 		t.Fatal(err)
 	}
 	// 断言必须能区分归档和永久删除（两者都让公开读取拿不到），所以直接查 archived_at。
@@ -143,16 +143,16 @@ func TestUpdateAndDeleteEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	if row == nil || row.ArchivedAt == nil {
-		t.Fatalf("写入口的归档（行还在 + archived_at 已写）: %#v", row)
+		t.Fatalf("写入口的删除应当只是归档（行还在 + archived_at 已写）: %#v", row)
 	}
 }
 
-// 公共归档（POST /api/nodes/{type}/{id}/archive）= Fire WriteDelete 规则 + ArchiveNode。
+// 公共删除（DELETE /api/nodes/{type}/{id}）= Fire WriteDelete 规则 + ArchiveNode。
 //
 // 断言必须能区分"归档"和"永久删除"：两者都会让默认读取拿不到，所以这里直接查
 // archived_at。之前只断言"读不到"，于是即使实现走的是永久删除也照样通过 —— 一个
 // 看起来在测契约、实际测不出东西的测试。
-func TestPublicArchiveRoute(t *testing.T) {
+func TestDeleteRouteArchives(t *testing.T) {
 	var fired int64
 	site, _ := maskTestSite(t, func(site *Site, _ *atomic.Int32) {
 		site.WriteRule(WriteDelete, "article", func(_ *CmsCtx, id int64) error {
@@ -166,28 +166,23 @@ func TestPublicArchiveRoute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 老的 DELETE 路径必须已经下线（改回 g.Delete 会让这里失败）。
-	if got := do(site, "DELETE", "/api/nodes/article/"+itoa(id), nil); got.Code == http.StatusOK {
-		t.Fatalf("旧的 DELETE 路径还能用（公共接口只该有 archive）: %d", got.Code)
-	}
-	w := do(site, "POST", "/api/nodes/article/"+itoa(id)+"/archive", nil)
+	w := do(site, "DELETE", "/api/nodes/article/"+itoa(id), nil)
 	if w.Code != http.StatusOK {
-		t.Fatalf("archive route = %d: %s", w.Code, w.Body.String())
+		t.Fatalf("delete route = %d: %s", w.Code, w.Body.String())
 	}
 	if fired != id {
 		t.Fatalf("WriteDelete 规则没被 Fire: fired=%d, want %d", fired, id)
 	}
-	// 直接取 core.Node：GetNodeById 不过滤归档（但它读不到"是不是刚归档的"），
-	// 这里要的是 archived_at 本身。
+	// 直接取 core.Node：GetNodeById 不过滤归档，这里要的是 archived_at 本身。
 	row, err := site.DB().WithCtx(t.Context()).Select("nodes", `id = #{1}`, id).FetchOne[core.Node]()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if row == nil {
-		t.Fatal("公共归档把节点物理删掉了（应当只是归档）")
+		t.Fatal("公共删除把节点物理删掉了（应当只是归档）")
 	}
 	if row.ArchivedAt == nil {
-		t.Fatal("公共归档没有写 archived_at")
+		t.Fatal("公共删除没有写 archived_at（应当只是归档）")
 	}
 	// 归档 = 数据还在、只是读不到。这里走公开读路径（负责过滤归档的是读路径，
 	// 不是 GetNodeById —— 后者连归档节点也返回，只有 Node.ArchivedAt 能分辨）。
