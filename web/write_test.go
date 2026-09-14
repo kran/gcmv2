@@ -137,27 +137,28 @@ func TestUpdateAndDeleteEntry(t *testing.T) {
 	if err := ctx.DeleteNode(id); err != nil {
 		t.Fatal(err)
 	}
-	// 断言必须能区分归档和永久删除（两者都让公开读取拿不到），所以直接查 archived_at。
+	// 断言必须能区分"真删"和"归档"（两者都让公开读取拿不到），所以直接查底表：
+	// 归档会留下行 + archived_at，真删则是行没了。
 	row, err := site.DB().WithCtx(t.Context()).Select("nodes", `id = #{1}`, id).FetchOne[core.Node]()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row == nil || row.ArchivedAt == nil {
-		t.Fatalf("写入口的删除应当只是归档（行还在 + archived_at 已写）: %#v", row)
+	if row != nil {
+		t.Fatalf("写入口的删除应当是真删（行还在说明只是归档）: %#v", row)
 	}
 }
 
-// 公共删除（DELETE /api/nodes/{type}/{id}）= Fire WriteDelete 规则 + ArchiveNode。
+// 公共删除（DELETE /api/nodes/{type}/{id}）= Fire WriteDelete 规则 + 永久删除。
 //
-// 断言必须能区分"归档"和"永久删除"：两者都会让默认读取拿不到，所以这里直接查
-// archived_at。之前只断言"读不到"，于是即使实现走的是永久删除也照样通过 —— 一个
-// 看起来在测契约、实际测不出东西的测试。
-func TestDeleteRouteArchives(t *testing.T) {
+// 断言必须能区分"真删"和"归档"：两者都会让默认读取拿不到，所以这里直接查底表。
+// 之前只断言"读不到"，于是两种实现都能通过 —— 一个看起来在测契约、实际测不出
+// 东西的测试。
+func TestDeleteRouteDeletes(t *testing.T) {
 	var fired int64
 	site, _ := maskTestSite(t, func(site *Site, _ *atomic.Int32) {
 		site.WriteRule(WriteDelete, "article", func(_ *CmsCtx, id int64) error {
 			fired = id
-			return nil // 允许匿名：本测试只关心"规则被 Fire"与"结果是归档"
+			return nil // 允许匿名：本测试只关心"规则被 Fire"与"结果是真删"
 		})
 	})
 	id, err := site.Engine().CreateNode(t.Context(), &core.Node{
@@ -173,21 +174,16 @@ func TestDeleteRouteArchives(t *testing.T) {
 	if fired != id {
 		t.Fatalf("WriteDelete 规则没被 Fire: fired=%d, want %d", fired, id)
 	}
-	// 直接取 core.Node：GetNodeById 不过滤归档，这里要的是 archived_at 本身。
+	// 直接查底表：真删 = 行没了；若是归档，行还在（只是公开读不到）。
 	row, err := site.DB().WithCtx(t.Context()).Select("nodes", `id = #{1}`, id).FetchOne[core.Node]()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row == nil {
-		t.Fatal("公共删除把节点物理删掉了（应当只是归档）")
+	if row != nil {
+		t.Fatalf("公共删除只是归档了（行还在，archived_at=%v）", row.ArchivedAt)
 	}
-	if row.ArchivedAt == nil {
-		t.Fatal("公共删除没有写 archived_at（应当只是归档）")
-	}
-	// 归档 = 数据还在、只是读不到。这里走公开读路径（负责过滤归档的是读路径，
-	// 不是 GetNodeById —— 后者连归档节点也返回，只有 Node.ArchivedAt 能分辨）。
 	if got := do(site, "GET", "/api/nodes/article/"+itoa(id), nil); got.Code != http.StatusNotFound {
-		t.Fatalf("归档后公开读取 = %d, want 404: %s", got.Code, got.Body.String())
+		t.Fatalf("删除后公开读取 = %d, want 404: %s", got.Code, got.Body.String())
 	}
 }
 

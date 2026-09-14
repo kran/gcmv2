@@ -7,7 +7,7 @@
 ### Breaking changes
 
 - `searchable.fields` takes type fields only. `display` is a node column that is always indexed (its own FTS column, highest bm25 weight), so listing it was a no-op that mostly taught the wrong thing; it is now rejected by the usual "field is not defined" check. Remove it from every `types.yaml`.
-- `CmsCtx.DeleteNode` archives the node instead of permanently deleting it. Its comment always said "公共删除 = 归档" (and ADR-004 says the public DELETE archives) while the implementation called `engine.DeleteNode` — the code now does what the comment promised. Nothing in-tree or in the sites called it, so no caller changes. The public API still has no permanent delete: `DELETE /admin/nodes/{id}` remains the only one, and the rule fired is still `WriteDelete` (`web.write.delete.<type>`).
+- Public `DELETE /api/nodes/{type}/{id}` and `CmsCtx.DeleteNode` permanently delete again (both archived for a while, per the old "公共 DELETE = 归档" rule). Deleting a node that something references with a required ref fails with HTTP 409 (`restrict`, unchanged). Archiving is now the explicit operation: `POST /admin/nodes/{id}/archive` (+ `/restore`) in the admin API, or `engine.ArchiveNode` for a site that wants a reversible 下架. The rule fired is still `WriteDelete` (`web.write.delete.<type>`).
 - `web.ReadRule` takes a fourth parameter, `*core.List[string]`: a read rule now declares both the row range and the fields the actor must not see. Existing rules add one ignored parameter.
 
 ### Added

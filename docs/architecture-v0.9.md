@@ -125,8 +125,8 @@ Lisp 只是受限文本前端，不直接生成 SQL，也不是公网业务参�
 
 ### 2.8 默认保守，破坏性操作显式
 
-- 公共 DELETE 默认归档。
-- 永久删除只通过明确的管理/Core 操作执行。
+- 公共 DELETE 是永久删除（按字段 `on_delete` 处理引用）。
+- 归档是可恢复操作，必须显式：`engine.ArchiveNode` / `POST /admin/nodes/{id}/archive`。
 - required ref 默认 `restrict`。
 - 可选 ref 默认 `set_null`。
 - `cascade` 只允许关系 Node endpoint。
@@ -379,7 +379,7 @@ page, total, err := ctx.ReadPage(actionMyContent, q) // 站点自定义读动作
 // 写（"客户端发起的写"：Fire 写规则 → 引擎 → 返回裁剪过的节点）
 node, err := ctx.CreateNode(&core.Node{...})
 node, err := ctx.UpdateNode(id, &core.NodePatch{...})
-err := ctx.DeleteNode(id)   // 走 WriteDelete 规则; 结果是归档（永久删除走 engine.DeleteNode）
+err := ctx.DeleteNode(id)   // 走 WriteDelete 规则; 永久删除（按字段 on_delete）
 ```
 
 两条硬规则：
@@ -639,7 +639,7 @@ GET /readyz  可接客（Ping 连接池; Close 后 503）
 ### 4.7 删除路径
 
 ```text
-Public DELETE -> ArchiveNode
+Public DELETE -> DeleteNode
 
 Admin/Core permanent delete
   -> 收集 incoming refs

@@ -155,7 +155,7 @@ func (s *Site) apiUpdateNode(ctx *CmsCtx) {
 	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
 }
 
-// apiDeleteNode DELETE /api/nodes/{type}/{id} — 写规则（归属）→ ArchiveNode。
+// apiDeleteNode DELETE /api/nodes/{type}/{id} — 写规则（归属）→ 永久删除（按字段 on_delete）。
 func (s *Site) apiDeleteNode(ctx *CmsCtx) {
 	typ := ctx.PathValue("type")
 	if _, ok := s.engine.Types().Type(typ); !ok {
@@ -189,7 +189,7 @@ func (s *Site) apiDeleteNode(ctx *CmsCtx) {
 		ctx.Reject(err)
 		return
 	}
-	err = s.engine.ArchiveNode(ctx.R.Context(), id, existing.Revision)
+	err = s.engine.DeleteNode(ctx.R.Context(), id)
 	if err != nil {
 		ctx.Fail(err)
 		return
