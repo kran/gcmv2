@@ -6,6 +6,11 @@
 // 用法：
 //
 //	go run ./tools/legacy-time -db /path/to/gcm.sqlite [-types types.yaml] [-dry-run]
+//	go run ./tools/legacy-time -db /path/to/gcm.sqlite -types types.yaml -check   # 只检查（CI/部署）
+//
+// 内核不做这件事：内核自己的写入是类型安全的（core.Time / types.TimeFormat），
+// 启动时**不扫全表**。脏值只可能来自外部手写 SQL（迁移、种子、站点代码），
+// 所以检查放在这里，由部署/CI 按需跑。
 //
 // 处理两处：
 //  1. 库里所有声明为 TIMESTAMP / DATETIME 的列（跳过 goose 的 migr_* 表与 sqlite 内部表）
@@ -33,12 +38,9 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// canonical 与 core.TimeFormat 一致：UTC、RFC3339、秒精度、带 Z。
-const canonical = "2006-01-02T15:04:05Z"
-
 // zoneLayouts 是历史出现过的**自带时区**的写法，解析结果无歧义。
 var zoneLayouts = []string{
-	canonical,
+	types.TimeFormat,
 	time.RFC3339Nano,
 	time.RFC3339,
 	"2006-01-02 15:04:05.999999999 -0700 MST", // 驱动默认 time.Time.String()
@@ -56,8 +58,9 @@ var wallLayouts = []string{
 // Options 是工具入参。
 type Options struct {
 	DBPath    string
-	TypesPath string // 可选：给了才处理 timestamp 字段值
+	TypesPath string // 可选：给了才处理（检查）timestamp 字段值
 	DryRun    bool
+	Check     bool // 只检查不写库；不合统一格式的值计入 Report.Bad
 	Out       io.Writer
 }
 
@@ -72,6 +75,7 @@ type Column struct {
 type Report struct {
 	Columns []Column
 	Fields  int // 改动的 timestamp 字段值个数
+	Bad     int // Check 模式：不合统一格式的值个数（列 + 字段）
 }
 
 // Run 执行迁移；DryRun 时只统计不写库。
@@ -85,6 +89,11 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 		return Report{}, fmt.Errorf("打开数据库: %w", err)
 	}
 	defer db.Close()
+
+	if opts.Check {
+		bad, err := checkAll(ctx, db, opts, out)
+		return Report{Bad: bad}, err
+	}
 
 	var report Report
 	columns, err := discoverTimeColumns(ctx, db)
@@ -117,6 +126,73 @@ func Run(ctx context.Context, opts Options) (Report, error) {
 		fmt.Fprintln(out, "（dry-run：没有写库）")
 	}
 	return report, nil
+}
+
+// checkAll 只检查不改：每列一条 SQL 数出不合统一格式的行数（不往 Go 搬行）。
+// 判据与内核的 core.Time 一致：值必须**就是** types.TimeFormat。
+// COALESCE 是必要的：strftime 解析不了的值返回 NULL，而 `x <> NULL` 恒为 NULL，
+// 那正好会漏掉最该抓的脏值。
+func checkAll(ctx context.Context, db *dba.SQL, opts Options, out io.Writer) (int, error) {
+	bad := 0
+	columns, err := discoverTimeColumns(ctx, db)
+	if err != nil {
+		return bad, err
+	}
+	for _, col := range columns {
+		n, err := db.WithCtx(ctx).Add(
+			`SELECT COUNT(*) FROM ` + col.table + ` WHERE ` + col.column + ` IS NOT NULL` +
+				` AND COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', ` + col.column + `), '') <> ` + col.column).FetchOne[int]()
+		if err != nil {
+			return bad, fmt.Errorf("检查 %s.%s: %w", col.table, col.column, err)
+		}
+		if n != nil && *n > 0 {
+			bad += *n
+			fmt.Fprintf(out, "  %s.%s: %d 行不是统一格式\n", col.table, col.column, *n)
+		}
+	}
+	if opts.TypesPath == "" {
+		return bad, nil
+	}
+	ts, err := loadTypes(opts.TypesPath)
+	if err != nil {
+		return bad, err
+	}
+	for _, typeName := range ts.Names() {
+		def, _ := ts.Type(typeName)
+		for _, field := range def.Fields {
+			if field.Kind != types.KindTimestamp {
+				continue
+			}
+			path := "$." + field.Name
+			n, err := db.WithCtx(ctx).Add(
+				`SELECT COUNT(*) FROM nodes WHERE type = #{1}`+
+					` AND json_extract(fields, #{2}) IS NOT NULL`+
+					` AND (typeof(json_extract(fields, #{2})) <> 'text'`+
+					` OR COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', json_extract(fields, #{2})), '')`+
+					` <> json_extract(fields, #{2}))`, typeName, path).FetchOne[int]()
+			if err != nil {
+				return bad, fmt.Errorf("检查 %s.%s: %w", typeName, field.Name, err)
+			}
+			if n != nil && *n > 0 {
+				bad += *n
+				fmt.Fprintf(out, "  %s.%s: %d 个节点的时间字段不是统一格式\n", typeName, field.Name, *n)
+			}
+		}
+	}
+	return bad, nil
+}
+
+// loadTypes 读 types.yaml（只为了知道哪些字段是 timestamp）。
+func loadTypes(path string) (*types.Types, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("读 types.yaml: %w", err)
+	}
+	ts := types.New()
+	if err := ts.Load(raw); err != nil {
+		return nil, fmt.Errorf("解析 types.yaml: %w", err)
+	}
+	return ts, nil
 }
 
 func migrateColumn(ctx context.Context, db *dba.SQL, col column, dryRun bool) (Column, error) {
@@ -165,12 +241,12 @@ func normalizeLegacyTime(raw string) (string, error) {
 	}
 	for _, layout := range zoneLayouts {
 		if parsed, err := time.Parse(layout, s); err == nil {
-			return parsed.UTC().Truncate(time.Second).Format(canonical), nil
+			return parsed.UTC().Truncate(time.Second).Format(types.TimeFormat), nil
 		}
 	}
 	for _, layout := range wallLayouts {
 		if parsed, err := time.ParseInLocation(layout, s, time.Local); err == nil {
-			return parsed.UTC().Truncate(time.Second).Format(canonical), nil
+			return parsed.UTC().Truncate(time.Second).Format(types.TimeFormat), nil
 		}
 	}
 	return "", fmt.Errorf("认不出来的时间值 %q（自带时区或 %s 本地墙钟）", raw, "YYYY-MM-DD HH:MM:SS")
@@ -183,20 +259,20 @@ func normalizeTimestampField(v any) (string, bool, error) {
 	case nil:
 		return "", false, nil
 	case float64:
-		return time.Unix(int64(value), 0).UTC().Format(canonical), true, nil
+		return time.Unix(int64(value), 0).UTC().Format(types.TimeFormat), true, nil
 	case json.Number:
 		seconds, err := value.Int64()
 		if err != nil {
 			return "", false, fmt.Errorf("数字 %v: %w", value, err)
 		}
-		return time.Unix(seconds, 0).UTC().Format(canonical), true, nil
+		return time.Unix(seconds, 0).UTC().Format(types.TimeFormat), true, nil
 	case string:
 		if strings.TrimSpace(value) == "" {
 			return "", false, nil
 		}
 		// 被演示 SQL 写成字符串的数字（"1788825600"）
 		if seconds, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil {
-			return time.Unix(seconds, 0).UTC().Format(canonical), true, nil
+			return time.Unix(seconds, 0).UTC().Format(types.TimeFormat), true, nil
 		}
 		normalized, err := normalizeLegacyTime(value)
 		if err != nil {
@@ -209,13 +285,9 @@ func normalizeTimestampField(v any) (string, bool, error) {
 }
 
 func migrateTimestampFields(ctx context.Context, db *dba.SQL, typesPath string, dryRun bool) (int, error) {
-	raw, err := os.ReadFile(typesPath)
+	ts, err := loadTypes(typesPath)
 	if err != nil {
-		return 0, fmt.Errorf("读 types.yaml: %w", err)
-	}
-	ts := types.New()
-	if err := ts.Load(raw); err != nil {
-		return 0, fmt.Errorf("解析 types.yaml: %w", err)
+		return 0, err
 	}
 	changed := 0
 	for _, typeName := range ts.Names() {
@@ -309,6 +381,7 @@ func main() {
 	flag.StringVar(&opts.DBPath, "db", "", "SQLite 数据库路径（必填）")
 	flag.StringVar(&opts.TypesPath, "types", "", "types.yaml 路径（可选：给了才处理 timestamp 字段值）")
 	flag.BoolVar(&opts.DryRun, "dry-run", false, "只统计不写库")
+	flag.BoolVar(&opts.Check, "check", false, "只检查不写库；有不合统一格式的值就退出码 1（部署/CI 用，字段检查需 -types）")
 	flag.Parse()
 	if opts.DBPath == "" {
 		flag.Usage()
@@ -317,6 +390,14 @@ func main() {
 	report, err := Run(context.Background(), opts)
 	if err != nil {
 		log.Fatalf("legacy-time: %v", err)
+	}
+	if opts.Check {
+		if report.Bad > 0 {
+			fmt.Printf("发现 %d 个值不是统一格式（%s）：先跑一次本工具（去掉 -check）再启动新版\n", report.Bad, types.TimeFormat)
+			os.Exit(1)
+		}
+		fmt.Println("时间格式检查通过：全部是统一格式")
+		return
 	}
 	columns, changed := 0, 0
 	for _, col := range report.Columns {

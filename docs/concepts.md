@@ -8,7 +8,7 @@
 
 | 读者 | 需要理解的概念 |
 |---|---|
-| Schema 作者（写 `types.yaml`） | TypeDef、FieldDef、Kind、Capability、Constraints、ref/ref[]、关系代数、access 语义 |
+| Schema 作者（写 `types.yaml`） | TypeDef、FieldDef、Kind、Capability、Constraints、ref/refs、关系代数、access 语义 |
 | Site 开发者（写 `main.go` + hooks） | Site、CmsCtx、Actor、AuthRealm、Policy、Hook、Error、Engine |
 | 内核维护者 | 全部，含存储、查询编译、完整性、迁移 |
 
@@ -59,21 +59,32 @@
 
 ```text
 text(text)      textarea(text)  richtext        number          bool
-select          timestamp       slug            ref             ref[]
+select          timestamp       slug            ref             refs
 upload-image    upload-file     gallery
 ```
 
 > 命名注意：常量 `KindString` 的值是 `"text"`，常量 `KindText` 的值是 `"textarea"` —— 代码里读起来容易搞混。
 
-**2 个结构语法**（不是 Kind，不进注册表）：`array`（`item`）、`object`（`fields`）。复合结构内禁止 ref/ref[]。
+后台界面不需要额外的"渲染器"概念：**kind 名就是组件文件名**。前端拿 `field.kind`
+去取 `web/admin/widgets/<kind>.vue`，那个组件自带宽窄两个模式（`mode="edit" | "cell"`），
+引用搜索、上传、时间格式化都在它自己里面。后台页面只是按名字取组件的**调度器**，
+不认识任何具体 kind；站点注册自定义 kind，只要有个同名组件就能显示，框架侧零改动。
+`RegisterKind` 因此校验 kind 名可做文件名/URL 段（小写字母/数字/减号）——
+名字不合法在根上就拒掉，而不是等浏览器里 404。
+
+`timestamp` 的值是**统一格式字符串**（`types.TimeFormat`：UTC + RFC3339 + 秒精度 + `…Z`，例如
+`2026-09-14T23:06:41Z`），不是 Unix 秒数。库里（含 JSON 字段）、API、筛选值都是同一个字符串：
+定宽 ⇒ 字典序 = 时间序，所以 `ORDER BY`、范围筛选、日期比较在 SQL 里直接按文本做就对了。
+
+**2 个结构语法**（不是 Kind，不进注册表）：`array`（`item`）、`object`（`fields`）。复合结构内禁止 ref/refs。
 
 ### 2.2 引用与关系代数
 
 | 概念 | 表达 | 语义 |
 |---|---|---|
 | 单引用 | `kind: ref, to: X` | 0..1（required 时 1..1） |
-| 多引用 | `kind: "ref[]", to: X` | 0..N（required 时 1..N） |
-| 顺序 | Edge.sort | ref[] 内的关系顺序 |
+| 多引用 | `kind: refs, to: X` | 0..N（required 时 1..N） |
+| 顺序 | Edge.sort | refs 内的关系顺序 |
 | `symmetric` | 字段级布尔 | 无向：存一条 Edge，读写双向解释 |
 | `transitive` | 字段级布尔 | 有向可达：Traverse / Subtree，写入检环 |
 | `equivalence` | 字段级布尔 | 无向等价类：EquivalenceClass |
@@ -96,7 +107,7 @@ upload-image    upload-file     gallery
 
 - 保留列名冲突、字段名格式、重复字段
 - Kind 存在、嵌套 Kind 存在、嵌套字段约束
-- 复合结构内禁止 ref/ref[]；array 不能声明 fields；object 不能声明 item；object 子字段不重名
+- 复合结构内禁止 ref/refs；array 不能声明 fields；object 不能声明 item；object 子字段不重名
 - ref 必须声明 `to` 且目标 Type 存在；代数互斥且必须 self-ref
 - `set_null` 不能用于 required；`cascade` 只能用于 relation endpoint
 - publication 字段必须支持相等且 draft ≠ published；tree.parent 必须是 self 单 ref；tree.order 必须可排序

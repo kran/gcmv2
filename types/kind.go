@@ -5,6 +5,10 @@ package types
 // 每个内置 kind 一个文件、一个独立实现（最笨但可迁移: 各自独立演进,
 // 将来给 image 加 URL 校验只动 image.go, 不碰其他）。
 // Kind 只管"值语义": 校验 / 空判断 / 存储形态。
+//
+// **kind 名就是后台界面的标识**：后台按 field.kind 去找
+// web/admin/widgets/<kind 名>.vue（那个组件自带宽窄两个模式）。
+// 所以名字要能当文件名 —— RegisterKind 会校验这一点。
 // 代数/To 在 FieldDef（类型定义层, 见 types.go）。
 type Kind interface {
 	Name() string
@@ -16,9 +20,6 @@ type Kind interface {
 	IsEmpty(v any) bool
 	// Class 分类: 值存哪、是什么形态 — kind 自己的声明, 引擎零推断。
 	Class() Class
-	// 控件名 = kind 名（约定: 前端按 kind 名渲染; 未知 kind 从
-	// /admin/ui-extras/{kind}.vue 动态加载 — 新 kind 一处一语言）。
-	// 无 Editor() — kind 名即控件名（B 方案: 内置 kind 名对齐前端控件）。
 	// QueryOps 显式声明该值类型允许的查询操作。Query Compiler 不按
 	// kind 名猜测能力；自定义 Kind 也必须声明。
 	QueryOps() QueryOps

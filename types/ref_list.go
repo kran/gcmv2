@@ -7,7 +7,7 @@ type refListKind struct{}
 
 // KindRefList kind 名; WidgetEntityList 编辑控件原语（各 kind 自包含定义 — 加新 kind
 // 只动一个文件）。
-const KindRefList = "ref[]"
+const KindRefList = "refs"
 
 func (refListKind) Name() string { return KindRefList }
 func (refListKind) Validate(_ FieldDef, v any) error {

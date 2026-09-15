@@ -46,7 +46,7 @@ addressable 仍要求 `slug` Kind，这是刻意的安全约束：公开路径�
 
 ### 已修复：Expand 逐层 Schema 上下文
 
-原 `expandBatch` 会遍历所有 Type，按第一个同名字段猜测 ref/ref[] 形态。现已替换为：
+原 `expandBatch` 会遍历所有 Type，按第一个同名字段猜测 ref/refs 形态。现已替换为：
 
 - `query.ExpandPath` 使用与 Query 相同的 typed `query.Path`。
 - 每一跳根据当前 Type 验证字段并推导下一 Type。
@@ -64,7 +64,7 @@ ADR-004 核心约束已实现：
 
 - Traverse/Subtree 只接受 transitive 或 tree.parent 字段，并限制深度、拒绝新环。
 - EquivalenceClass 验证字段归属和 equivalence 声明。
-- AddEdge/Create/Patch 统一执行 ref/ref[] 基数、目标类型和 symmetric 规范化。
+- AddEdge/Create/Patch 统一执行 ref/refs 基数、目标类型和 symmetric 规范化。
 - `on_delete` 支持 restrict/set_null/cascade；cascade 只允许关系 Node endpoint。
 - 公共删除与 Admin 删除都是永久删除，执行引用策略（归档机制已于 v0.9.3 移出内核）。
 - 新增 EditableNode/Ref API 和只读关系完整性报告。
@@ -140,7 +140,7 @@ Validate(f FieldDef, v any) error
 
 select 的 options 校验由 `selectKind` 自己完成，`ValidateValue` 不再按 Kind 名特判。
 
-array/object 仍保留为结构语法（不进 kinds 注册表），但容器只负责形状递归；叶子 kind 的存在性、字段约束和引用限制都在 Load 期校验（复合结构内禁止 ref/ref[]）。
+array/object 仍保留为结构语法（不进 kinds 注册表），但容器只负责形状递归；叶子 kind 的存在性、字段约束和引用限制都在 Load 期校验（复合结构内禁止 ref/refs）。
 
 ### 已解决：Types 包不再包含模板命名规则
 
@@ -171,7 +171,7 @@ array/object 仍保留为结构语法（不进 kinds 注册表），但容器只
 
 - Query Compiler 知道 `nodes`、`fields JSON` 和 `edges`：这是存储编译器职责。
 - Core 知道 Node 系统列：这些列由 core 自己拥有。
-- Edge 的 `sort`：它表示 ref[] 内的关系顺序，不是旧 Node.Sort。
+- Edge 的 `sort`：它表示 refs 内的关系顺序，不是旧 Node.Sort。
 - addressable 要求 slug Kind：这是公开路径安全不变量。
 - TypeDef 中保留 Admin 分组：已经与 Schema/Capability 分组，core 数据校验不读取 Admin。
 

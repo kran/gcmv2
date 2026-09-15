@@ -120,13 +120,13 @@ export default {
             var res = await $api.types()
             this.defsByType = res.types || {}
             this.def = this.defsByType[this.typeName] || null
-            // 引用该 tree 类型的类型（含自己 — 新建子分类）: ref/ref[] 字段 to === typeName
+            // 引用该 tree 类型的类型（含自己 — 新建子分类）: ref/refs 字段 to === typeName
             var me = this
             this.refTypes = []
             Object.keys(this.defsByType).forEach(function (t) {
                 var def = me.defsByType[t]
                 var hits = (def.fields || []).filter(function (f) {
-                    return (f.kind === 'ref' || f.kind === 'ref[]') && f.to === me.typeName
+                    return (f.kind === 'ref' || f.kind === 'refs') && f.to === me.typeName
                 })
                 if (hits.length) me.refTypes.push(t)
             })
@@ -167,7 +167,7 @@ export default {
             var def = this.defsByType[t] || {}
             var me = this
             var f = (def.fields || []).find(function (x) {
-                return (x.kind === 'ref' || x.kind === 'ref[]') && x.to === me.typeName
+                return (x.kind === 'ref' || x.kind === 'refs') && x.to === me.typeName
             })
             this.createField = f ? f.name : ''
             this.createVisible = true

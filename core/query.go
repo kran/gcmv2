@@ -172,7 +172,15 @@ func (s *Service) compileSort(ctx context.Context, typeName string, fields []gqu
 		if sortField.Path.Kind != gquery.PathSystem && sortField.Path.Kind != gquery.PathField {
 			return "", fmt.Errorf("%w: relation %q cannot be sorted", ErrInvalidField, sortField.Path.Field)
 		}
-		if path.hasField && !s.types.FieldQueryOps(path.field).Sortable {
+		// 能否排序同样来自声明：类型字段看 kind.QueryOps，系统列看 SystemField.Ops。
+		// （以前系统列完全没查 Sortable —— 按 fields（JSON 容器）排序是被静默放行的。）
+		sortable := false
+		if path.hasField {
+			sortable = s.types.FieldQueryOps(path.field).Sortable
+		} else if sys, ok := s.types.SystemField(path.fieldName); ok {
+			sortable = sys.Ops.Sortable
+		}
+		if !sortable {
 			return "", fmt.Errorf("%w: field %q cannot be sorted", ErrInvalidField, sortField.Path.Field)
 		}
 		direction := "ASC"

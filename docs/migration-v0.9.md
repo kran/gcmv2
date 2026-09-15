@@ -165,11 +165,12 @@ err := site.Engine().SyncRelationSchema(ctx)
 
 after those site migrations. The old `FullFields` API is replaced by `FullNode`/`FullNodes`, whose `EditableNode.Values` explicitly contains scalar values plus ref IDs. Existing direct `Merge` calls must be removed; `PreviewMerge` is read-only until conflict resolution and audit-backed merge execution are implemented.
 
-Composite fields (`array` / `object`) must not contain `ref` or `ref[]` sub-fields. Such a declaration used to load successfully and store raw node IDs inside `fields` JSON, so it had no edge, no cardinality, no delete policy, and was invisible to `CheckRelations`. Types that used this shape must be remodelled as a relation Node; the Schema loader now rejects them with a `kind ref cannot be nested in array/object` error.
+Composite fields (`array` / `object`) must not contain `ref` or `refs` sub-fields. Such a declaration used to load successfully and store raw node IDs inside `fields` JSON, so it had no edge, no cardinality, no delete policy, and was invisible to `CheckRelations`. Types that used this shape must be remodelled as a relation Node; the Schema loader now rejects them with a `kind ref cannot be nested in array/object` error.
 
 ### 时间格式（v0.9.3）
 
-时间列与 `timestamp` 字段值统一为 `…Z`（UTC + RFC3339 + 秒精度）。老库里的历史写法
+时间列与 `timestamp` 字段值统一为 `…Z`（UTC + RFC3339 + 秒精度，见 `types.TimeFormat`）。
+`timestamp` 字段的值**必须是**这个字符串（不再是 Unix 秒数字）。老库里的历史写法
 （驱动默认的 `time.Time.String()`、种子 SQL 的无时区墙钟、Unix 秒数字）由一次性命令转换：
 
 ```bash

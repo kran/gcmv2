@@ -54,15 +54,6 @@ func Open(db *dba.SQL, ts *types.Types) (*Service, error) {
 	if err = s.syncSchemaIndexes(); err != nil {
 		return nil, fmt.Errorf("core: schema indexes: %w", err)
 	}
-	// 时间闸门：全库时间列必须都是统一格式（dba.H / 手写 SQL 绕过类型系统，只有这里能
-	// 抓住）。老库的历史值由一次性工具 tools/legacy-time 在升级前处理，内核不做兼容。
-	if err = s.checkTimeFormats(context.Background()); err != nil {
-		return nil, err
-	}
-	if err = s.dropLegacyArchive(context.Background()); err != nil {
-		return nil, fmt.Errorf("core: drop legacy archive: %w", err)
-	}
-
 	s.initSearch()
 	// 本次有迁移 → 全文索引可能与数据不一致（例如索引表被重建）: 重建一次。
 	// 只在真正升级时发生（不是每次启动）, 百万节点约十几分钟, 属于一次性升级成本。

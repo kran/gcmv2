@@ -92,7 +92,7 @@ types:
   article:
     fields:
       - { name: body, kind: richtext }
-      - { name: related, kind: "ref[]", to: article, symmetric: true }
+      - { name: related, kind: "refs", to: article, symmetric: true }
 `)
 	s := New(testDB(t), ts)
 	a1, _ := s.CreateNode(t.Context(), &Node{Type: "article", Display: "t", Fields: Fields{"body": "1"}})
@@ -205,7 +205,7 @@ types:
     fields:
       - { name: title, kind: text }
       - { name: editor, kind: ref, to: person }
-      - { name: reviewers, kind: "ref[]", to: person }
+      - { name: reviewers, kind: "refs", to: person }
 `
 	s := New(testDB(t), newTypes(t, typesYAML))
 	first, _ := s.CreateNode(t.Context(), &Node{Type: "person", Display: "first", Fields: Fields{"name": "first"}})
@@ -219,7 +219,7 @@ types:
 		"title": "duplicate", "reviewers": []any{first, first},
 	}})
 	if !errors.Is(err, ErrInvalidFields) {
-		t.Fatalf("ref[] duplicate error = %v", err)
+		t.Fatalf("refs duplicate error = %v", err)
 	}
 	if _, err := s.AddEdge(t.Context(), second, third, "partner", 0); err != nil {
 		t.Fatal(err)
@@ -307,6 +307,6 @@ func TestReferenceReadAPI(t *testing.T) {
 		t.Fatalf("RefID = %d, %v, %v", parent, found, err)
 	}
 	if _, _, err := s.RefID(t.Context(), article, "authors"); err == nil {
-		t.Fatal("RefID must reject ref[]")
+		t.Fatal("RefID must reject refs")
 	}
 }

@@ -15,7 +15,7 @@ GCM_SCALE=1000000 GCM_SCALE_BULK=1 go test -run TestScale -v -timeout 90m ./core
 ## 数据集形状
 
 CMS 形态，避免误读数字：分类 1/200 比例（最多 2000 个，含三层 parent 树）、文章为 主体，
-每篇 ~1.5KB 中文正文 + title/excerpt/position/publish_time/views + 一个 `ref[]` 分类，
+每篇 ~1.5KB 中文正文 + title/excerpt/position/publish_time/views + 一个 `refs` 分类，
 `searchable: [title, body]`（display 天生可搜，不必声明）、`addressable: {field: slug}`、`publication` 齐全，
 并声明 `indexes: [[publication_state, publish_time]]`。写入走真实 `CreateNode`（含边与 FTS 同步）。
 
@@ -28,7 +28,7 @@ CMS 形态，避免误读数字：分类 1/200 比例（最多 2000 个，含三
 | 主库 | 14.5 MB | 64.7 MB | 649 MB | 6.5 GB |
 | 主键详情 | 47 µs | 49 µs | 48 µs | 302 µs |
 | 地址查询（slug） | 93 µs¹ | 99 µs | 96 µs | 422 µs |
-| 引用读出（ref[]） | 101 µs | 105 µs | 106 µs | 1.05 ms |
+| 引用读出（refs） | 101 µs | 105 µs | 106 µs | 1.05 ms |
 | 分类树加载 | 175 µs | 318 µs | 2.5 ms | 9.9 ms |
 | 子树遍历 | 73 µs | 64 µs | 75 µs | 87 µs |
 | 列表页（不带 total） | — | 744 µs | 758 µs | 736 µs |

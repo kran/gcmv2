@@ -60,7 +60,7 @@ Core 只负责所有业务都会复用的数据不变量和执行机制：
 
 - 字段类型和合法值
 - 字段是否必填、默认、不可变
-- ref/ref[] 的目标类型和基数
+- ref/refs 的目标类型和基数
 - 删除策略和关系代数
 - 可搜索、可寻址、发布、认证、树、关系 Node 等能力
 - 数据库唯一约束和索引
@@ -126,8 +126,10 @@ Lisp 只是受限文本前端，不直接生成 SQL，也不是公网业务参�
 ### 2.8 默认保守，破坏性操作显式
 
 - 公共 DELETE 是永久删除（按字段 `on_delete` 处理引用）。
-- 时间只有一种表示：`core.Time`（UTC + RFC3339 + 秒精度 + `…Z`），列与 JSON 同一个字符串。
-  内核不为老数据留兼容分支：老库升级前跑一次性命令 `tools/legacy-time`，启动闸门会挡住没跑的库。
+- 时间只有一种表示：`types.TimeFormat`（UTC + RFC3339 + 秒精度 + `…Z`）。时间列走 `core.Time`，
+  `timestamp` 字段走同一格式的字符串 —— 库里、JSON、筛选值是同一个字符串。
+  内核不为老数据留兼容分支，**启动时也不扫全表**：老库升级前跑一次性命令
+  `tools/legacy-time`（`-check` 只检查，退出码非 0 = 需要先迁移）。
 - 归档（软删除）不是内核概念：要"下线/撤回"就用类型自己的状态字段，并在读规则里限制范围。
 - required ref 默认 `restrict`。
 - 可选 ref 默认 `set_null`。
@@ -160,7 +162,7 @@ id / type / display / revision / fields / created_at / updated_at（时间统一
 - `Type`：Schema 类型名，创建后不可修改。
 - `Display`：通用可读标签。
 - `Revision`：乐观锁版本。
-- `Fields`：只保存标量、对象和数组，不保存 ref/ref[]。
+- `Fields`：只保存标量、对象和数组，不保存 ref/refs。
 
 `slug/status/sort` 已不再是 Node 固定列。
 
@@ -222,7 +224,7 @@ Type 选择启用的通用行为：
 
 ### 3.5 Edge
 
-Edge 是 ref/ref[] 的物理存储：
+Edge 是 ref/refs 的物理存储：
 
 ```text
 from_node / field / to_node / sort / single_ref / symmetric / created_at
@@ -231,8 +233,8 @@ from_node / field / to_node / sort / single_ref / symmetric / created_at
 其中 `single_ref` 和 `symmetric` 是数据库约束元数据，不是业务字段。
 
 - `ref`：0..1；required 时为 1。
-- `ref[]`：0..N；required 时至少为 1。
-- `sort`：ref[] 内部顺序。
+- `refs`：0..N；required 时至少为 1。
+- `sort`：refs 内部顺序。
 
 ### 3.6 关系 Node
 
@@ -550,7 +552,7 @@ nodes
 
 edges
   ├── from_node + field + to_node：引用
-  ├── sort：ref[] 顺序
+  ├── sort：refs 顺序
   └── single_ref + symmetric：数据库约束元数据
 
 auth_methods
@@ -583,9 +585,9 @@ Create/Patch request
 引用写入统一检查：
 
 - 字段属于 source Type。
-- 字段是 ref/ref[]。
+- 字段是 ref/refs。
 - target 存在且 Type 匹配。
-- ref[] 无重复并保存数组顺序。
+- refs 无重复并保存数组顺序。
 - symmetric/equivalence 端点规范化。
 - transitive/tree 写入不形成环。
 
@@ -744,8 +746,8 @@ Admin/Core permanent delete
 
 已实现：
 
-- ref/ref[] 基数及数据库并发约束。
-- ref[] 重复拒绝和顺序保存。
+- ref/refs 基数及数据库并发约束。
+- refs 重复拒绝和顺序保存。
 - symmetric/equivalence canonical storage。
 - `OutEdges`、`InEdges`、Query、Expand 和 Ref API 的无向语义。
 - `InEdges` 字段过滤。
@@ -861,7 +863,7 @@ relation capability 已可声明，关系 Node 可通过普通 Node API 管理�
 - select options 校验下沉到 `selectKind.Validate(f, v)`，容器不再按 Kind 名特判。
 - `TypeDef.TemplateCandidates` 已删除，模板候选由 `web` 独占。
 - `LoadTree(ctx, type, scope)`：Core 只读 tree capability，发布可见范围由调用方 Scope 决定。
-- 复合字段（array/object）内部禁止 ref/ref[]，嵌套 Kind 与字段约束改为 Load 期校验。
+- 复合字段（array/object）内部禁止 ref/refs，嵌套 Kind 与字段约束改为 Load 期校验。
 
 ### 7.3 明确不在 Core 内实现
 
@@ -881,7 +883,7 @@ relation capability 已可声明，关系 Node 可通过普通 Node API 管理�
 1. 客户端不能决定认证 NodeType。
 2. 客户端不能构造 QueryScope 或绕过 Policy。
 3. 公网 API 不接收 Raw SQL、任意排序字符串或未限制查询。
-4. ref/ref[] 只存在 Edge，不复制进 `Node.Fields`。
+4. ref/refs 只存在 Edge，不复制进 `Node.Fields`。
 5. 新 Edge 不能指向不存在或类型错误的 Node。
 6. 单 ref 的最终基数由数据库约束兜底。
 7. symmetric/equivalence 只存一条 canonical Edge。

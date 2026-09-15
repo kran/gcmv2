@@ -107,7 +107,7 @@ HostMux 可以托管多个 Site，但每个 Site 仍然独立数据库。
 - [x] Node.Type 创建后不可修改。
 - [x] Node.Display 是所有实体唯一必备的可读标签。
 - [x] scalar/object/array 字段只存 Fields JSON。
-- [x] ref/ref[] 只存 Edge，不同时在 Fields 中保留副本。
+- [x] ref/refs 只存 Edge，不同时在 Fields 中保留副本。
 - [ ] Create、Patch 已统一 Schema 校验；Import、Batch 尚未实现。
 - [ ] 所有写操作在单事务中完成实体、引用、索引、审计和 outbox 写入。
 
@@ -291,7 +291,7 @@ query.And(
 编译 SQL 前必须知道当前 Type：
 
 - [x] `$field` 必须存在于当前 TypeDef。
-- [x] `->field` 必须是 ref/ref[]。
+- [x] `->field` 必须是 ref/refs。
 - [x] `<-type.field` 必须存在且目标类型匹配。
 - [x] 大小比较由 Kind.QueryOps().Ordered 决定。
 - [x] contains/prefix 由 Kind.QueryOps().Text 决定。
@@ -433,7 +433,7 @@ CRM 不能只验证功能，还要验证 JSON + Edge 模型在真实数据量下
 
 - [ ] 10 万、100 万 Node 的按 type 分页。
 - [ ] JSON 单字段等值、范围和排序。
-- [ ] 单 ref 和 ref[] 筛选。
+- [ ] 单 ref 和 refs 筛选。
 - [ ] 两跳关系筛选。
 - [ ] 负责人 + 状态 + 时间组合筛选。
 - [ ] FTS 与普通条件组合。
@@ -535,7 +535,7 @@ CRM 的金额不能默认使用 float64。
 - [x] 分离 Schema、Capability 和 View 元数据。
 - [ ] Create/Patch 已使用统一 Validator；Import 尚未实现。
 - [x] 唯一约束和索引声明。
-- [x] 复合字段（array/object）Load 期递归校验嵌套 Kind，并拒绝嵌套 ref/ref[]。
+- [x] 复合字段（array/object）Load 期递归校验嵌套 Kind，并拒绝嵌套 ref/refs。
 - [ ] 默认值、immutable 已实现；条件必填和跨字段校验待实现。
 - [x] 删除策略 restrict/set_null/cascade。
 

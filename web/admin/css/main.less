@@ -633,10 +633,24 @@ html, body {
     &:hover { color: #000 !important; }
 }
 .op-btn + .op-btn { margin-left: 0 !important; }
-// 列表标题链接（点击 → 编辑）— Azure 链接颜色: #0078d4 无下划线, hover 下划线
-.node-title-link {
+// 列表标题链接 / 引用链接（点击 → 编辑那个节点）— Azure 链接颜色: #0078d4 无下划线, hover 下划线
+.node-title-link, .w-ref-link {
     color: #0078d4;
     text-decoration: none;
     cursor: pointer;
     &:hover { text-decoration: underline; color: #004578; }
+}
+
+
+// ── 后台组件（web/admin/widgets/<kind>.vue）的**公共**样式 ──────────
+// 每个 kind 自己的样式写在它自己的组件文件里（<style> 会被 loader 注入 head）。
+// 留在这里的只有三类：
+//   ① 所有 cell 共用的基类（13 个组件都用，抄 13 份没意义）
+//   ② 与列表标题链接共享同一套声明的引用链接（"点了能开编辑表单"的视觉约定）
+//   ③ 组件文件缺失的提示块 —— 它出自 js/widgets.js，不是 SFC，没法自带样式
+.w-cell { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; }
+.w-empty { color: #bbb; }
+.w-missing {
+    display: block; padding: 6px 10px; border: 1px solid #f0c36d; border-radius: 4px;
+    background: #fdf6e3; color: #8a6d3b; font-size: 12px;
 }

@@ -136,7 +136,7 @@ func wouldCreateCycle(tx *dba.SQL, typeName, field string, from, to int64) (bool
 	return found != nil, nil
 }
 
-// refIDs 引用字段值 → id 列表（ref 单个包一层, ref[] 原样）。
+// refIDs 引用字段值 → id 列表（ref 单个包一层, refs 原样）。
 func refIDs(ts *types.Types, f types.FieldDef, v any) ([]int64, error) {
 	k, ok := ts.Kind(f.Kind)
 	if !ok {
@@ -152,13 +152,13 @@ func refIDs(ts *types.Types, f types.FieldDef, v any) ([]int64, error) {
 	case types.ClassRefList:
 		arr, ok := v.([]any)
 		if !ok {
-			return nil, fmt.Errorf("core: ref[] value: expects array, got %T", v)
+			return nil, fmt.Errorf("core: refs value: expects array, got %T", v)
 		}
 		ids := make([]int64, 0, len(arr))
 		for i, e := range arr {
 			id, err := types.ToID(e)
 			if err != nil {
-				return nil, fmt.Errorf("core: ref[] value[%d]: %w", i, err)
+				return nil, fmt.Errorf("core: refs value[%d]: %w", i, err)
 			}
 			ids = append(ids, id)
 		}
@@ -173,7 +173,7 @@ var (
 	ErrEdgeNotFound = errors.New("core: edge not found")
 	// ErrRequiredReference means an operation would leave a required ref empty.
 	ErrRequiredReference = errors.New("core: required reference")
-	// ErrRelationCardinality means a ref/ref[] database invariant would be violated.
+	// ErrRelationCardinality means a ref/refs database invariant would be violated.
 	ErrRelationCardinality = errors.New("core: relation cardinality violation")
 	// ErrDeleteRestricted means incoming references prohibit permanent deletion.
 	ErrDeleteRestricted = errors.New("core: delete restricted")

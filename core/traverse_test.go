@@ -19,8 +19,8 @@ types:
       - { name: publication_state, kind: select, options: [draft, published], default: draft }
       - { name: position, kind: number, default: 0 }
       - { name: parent, kind: ref, to: category, transitive: true }
-      - { name: children, kind: "ref[]", to: category }
-      - { name: synonym, kind: "ref[]", to: category, equivalence: true }
+      - { name: children, kind: "refs", to: category }
+      - { name: synonym, kind: "refs", to: category, equivalence: true }
 `
 
 func newTraverseService(t *testing.T) *Service {

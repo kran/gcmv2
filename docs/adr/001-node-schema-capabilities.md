@@ -53,7 +53,7 @@ type Node struct {
 - `Type`：Schema 身份，创建后不可变
 - `Display`：所有实体统一的可读标签
 - `Revision`：乐观锁版本，每次有效更新递增
-- `Fields`：类型定义中的业务值；不包含 ref/ref[]
+- `Fields`：类型定义中的业务值；不包含 ref/refs
 - `Expand/Extra`：只读装配数据，不持久化
 
 ### 2. slug/status/sort 不再是通用 Node 语义

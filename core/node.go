@@ -92,7 +92,7 @@ type Node struct {
 	CreatedAt Time   `db:"created_at" json:"created_at"`
 	UpdatedAt Time   `db:"updated_at" json:"updated_at"`
 
-	// 类型字段（Scan/Value 自动 JSON 转换；ref/ref[] 存 edges）
+	// 类型字段（Scan/Value 自动 JSON 转换；ref/refs 存 edges）
 	Fields Fields `db:"fields" json:"fields"`
 
 	// Expand 引用展开容器（typed Expand 填充 — 不落库）: map[路径 key] → *Node / []*Node

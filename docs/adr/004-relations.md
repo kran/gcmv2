@@ -6,7 +6,7 @@
 
 ## 背景
 
-gcm 当前将 ref/ref[] 存在统一 edges 表：
+gcm 当前将 ref/refs 存在统一 edges 表：
 
 ```text
 from_node / field / to_node / sort / created_at
@@ -114,19 +114,19 @@ types:
 
 ```text
 ref    0..1，required 时 1
-ref[]  0..N，required 时 1..N
+refs  0..N，required 时 1..N
 ```
 
 必须保证：
 
 - [x] ref 在数据库中最多一条 Edge。
-- [x] ref[] 不允许重复 target。
+- [x] refs 不允许重复 target。
 - [x] Edge target 必须存在。
 - [x] target.Type 必须等于 FieldDef.To。
 - [x] required ref 在 Create 和 Patch 后不能为空。
 - [x] 并发写入由数据库 partial unique index 和 symmetric trigger 兜底。
 
-当前 `UNIQUE(from_node, field, to_node)` 只能防止 ref[] 重复，不能保证 ref 最多一条。需要为 ref 写路径增加约束检查，必要时增加物化基数标识或事务保证。
+当前 `UNIQUE(from_node, field, to_node)` 只能防止 refs 重复，不能保证 ref 最多一条。需要为 ref 写路径增加约束检查，必要时增加物化基数标识或事务保证。
 
 ## 删除策略
 
@@ -158,7 +158,7 @@ required ref 默认 restrict。
 - 可选标签
 - 临时推荐关系
 
-可选 ref/ref[] 默认 set_null。
+可选 ref/refs 默认 set_null。
 
 ### cascade
 
@@ -299,7 +299,7 @@ edges 至少需要：
 
 - owner 查询
 - team 范围
-- ref[] 多选
+- refs 多选
 - 两跳关系
 - 大量入边的详情页
 - relation Node 列表
@@ -334,7 +334,7 @@ edges 至少需要：
 
 ## 直接迁移
 
-- 未显式声明 `on_delete` 时，required ref 规范化为 `restrict`，可选 ref/ref[] 规范化为 `set_null`。
+- 未显式声明 `on_delete` 时，required ref 规范化为 `restrict`，可选 ref/refs 规范化为 `set_null`。
 - Core migration `00011_edge_integrity.sql` 增加 `single_ref`、`symmetric` 存储元数据和并发约束。
 - `SyncRelationSchema` 在启动时根据当前 Schema 重建 Edge 元数据；原始 SQL 导入 Edge 后必须再次调用。
 - 新写路径立即执行新规则，不保留旧删除函数。
@@ -343,7 +343,7 @@ edges 至少需要：
 
 ## 验收条件
 
-- [x] ref/ref[] 基数由应用校验和数据库约束保证。
+- [x] ref/refs 基数由应用校验和数据库约束保证。
 - [x] 删除策略有 restrict/set_null/cascade 测试。
 - [x] 永久删除执行 on_delete（软删除/归档已于 v0.9.3 移出内核）。
 - [x] relation capability 的关系 Node 仍通过通用 Node API 管理。

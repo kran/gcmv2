@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/kran/dba"
 	gquery "github.com/kran/gcmv2/query"
@@ -84,7 +83,7 @@ func (c *queryCompiler) resolvePath(path gquery.Path, typeName, nodeRef string) 
 	}
 	switch path.Kind {
 	case gquery.PathSystem:
-		if !types.IsNodeColumn(path.Field) || path.Field == "fields" {
+		if !types.IsNodeColumn(path.Field) {
 			return resolvedPath{}, fmt.Errorf("%w: system field %q", ErrInvalidField, path.Field)
 		}
 		return resolvedPath{sql: nodeRef + "." + quoteIdentifier(path.Field), fieldName: path.Field}, nil
@@ -164,10 +163,20 @@ func (c *queryCompiler) validateCompare(typeName string, op gquery.CompareOp, pa
 		}
 		return fmt.Errorf("%w: null only supports eq/ne", ErrInvalidValue)
 	}
-	if !path.hasField {
-		return validateSystemValue(op, path.fieldName, value)
+	// 系统列与类型字段走**同一条**校验：能力来自声明（SystemField.Ops / kind.QueryOps），
+	// 不在编译期按名字猜。
+	var operations types.QueryOps
+	var validateValue func(any) error
+	if path.hasField {
+		operations = c.service.types.FieldQueryOps(path.field)
+		validateValue = func(v any) error { return c.service.types.ValidateValue(typeName, path.field, v) }
+	} else {
+		sys, ok := c.service.types.SystemField(path.fieldName)
+		if !ok {
+			return fmt.Errorf("%w: system field %q", ErrInvalidField, path.fieldName)
+		}
+		operations, validateValue = sys.Ops, sys.Validate
 	}
-	operations := c.service.types.FieldQueryOps(path.field)
 	switch op {
 	case gquery.OpEQ, gquery.OpNE:
 		if !operations.Equal {
@@ -182,45 +191,8 @@ func (c *queryCompiler) validateCompare(typeName string, op gquery.CompareOp, pa
 			return fmt.Errorf("%w: %s does not support %s", ErrInvalidOperator, path.fieldName, op)
 		}
 	}
-	err := c.service.types.ValidateValue(typeName, path.field, value)
-	if err != nil {
+	if err := validateValue(value); err != nil {
 		return fmt.Errorf("%w: %s: %v", ErrInvalidValue, path.fieldName, err)
-	}
-	return nil
-}
-
-func validateSystemValue(op gquery.CompareOp, field string, value any) error {
-	textual := field == "type" || field == "display"
-	ordered := field == "id" || field == "revision" || field == "created_at" || field == "updated_at"
-	if op == gquery.OpContains || op == gquery.OpPrefix {
-		if !textual {
-			return fmt.Errorf("%w: %s does not support %s", ErrInvalidOperator, field, op)
-		}
-		if _, ok := value.(string); !ok {
-			return fmt.Errorf("%w: %s expects string", ErrInvalidValue, field)
-		}
-		return nil
-	}
-	if op == gquery.OpGT || op == gquery.OpGTE || op == gquery.OpLT || op == gquery.OpLTE {
-		if !ordered {
-			return fmt.Errorf("%w: %s does not support %s", ErrInvalidOperator, field, op)
-		}
-	}
-	switch field {
-	case "type", "display":
-		if _, ok := value.(string); !ok {
-			return fmt.Errorf("%w: %s expects string", ErrInvalidValue, field)
-		}
-	case "id", "revision":
-		if _, err := types.ToID(value); err != nil {
-			return fmt.Errorf("%w: %s expects integer", ErrInvalidValue, field)
-		}
-	case "created_at", "updated_at":
-		switch value.(type) {
-		case time.Time, string:
-		default:
-			return fmt.Errorf("%w: %s expects time or string", ErrInvalidValue, field)
-		}
 	}
 	return nil
 }

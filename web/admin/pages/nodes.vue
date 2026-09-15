@@ -74,7 +74,11 @@
           <template #default="{ row: r }"><a class="node-title-link" @click.prevent="openEdit(r)">{{ titleOf(r) }}</a></template>
         </el-table-column>
         <el-table-column v-for="c in adminColumns" :key="c" :label="fieldLabel(c)" min-width="130" show-overflow-tooltip>
-          <template #default="{ row: r }">{{ fieldValue(r, c) }}</template>
+          <template #default="{ row: r }">
+            <component v-if="cellOf(c)" :is="cellOf(c)" mode="cell" :model-value="fieldOf2(r, c)"
+                       :field="fieldDef(c)" :expand="expandOf(r, c)" @open-node="openRef" />
+            <span v-else class="cell-error">字段 {{ c }} 没有 kind</span>
+          </template>
         </el-table-column>
         <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row: r }">
@@ -90,7 +94,11 @@
           <template #default="{ row: r }"><a class="node-title-link" @click.prevent="openEdit(r)">{{ titleOf(r) }}</a></template>
         </el-table-column>
         <el-table-column v-for="c in adminColumns" :key="c" :label="fieldLabel(c)" min-width="130" show-overflow-tooltip>
-          <template #default="{ row: r }">{{ fieldValue(r, c) }}</template>
+          <template #default="{ row: r }">
+            <component v-if="cellOf(c)" :is="cellOf(c)" mode="cell" :model-value="fieldOf2(r, c)"
+                       :field="fieldDef(c)" :expand="expandOf(r, c)" @open-node="openRef" />
+            <span v-else class="cell-error">字段 {{ c }} 没有 kind</span>
+          </template>
         </el-table-column>
         <el-table-column label="更新时间" width="165">
           <template #default="{ row: r }">{{ fmt(r.updated_at) }}</template>
@@ -112,6 +120,9 @@
                         @changed="refresh" />
       <!-- 标题链接编辑（列表标题点击 → 编辑对话框） -->
       <node-edit-dialog v-model:visible="editVisible" :node="editNode" :type-name="query.type"
+                        :is-edit="true" :defs="typeDefs" @changed="refresh" />
+      <!-- 点引用链接：目标多半是别的类型，所以单独一个抽屉（类型跟着目标走） -->
+      <node-edit-dialog v-model:visible="refEdit.visible" :node="refEdit.node" :type-name="refEdit.typeName"
                         :is-edit="true" :defs="typeDefs" @changed="refresh" />
     </div>
 
@@ -145,6 +156,7 @@ export default {
             rebuilding: false,
             createVisible: false,
             editVisible: false,
+            refEdit: { visible: false, node: null, typeName: '' },   // 点引用链接打开的节点（类型可能不同）
             editNode: null,
         }
     },
@@ -198,20 +210,25 @@ export default {
             const field = (def.fields || []).find(f => f.name === name)
             return (field && field.label) || name
         },
-        // 单元格: ref/ref[] 的值不在 fields 里（存 edges 表），只能取 expand 里的显示名 ——
+        // 单元格: ref/refs 的值不在 fields 里（存 edges 表），只能取 expand 里的显示名 ——
         // 列表接口本来就批量展开了一层出边，这里只是把它用上。
-        fieldValue(node, name) {
+        // 列 → 字段定义 → 字段 kind 名对应的组件（web/admin/widgets/<kind>.vue）。
+        fieldDef(name) {
             const def = this.typeDefs[this.query.type] || {}
-            const field = (def.fields || []).find(f => f.name === name)
-            if (field && (field.kind === 'ref' || field.kind === 'ref[]')) {
-                const expanded = (node.expand || {})[name]
-                const list = Array.isArray(expanded) ? expanded : (expanded ? [expanded] : [])
-                return list.filter(Boolean).map(n => n.display || '#' + n.id).join('、')
-            }
-            const value = node.fields && node.fields[name]
-            if (Array.isArray(value)) return value.join(', ')
-            return value === undefined || value === null ? '' : value
+            return (def.fields || []).find(f => f.name === name) || null
         },
+        // 引用链接触发：只给 id+type（NodeEditDialog 会拉全量值 + 引用回显）
+        openRef(target) {
+            if (!target || !target.id) return
+            this.refEdit = { visible: true, node: { id: target.id, type: target.type }, typeName: target.type }
+        },
+        cellOf(name) {
+            const field = this.fieldDef(name)
+            return Widgets.resolve(field && field.kind)
+        },
+        // 引用值不在 fields 里（存 edges），列表接口批量展开在 node.expand
+        fieldOf2(node, name) { return node.fields ? node.fields[name] : undefined },
+        expandOf(node, name) { return (node.expand || {})[name] || null },
         async loadTypes() {
             const res = await window.$api.types()
             this.typeDefs = res.types || {}
@@ -246,7 +263,7 @@ export default {
                 this.treeNodes = this.buildTree(res.items || [], this.parentField)
             } finally { this.loading = false }
         },
-        // 引用筛选：类型的每个 ref/ref[] 字段一项（自引用除外 —— 那种类型的列表本身就是树）。
+        // 引用筛选：类型的每个 ref/refs 字段一项（自引用除外 —— 那种类型的列表本身就是树）。
         // 目标类型声明了 tree capability → 用分类树选（含子树，多字段 AND）；
         // 其他目标 → 与编辑表单同款的远程搜索选择（一个节点）。
         setupFilters(def) {
@@ -254,7 +271,7 @@ export default {
             if (!def) return
             const name = def.name
             for (const f of def.fields || []) {
-                if (f.kind !== 'ref' && f.kind !== 'ref[]') continue
+                if (f.kind !== 'ref' && f.kind !== 'refs') continue
                 if (f.to === name) continue
                 const tdef = this.typeDefs[f.to] || {}
                 const item = {

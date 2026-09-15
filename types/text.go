@@ -1,15 +1,15 @@
 package types
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
-import "strings"
-
-// textKind 多行文本。
+// textKind 单行文本（kind 名 "text"）。
 type textKind struct{}
 
-// KindText kind 名; WidgetTextarea 编辑控件原语（各 kind 自包含定义 — 加新 kind
-// 只动一个文件）。
-const KindText = "textarea"
+// KindText kind 名。名字就是后台组件文件名：web/admin/widgets/text.vue。
+const KindText = "text"
 
 func (textKind) Name() string { return KindText }
 func (textKind) Validate(_ FieldDef, v any) error {
@@ -24,7 +24,7 @@ func (textKind) IsEmpty(v any) bool {
 }
 func (textKind) Class() Class { return ClassField }
 func (textKind) QueryOps() QueryOps {
-	return QueryOps{Equal: true, Text: true}
+	return QueryOps{Equal: true, Text: true, Sortable: true}
 }
 
 func (textKind) ValidateField(t *Types, typeName string, f FieldDef, defs map[string]TypeDef) error {

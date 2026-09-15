@@ -527,8 +527,10 @@ func (b *backend) me(ctx *CmsCtx) {
 // ── 类型定义 ─────────────────────────────────────
 
 // types 类型定义（admin UI 动态表单渲染用）。
+//
+// 界面不在这里描述：字段的 kind 名本身就是界面标识 —— 前端拿 field.kind
+// 去取 web/admin/widgets/<kind>.vue（那个组件自带编辑/列表两个模式）。
 func (b *backend) types(ctx *CmsCtx) {
-	// kind 名即控件名（B 方案）: 前端按 kind 直接渲染, 无需 kinds 映射。
 	_ = ctx.Json(http.StatusOK, map[string]any{"types": b.eng.Types().Defs()})
 }
 

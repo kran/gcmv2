@@ -138,7 +138,7 @@ func TestUpdateAndDeleteEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 断言必须能区分"真删"和"归档"（两者都让公开读取拿不到），所以直接查底表：
-	// 归档会留下行 + archived_at，真删则是行没了。
+	// 真删：行没了。
 	row, err := site.DB().WithCtx(t.Context()).Select("nodes", `id = #{1}`, id).FetchOne[core.Node]()
 	if err != nil {
 		t.Fatal(err)

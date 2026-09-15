@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kran/dba"
+	"github.com/kran/gcmv2/types"
 )
 
 // 造一个"老库"：时间列是历史写法（驱动默认格式 / 无时区墙钟），timestamp 字段是
@@ -103,7 +104,7 @@ func TestRunNormalizesLegacyData(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	// 列：驱动默认格式与无时区墙钟都归一化。
-	localNaive := time.Date(2026, 8, 30, 9, 38, 30, 0, time.Local).UTC().Format(canonical)
+	localNaive := time.Date(2026, 8, 30, 9, 38, 30, 0, time.Local).UTC().Format(types.TimeFormat)
 	if got := raw(t, db, `SELECT quote(created_at) FROM nodes WHERE id = 1`); got != "2026-09-14T23:06:57Z" {
 		t.Fatalf("驱动默认格式 = %q", got)
 	}
@@ -124,10 +125,10 @@ func TestRunNormalizesLegacyData(t *testing.T) {
 		t.Fatalf("migr_gcm 被动过了: %q", got)
 	}
 	// timestamp 字段：Unix 秒（数字 / 数字字符串）与带偏移输入都归一化。
-	if got := one(t, db, `SELECT json_extract(fields, '$.start_at') FROM nodes WHERE id = 1`); got != time.Unix(1700000000, 0).UTC().Format(canonical) {
+	if got := one(t, db, `SELECT json_extract(fields, '$.start_at') FROM nodes WHERE id = 1`); got != time.Unix(1700000000, 0).UTC().Format(types.TimeFormat) {
 		t.Fatalf("start_at = %q", got)
 	}
-	if got := one(t, db, `SELECT json_extract(fields, '$.end_at') FROM nodes WHERE id = 1`); got != time.Unix(1788825600, 0).UTC().Format(canonical) {
+	if got := one(t, db, `SELECT json_extract(fields, '$.end_at') FROM nodes WHERE id = 1`); got != time.Unix(1788825600, 0).UTC().Format(types.TimeFormat) {
 		t.Fatalf("end_at = %q", got)
 	}
 	if got := one(t, db, `SELECT json_extract(fields, '$.start_at') FROM nodes WHERE id = 3`); got != "2026-10-01T01:00:00Z" {

@@ -1,8 +1,11 @@
 package core
 
 import (
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/kran/gcmv2/types"
 )
 
 // 统一时间格式：UTC、秒精度、…Z。带偏移的输入一律归一化。
@@ -103,43 +106,41 @@ func TestTimeJSON(t *testing.T) {
 	}
 }
 
-// 闸门：引擎写入必须过；手写 SQL 塞的脏值（含 SQLite 解析不了的）必须被抓住。
-// 内核不做数据迁移 —— 修数据是 tools/legacy-time 的事。
-func TestTimeGate(t *testing.T) {
+// 内核写出来的时间**就是**统一格式（不再有启动闸门全表扫描，这条由测试保证）：
+// 时间列走 core.Time，配置表也走 types.FormatTime。
+func TestWritesAreCanonical(t *testing.T) {
 	db := testDB(t)
 	s := New(db, newTypes(t, testTypesYAML))
 	id, err := s.CreateNode(t.Context(), &Node{Type: "article", Display: "时间"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := func(expr string) string {
-		var v string
-		if err := db.Pool().QueryRow(`SELECT `+expr+` FROM nodes WHERE id = ?`, id).Scan(&v); err != nil {
-			t.Fatal(err)
-		}
-		return v
-	}
 	// 真正的收益：SQLite 能解析它（改之前 datetime() 返回 NULL，按时间排序/筛选全废）。
-	if got := raw("COALESCE(datetime(created_at), 'NULL')"); got == "NULL" {
-		t.Fatal("datetime(created_at) 解析不了 —— 时间格式没统一成功")
+	stored, err := db.Add(`SELECT quote(created_at) FROM nodes WHERE id = #{1}`, id).FetchOne[string]()
+	if err != nil || stored == nil {
+		t.Fatal(err)
 	}
-	if err := s.checkTimeFormats(t.Context()); err != nil {
-		t.Fatalf("引擎写入应当通过闸门: %v", err)
+	if got := strings.Trim(*stored, "'"); got != types.FormatTime(time.Now()) {
+		t.Fatalf("nodes.created_at = %q，不是统一格式", got)
 	}
+	if got, err := db.Add(`SELECT COALESCE(datetime(created_at), 'NULL') FROM nodes WHERE id = #{1}`, id).FetchOne[string](); err != nil || *got == "NULL" {
+		t.Fatalf("datetime(created_at) 解析不了（%v, %v）—— 时间格式没统一成功", got, err)
+	}
+}
 
-	// 手写 SQL 绕过类型系统（编译器看不见这种写入）。
-	if _, err := db.Add(`UPDATE nodes SET created_at = #{1} WHERE id = #{2}`,
-		"2026-09-15 07:06:57.993279 +0800 CST m=+0.020570626", id).Exec(); err != nil {
+// settings.updated_at 也要统一格式：曾经用 SQLite 的 datetime('now')（"2026-09-15 07:06:57"，
+// 空格 + 无 Z）。
+func TestSettingTimeIsCanonical(t *testing.T) {
+	db := testDB(t)
+	s := New(db, newTypes(t, testTypesYAML))
+	if err := s.SetSetting(t.Context(), "site_name", "basic", "string", "商会"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.checkTimeFormats(t.Context()); err == nil {
-		t.Fatal("闸门必须抓住非统一格式的时间")
-	}
-	// 连 SQLite 解析不了的脏值也要抓住（COALESCE 那处防的就是这个漏网）。
-	if _, err := db.Add(`UPDATE nodes SET updated_at = '不是时间' WHERE id = #{1}`, id).Exec(); err != nil {
+	stored, err := db.Add(`SELECT quote(updated_at) FROM settings WHERE "key" = 'site_name'`).FetchOne[string]()
+	if err != nil || stored == nil {
 		t.Fatal(err)
 	}
-	if err := s.checkTimeFormats(t.Context()); err == nil {
-		t.Fatal("闸门必须抓住解析不了的脏值")
+	if got := strings.Trim(*stored, "'"); got != types.FormatTime(time.Now()) {
+		t.Fatalf("settings.updated_at = %q，不是统一格式", got)
 	}
 }

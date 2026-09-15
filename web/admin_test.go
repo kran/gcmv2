@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -76,6 +78,124 @@ func TestAdminTreeRouteUsesParamKey(t *testing.T) {
 }
 
 // TestAdminNodes CRUD 全流程（含认证守卫）。
+// /admin/types 除了类型定义还要下发 kind → 渲染器名：前端只认渲染器名（不认 kind 名），
+// 自定义 kind 复用内置渲染器时前端零改动。这份映射是 Go 与前端之间唯一的界面契约。
+// 后台界面契约：字段的 kind 名**就是**它的组件文件名（web/admin/widgets/<kind>.vue）。
+// 这里两面都钉住：
+//
+//	① /admin/types 不再下发"kind → 渲染器名"的映射表（前端不需要中间层）；
+//	② 站点实际用到的每个 kind 都得有组件文件（否则浏览器里才是"没有界面"）。
+func TestAdminTypesAndWidgetFiles(t *testing.T) {
+	s := testSite(t)
+	cookie := adminCookie(t, s)
+	w := do(s, "GET", "/admin/types", nil, cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("types = %d: %s", w.Code, w.Body.String())
+	}
+	// 按原始 JSON 键断言（unmarshal 进结构体对大小写不敏感，曾经漏过一次）
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := raw["kinds"]; ok {
+		t.Fatal("/admin/types 又下发了 kinds 映射表：kind 名本身是界面标识，前端不需要中间层")
+	}
+	var body struct {
+		Types map[string]struct {
+			Fields []struct {
+				Kind string `json:"kind"`
+			} `json:"fields"`
+		} `json:"types"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	files := widgetFiles(t)
+	seen := 0
+	for typeName, def := range body.Types {
+		for _, field := range def.Fields {
+			seen++
+			if !files[field.Kind] {
+				t.Errorf("%s 用了 kind %q，但没有 admin/widgets/%s.vue", typeName, field.Kind, field.Kind)
+			}
+		}
+	}
+	if seen == 0 {
+		t.Fatal("夹具里没有字段，这个用例什么也没验证")
+	}
+}
+
+// 内置 kind 名 ↔ admin/widgets/*.vue 文件名必须**两边相等**：
+// 少了 = 浏览器里那个 kind 没有界面；多了 = 有个组件没人用（改 kind 名/删 kind 时漏了）。
+func TestBuiltinKindsHaveWidgetFiles(t *testing.T) {
+	site := testSite(t)
+	files := widgetFiles(t)
+	for _, kind := range site.Engine().Types().KindNames() {
+		if !files[kind] {
+			t.Errorf("kind %q 没有 admin/widgets/%s.vue（浏览器里它会显示「没有界面」）", kind, kind)
+		}
+	}
+	for name := range files {
+		if _, ok := site.Engine().Types().Kind(name); !ok {
+			t.Errorf("admin/widgets/%s.vue 没有对应 kind（文件名必须等于 kind 名）", name)
+		}
+	}
+}
+
+// widgetFiles 内置界面组件文件名集合（文件名 = kind 名）。
+func widgetFiles(t *testing.T) map[string]bool {
+	t.Helper()
+	entries, err := os.ReadDir("admin/widgets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]bool{}
+	for _, e := range entries {
+		if name := strings.TrimSuffix(e.Name(), ".vue"); name != e.Name() {
+			files[name] = true
+		}
+	}
+	return files
+}
+
+// 后台接口的 JSON 键必须小写。Go 结构体默认用字段名（Edit/Cell）当键，前端读的是 .edit——
+// 这种错前端只会拿到 undefined（渲染器名变空字符串），没有任何报错，所以在这里拦。
+func TestAdminJSONKeysAreLowercase(t *testing.T) {
+	s := testSite(t)
+	cookie := adminCookie(t, s)
+	capitalized := regexp.MustCompile(`"[A-Z][A-Za-z]*"\s*:`)
+
+	// 类型名不写死（各夹具的类型集不同）：从 /admin/types 自己发现
+	var types struct {
+		Types map[string]json.RawMessage `json:"types"`
+	}
+	if err := json.Unmarshal(do(s, "GET", "/admin/types", nil, cookie).Body.Bytes(), &types); err != nil {
+		t.Fatal(err)
+	}
+	if len(types.Types) == 0 {
+		t.Fatal("夹具里没有类型")
+	}
+	var typeName string
+	for name := range types.Types {
+		typeName = name
+	}
+
+	paths := []string{"/admin/types", "/admin/me", "/admin/settings",
+		"/admin/integrity/relations", "/admin/search?q=x"}
+	for _, path := range []string{"/admin/nodes?type=", "/admin/tree?type="} {
+		paths = append(paths, path+typeName)
+	}
+	for _, path := range paths {
+		w := do(s, "GET", path, nil, cookie)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d", path, w.Code)
+		}
+		if hit := capitalized.FindAllString(w.Body.String(), -1); len(hit) > 0 {
+			t.Fatalf("%s 的 JSON 里有大写键（前端读不到）: %v", path, hit)
+		}
+	}
+}
+
 func TestAdminNodes(t *testing.T) {
 	s := testSite(t)
 	// 登录（testSite 无固定密码 — 从库读? 简化: EnsureDefaults 的随机密码不可知 —

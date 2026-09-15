@@ -54,7 +54,7 @@ types:
       - { name: body, kind: richtext }
       - { name: publish_time, kind: timestamp }
       - { name: views, kind: number }
-      - { name: categories, kind: "ref[]", to: category }
+      - { name: categories, kind: "refs", to: category }
 `
 
 func TestScale(t *testing.T) {
@@ -191,9 +191,9 @@ func (f *scaleFixture) loadBulk(t *testing.T) {
 	}
 	now := time.Now()
 	for i := 0; i < f.size; i++ {
-		fields := fmt.Sprintf(`{"slug":"article-%d","publication_state":"published","position":%d,"title":"规模测试文章 %d","body":%q,"publish_time":%d,"views":%d}`,
-			i, i%50, i, scaleBody(i), 1_700_000_000+int64(i%30_000_000), i%9973)
-		res, err := insertNode.Exec(fmt.Sprintf("规模测试文章 %d", i), fields, now, now)
+		fields := fmt.Sprintf(`{"slug":"article-%d","publication_state":"published","position":%d,"title":"规模测试文章 %d","body":%q,"publish_time":"%s","views":%d}`,
+			i, i%50, i, scaleBody(i), types.FormatTime(time.Unix(1_700_000_000+int64(i%30_000_000), 0)), i%9973)
+		res, err := insertNode.Exec(fmt.Sprintf("规模测试文章 %d", i), fields, types.FormatTime(now), types.FormatTime(now))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -262,7 +262,7 @@ func (f *scaleFixture) articleNode(i int) *Node {
 			"position":          i % 50,
 			"title":             fmt.Sprintf("规模测试文章 %d", i),
 			"body":              scaleBody(i),
-			"publish_time":      1_700_000_000 + i%30_000_000,
+			"publish_time":      types.FormatTime(time.Unix(1_700_000_000+int64(i%30_000_000), 0)),
 			"views":             i % 9973,
 			"categories":        []any{f.categories[i%len(f.categories)]},
 		},
@@ -473,7 +473,7 @@ func (f *scaleFixture) reportReads(t *testing.T, ctx context.Context) {
 		}
 	})
 
-	measure(t, "引用读出(ref[] → 分类节点)", iterations, func() {
+	measure(t, "引用读出(refs → 分类节点)", iterations, func() {
 		id := f.articleIDs[rand.Intn(len(f.articleIDs))]
 		_, _, err := f.service.OutEdges(ctx, "article", id, "categories", 1, 10)
 		if err != nil {

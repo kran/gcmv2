@@ -23,9 +23,9 @@ import (
 type TypeDef struct {
 	Name         string       `json:"name"` // 类型名（配置键）
 	Fields       []FieldDef   `yaml:"fields" json:"fields"`
-	Constraints  Constraints  `yaml:"constraints,omitempty" json:"constraints,omitempty"`
-	Capabilities Capabilities `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
-	Admin        AdminView    `yaml:"admin,omitempty" json:"admin,omitempty"`
+	Constraints  Constraints  `yaml:"constraints,omitempty" json:"constraints"`
+	Capabilities Capabilities `yaml:"capabilities,omitempty" json:"capabilities"`
+	Admin        AdminView    `yaml:"admin,omitempty" json:"admin"`
 }
 
 // Constraints 类型级数据库约束。v0.9 首期只接受标量字段；引用参与的
@@ -99,9 +99,9 @@ type FieldDef struct {
 	Name  string `yaml:"name" json:"name"`
 	Label string `yaml:"label" json:"label"` // 显示名（表单/列表）; 空 = 回退字段名
 	Kind  string `yaml:"kind" json:"kind"`
-	To    string `yaml:"to" json:"to"` // ref/ref[]: 目标类型名
+	To    string `yaml:"to" json:"to"` // ref/refs: 目标类型名
 	// 复合字段（结构语法, 非值类型 — 不进 kinds 注册表）:
-	// item/fields 只描述结构; 嵌套层不接受 ref/ref[]（引用必须用顶层字段）。
+	// item/fields 只描述结构; 嵌套层不接受 ref/refs（引用必须用顶层字段）。
 	Options     []string   `yaml:"options,omitempty" json:"options,omitempty"` // kind=select: 可选项
 	Item        *FieldDef  `yaml:"item,omitempty" json:"item,omitempty"`       // kind=array: 元素定义（递归）
 	Fields      []FieldDef `yaml:"fields,omitempty" json:"fields,omitempty"`   // kind=object: 子字段（递归）
@@ -132,8 +132,8 @@ func New() *Types {
 // defaultKinds 内置实现清单（New 时注册; 每个实现一个文件）。
 func defaultKinds() []Kind {
 	return []Kind{
-		stringKind{},
 		textKind{},
+		textareaKind{},
 		richtextKind{},
 		numberKind{},
 		boolKind{},
@@ -150,14 +150,34 @@ func defaultKinds() []Kind {
 
 // RegisterKind 注册新字段类型（站点扩展）。重复注册 panic（fail-loud）。
 // 必须在 Load 之前调用。
+//
+// kind 名同时是后台界面的标识（web/admin/widgets/<名字>.vue）与 URL 段，
+// 所以在这里钉住形状（小写字母/数字/减号）—— 名字不能当文件名就没法对应组件，
+// 在根上拒掉，而不是等浏览器里 404。
 func (t *Types) RegisterKind(k Kind) {
 	if k == nil || k.Name() == "" {
 		panic("types: register kind: nil or empty name")
+	}
+	if !validKindName(k.Name()) {
+		panic(fmt.Sprintf("types: kind 名 %q 不合法（只能小写字母/数字/减号，且不以减号开头或结尾）—— 它要当后台组件文件名与 URL 段", k.Name()))
 	}
 	if _, ok := t.kinds[k.Name()]; ok {
 		panic(fmt.Sprintf("types: kind %q already registered", k.Name()))
 	}
 	t.kinds[k.Name()] = k
+}
+
+// validKindName 校验 kind 名能当文件名/URL 段（后台 widgets/<name>.vue）。
+func validKindName(name string) bool {
+	for i, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+		case r == '-' && i > 0 && i < len(name)-1:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // Kind 取 kind 实现; 不存在返回 ok=false。
@@ -257,18 +277,8 @@ func (t *Types) Field(typeName, fieldName string) (FieldDef, bool) {
 // ── 整体校验（宪法）─────────────────────────────────
 
 var (
-	nameRe   = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
-	reserved = map[string]bool{"node": true, "types": true, "settings": true}
+	nameRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 	// Node 的真正通用列不得在动态字段中重复声明。
-	reservedField = map[string]bool{
-		"id": true, "type": true, "display": true, "revision": true,
-		"fields": true, "created_at": true, "updated_at": true, "archived_at": true,
-	}
-	// nodeColumns 节点列全集（穿透路径第二段: 无 $. 前缀即列）。
-	nodeColumns = map[string]bool{
-		"id": true, "type": true, "display": true, "revision": true,
-		"fields": true, "created_at": true, "updated_at": true, "archived_at": true,
-	}
 )
 
 func (t *Types) validate(defs map[string]TypeDef) error {
@@ -278,12 +288,9 @@ func (t *Types) validate(defs map[string]TypeDef) error {
 		if !nameRe.MatchString(name) {
 			return fmt.Errorf("types: type %q: must match %s", name, nameRe)
 		}
-		if reserved[name] {
-			return fmt.Errorf("types: type %q is reserved", name)
-		}
 		seen := map[string]bool{}
 		for _, f := range td.Fields {
-			if reservedField[f.Name] {
+			if IsReservedField(f.Name) {
 				return fmt.Errorf("types: type %q: field %q is reserved for node columns", name, f.Name)
 			}
 			if !nameRe.MatchString(f.Name) {
@@ -520,7 +527,7 @@ const maxCompositeDepth = 4
 // validateComposite 递归校验复合字段: array 必带 item; object 必带 fields;
 // 递归到叶子时校验 kind 存在、没有引用代数声明, 并执行该 kind 自己的字段约束。
 //
-// 复合结构内不允许引用系 kind（ref/ref[]）: 嵌套引用没有路径可落 Edge,
+// 复合结构内不允许引用系 kind（ref/refs）: 嵌套引用没有路径可落 Edge,
 // 若降级成标量存进 fields JSON, 就只剩裸 ID — 没有外键、基数、删除策略,
 // 完整性检查也看不到。需要“数组/对象里带引用”时请建模为关系 Node。
 //

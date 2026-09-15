@@ -151,6 +151,11 @@ window.Panel = (function () {
         var root = await loadComponent(options.root)
         _app = Vue.createApp(root)
 
+        // 全局工具进模板作用域：模板里的表达式被编译成 `_ctx.X`（Vue 只放行
+        // Math/Date/JSON 这类白名单全局），所以 window 上的全局**在模板里看不见** ——
+        // Widgets.truncate() 会变成 undefined.truncate()。挂到 globalProperties 才两边都能用。
+        _app.config.globalProperties.Widgets = window.Widgets
+
         _app.use(_router)
         _app.use(ElementPlus, { size: 'small', locale: window.ElementPlusLocaleZhCn })
 

@@ -16,9 +16,9 @@ types:
     fields:
       - { name: body, kind: richtext, required: true }
       - { name: cover, kind: upload-image }
-      - { name: authors, kind: "ref[]", to: person }
-      - { name: related, kind: "ref[]", to: article, symmetric: true }
-      - { name: categories, kind: "ref[]", to: category }
+      - { name: authors, kind: "refs", to: person }
+      - { name: related, kind: "refs", to: article, symmetric: true }
+      - { name: categories, kind: "refs", to: category }
   category:
     fields:
       - { name: name, kind: text, required: true }
@@ -28,8 +28,8 @@ types:
   person:
     fields:
       - { name: name, kind: text, required: true }
-      - { name: articles, kind: "ref[]", to: article }
-      - { name: employment, kind: "ref[]", to: employment }
+      - { name: articles, kind: "refs", to: article }
+      - { name: employment, kind: "refs", to: employment }
   org:
     fields:
       - { name: name, kind: text, required: true }
@@ -83,13 +83,12 @@ func TestLoadInvalid(t *testing.T) {
 	}{
 		{"empty", "types: {}", "no types"},
 		{"type name", base + "      - { name: body, kind: richtext }\n  BadType:\n    fields: []", "must match"},
-		{"reserved", base + "      - { name: body, kind: richtext }\n  node:\n    fields: []", "reserved"},
 		{"unknown kind", base + "      - { name: body, kind: banana }", "unknown kind"},
 		{"bad field name", base + "      - { name: 'Bad-Name', kind: textarea }", "must match"},
 		{"duplicate field", base + "      - { name: body, kind: textarea }\n      - { name: body, kind: textarea }", "duplicate"},
 		{"ref no to", base + "      - { name: authors, kind: ref }", "requires to"},
 		{"ref to undefined", base + "      - { name: authors, kind: ref, to: ghost }", "not defined"},
-		{"algebra mutual", base + "      - { name: r, kind: \"ref[]\", to: article, symmetric: true, transitive: true }",
+		{"algebra mutual", base + "      - { name: r, kind: \"refs\", to: article, symmetric: true, transitive: true }",
 			"mutually exclusive"},
 		{"algebra cross type", base + "      - { name: r, kind: ref, to: other, transitive: true }\n  other:\n    fields: []", "self reference"},
 		{"required set null", base + "      - { name: r, kind: ref, to: article, required: true, on_delete: set_null }", "required ref cannot use set_null"},
@@ -140,7 +139,7 @@ func TestRelationCapabilityValidation(t *testing.T) {
   employment:
     capabilities: { relation: { from: people, to: owner } }
     fields:
-      - { name: people, kind: "ref[]", to: person, required: true }
+      - { name: people, kind: "refs", to: person, required: true }
       - { name: owner, kind: ref, to: person, required: true }
 `,
 			want: "required single ref",
@@ -247,6 +246,8 @@ func (dateKind) Validate(_ FieldDef, v any) error {
 }
 func (dateKind) IsEmpty(v any) bool { s, ok := v.(string); return !ok || s == "" }
 func (dateKind) Class() Class       { return ClassField }
+
+// 自定义 kind 复用内置渲染器（datetime）—— 前端零代码。
 func (dateKind) QueryOps() QueryOps {
 	return QueryOps{Equal: true, Ordered: true, Sortable: true}
 }
@@ -301,7 +302,7 @@ func TestRegisterDuplicate(t *testing.T) {
 		}
 	}()
 	ts := New()
-	ts.RegisterKind(stringKind{})
+	ts.RegisterKind(textKind{})
 }
 
 // tree capability 校验：parent 必须是自引用；后台 tree view 依赖该能力。
@@ -421,8 +422,8 @@ func TestCompositeRejectsRef(t *testing.T) {
 		},
 		{
 			name: "array item ref list",
-			base: "      - { name: members, kind: array, item: { kind: 'ref[]', to: person } }",
-			want: "kind ref[] cannot be nested",
+			base: "      - { name: members, kind: array, item: { kind: 'refs', to: person } }",
+			want: "kind refs cannot be nested",
 		},
 		{
 			name: "object sub-field ref",

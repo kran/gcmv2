@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"time"
 
 	"github.com/kran/dba"
+	"github.com/kran/gcmv2/types"
 )
 
 // keyRe 配置键格式（字母/数字/下划线/连字符/点）。
@@ -55,10 +57,13 @@ func (s *Service) SetSetting(ctx context.Context, key, group, typ string, value 
 	if err != nil {
 		return err
 	}
+	// 时间由 core.Time（= types.TimeFormat）产出：SQLite 的 datetime('now') 是
+	// "YYYY-MM-DD HH:MM:SS"（空格、无 Z），不是内核的统一格式。
+	now := types.FormatTime(time.Now())
 	_, err = s.db.WithCtx(ctx).Add(`INSERT INTO settings ("key", "group_name", "type", "value", "updated_at")
-		VALUES (#{1}, #{2}, #{3}, #{4}, datetime('now'))
-		ON CONFLICT("key") DO UPDATE SET "group_name" = #{2}, "type" = #{3}, "value" = #{4}, updated_at = datetime('now')`,
-		key, group, typ, string(b)).Exec()
+		VALUES (#{1}, #{2}, #{3}, #{4}, #{5})
+		ON CONFLICT("key") DO UPDATE SET "group_name" = #{2}, "type" = #{3}, "value" = #{4}, updated_at = #{5}`,
+		key, group, typ, string(b), now).Exec()
 	return err
 }
 

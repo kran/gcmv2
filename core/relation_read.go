@@ -38,7 +38,7 @@ func (s *Service) RefID(ctx context.Context, nodeID int64, fieldName string) (in
 	return ids[0], true, nil
 }
 
-// RefIDs returns all targets of one ref[] field in stable edge order.
+// RefIDs returns all targets of one refs field in stable edge order.
 func (s *Service) RefIDs(ctx context.Context, nodeID int64, fieldName string) ([]int64, error) {
 	node, field, err := s.referenceField(ctx, nodeID, fieldName)
 	if err != nil {

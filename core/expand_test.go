@@ -127,12 +127,12 @@ types:
   article:
     fields:
       - { name: title, kind: text }
-      - { name: authors, kind: "ref[]", to: person }
-      - { name: categories, kind: "ref[]", to: category }
-      - { name: employment, kind: "ref[]", to: employment }
+      - { name: authors, kind: "refs", to: person }
+      - { name: categories, kind: "refs", to: category }
+      - { name: employment, kind: "refs", to: employment }
 `
 
-// 并行多字段 + 自然形态（ref → 单值, ref[] → 数组）。
+// 并行多字段 + 自然形态（ref → 单值, refs → 数组）。
 func TestExpandPathParallel(t *testing.T) {
 	ts := newTypes(t, expandPathTypes)
 	s := New(testDB(t), ts)
@@ -146,12 +146,12 @@ func TestExpandPathParallel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// authors: ref[] → 数组
+	// authors: refs → 数组
 	as, ok := root.Expand["authors"].([]*Node)
 	if !ok || len(as) != 2 {
 		t.Fatalf("authors: %T %v", root.Expand["authors"], root.Expand["authors"])
 	}
-	// categories: ref[] → 数组（1 个）
+	// categories: refs → 数组（1 个）
 	cs, ok := root.Expand["categories"].([]*Node)
 	if !ok || len(cs) != 1 || cs[0].Fields["name"] != "行业" {
 		t.Fatalf("categories: %v", cs)
@@ -334,7 +334,7 @@ types:
   primary_contact:
     fields: [{ name: people, kind: ref, to: person }]
   contact_group:
-    fields: [{ name: people, kind: "ref[]", to: person }]
+    fields: [{ name: people, kind: "refs", to: person }]
 `)
 	s := New(testDB(t), ts)
 	person1, _ := s.CreateNode(t.Context(), &Node{Type: "person", Display: "一", Fields: Fields{"name": "一"}})
@@ -382,7 +382,7 @@ types:
 // 爆炸防护: 单字段超 1000 引用 → fail-loud（不静默截断）。
 func TestExpandOverflowFails(t *testing.T) {
 	s := newFilterSvc(t)
-	// 1500 个作者 + 1 篇文章挂满（绕过 title 用 categories? — article 有 categories ref[]）
+	// 1500 个作者 + 1 篇文章挂满（绕过 title 用 categories? — article 有 categories refs）
 	ids := make([]any, 0, 1500)
 	for i := 0; i < 1500; i++ {
 		id, err := s.CreateNode(t.Context(), &Node{Type: "category", Display: "t", Fields: Fields{"name": "c" + strconv.Itoa(i)}})
@@ -470,7 +470,7 @@ func TestExpandMultiLevel(t *testing.T) {
 	if len(l1) != 1 || l1[0].ID != grand {
 		t.Fatalf("level1: %v", l1)
 	}
-	// parent 是 ref 单值（非 ref[]）→ 形态 *Node
+	// parent 是 ref 单值（非 refs）→ 形态 *Node
 	l2 := l1[0].Expand["parent"].(*Node)
 	if l2.ID != child {
 		t.Fatalf("level2: %d", l2.ID)

@@ -61,4 +61,3 @@ func ParsePath(raw string) ([]Seg, error) {
 }
 
 // IsNodeColumn 节点列全集（title 穿透第二段 / filter 无前缀段的三层归属之一）。
-func IsNodeColumn(name string) bool { return nodeColumns[name] }

@@ -177,12 +177,12 @@ AST 必须在 SQL 编译前结合 TypeDef 校验。
 | number/money | eq、ne、gt、gte、lt、lte、between、in、is-null |
 | timestamp | eq、gt、gte、lt、lte、between、is-null |
 | bool | eq、ne、is-null |
-| ref/ref[] | has、any、all、none、exists、missing |
+| ref/refs | has、any、all、none、exists、missing |
 | array/object/gallery | 初期仅 exists/missing，其他操作按 Kind 扩展 |
 
 ### 关系路径
 
-- OutRef 字段必须存在于当前 Type 且是 ref/ref[]
+- OutRef 字段必须存在于当前 Type 且是 ref/refs
 - InRef 必须明确来源 Type 和来源字段
 - 每深入一层，Validator 切换当前 Type
 - 最大关系深度默认 4

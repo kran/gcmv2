@@ -50,7 +50,7 @@ export default {
     },
     props: {
         node: { type: Object, required: true },      // 行数据（含 id/type）
-        defs: { type: Object, default: () => ({}) }, // 类型定义表（titleOf/refLabel 用）
+        defs: { type: Object, default: () => ({}) },
         typeName: { type: String, default: '' },     // 新建时的类型（编辑用 node.type）
         showCreate: { type: Boolean, default: false }, // 树场景: 新建子
         parentId: { type: Number, default: 0 },        // 新建子的父 id（= node.id）

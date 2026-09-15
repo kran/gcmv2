@@ -15,7 +15,8 @@
                 <el-input v-model="form.display" placeholder="公共显示文本（列表/搜索/导航显示）" />
             </div>
             <field-renderer v-if="def" :fields="def.fields" v-model="form.fields"
-                            :ref-preset="form.refPreset || {}" :defs="defs" :editing="isEdit" />
+                            :ref-preset="form.refPreset || {}" :defs="defs"
+                            :editing="isEdit" />
         </el-form>
         <template #footer>
             <div style="display:flex;justify-content:flex-end;gap:8px;">

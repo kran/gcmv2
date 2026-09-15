@@ -6,11 +6,33 @@
 
 ### Breaking changes
 
+- **A kind's UI is its name**: the admin frontend takes `field.kind` and loads
+  `web/admin/widgets/<kind>.vue` — no mapping table, no `Render()` declaration, no `kinds` in
+  `/admin/types`. Each component carries both modes (`mode="edit" | "cell"`) and everything it
+  needs (ref search, upload, time formatting); `FieldRenderer` and the node list are dispatchers
+  that only know the two structures `array`/`object`. A missing component renders an explicit
+  error block (never a silent raw value). The upshot: a site's custom kind needs one file named
+  after it, and the framework adds nothing.
+- `types.Types.RegisterKind` now rejects kind names that cannot be a filename/URL segment
+  (lowercase letters, digits, `-`) — a kind name *is* a component filename, so this is checked
+  where the kind is defined.
+- **`ref[]` → `refs`** (the old name could not be a filename). Kind names appear in `types.yaml`:
+  `kind: refs` becomes `kind: refs` (`KindRefList` value changed). Also `types.KindText`/
+  `KindString` swapped so constant names match their values (`KindText = "text"`,
+  `KindTextarea = "textarea"`), and `types/text.go` / `types/textarea.go` are now named after
+  the kind they implement.
+- The admin's "array of text → tag input" convenience is gone: it required the dispatcher to know
+  one kind name, and no site had such a field. Arrays now always render as item rows.
+
 - `searchable.fields` takes type fields only. `display` is a node column that is always indexed (its own FTS column, highest bm25 weight), so listing it was a no-op that mostly taught the wrong thing; it is now rejected by the usual "field is not defined" check. Remove it from every `types.yaml`.
 - Public `DELETE /api/nodes/{type}/{id}` and `CmsCtx.DeleteNode` permanently delete again (both archived for a while, per the old "公共 DELETE = 归档" rule). Deleting a node that something references with a required ref fails with HTTP 409 (`restrict`, unchanged). Archiving is now the explicit operation: `POST /admin/nodes/{id}/archive` (+ `/restore`) in the admin API, or `engine.ArchiveNode` for a site that wants a reversible 下架. The rule fired is still `WriteDelete` (`web.write.delete.<type>`).
 - `GetNodeById` is now `GetNodeByID` (the only `Id` left in the public surface, next to `RefID`/`RefIDs`/`nodeID`), `CmsCtx.SearchPage` is now `CmsCtx.ReadSearch` (every read entry is `Read*`), and `Service.SyncRelationSchema` takes a `context.Context` (it runs DDL, so it was the one I/O entry without one).
-- Archive is gone from the kernel: `archived_at`, `ArchiveNode`/`RestoreNode`, the archive/restore hooks, the `node is archived` conflict, the admin `POST /admin/nodes/{id}/archive` + `/restore` routes, and the `archived_at IS NULL` guard that every read path carried. Soft delete is a product policy ("下架 / 撤回 / 回收站"): express it with a state field of your own types plus a read-rule scope, or build a recycle bin at the project layer (a plugin later). **Data note:** the column is dropped at startup (one-time step in `core.Open`); if a database still has archived rows they become visible again, and the kernel logs a warning with the count.
-- Time is one format everywhere: `core.Time` (UTC, RFC3339, second precision, `…Z`). Node/Edge/Setting/AuthMethod/Session/Account time columns now store and read `2026-09-14T23:06:41Z`. Before this, the SQLite driver stored `time.Time.String()` — `2026-09-15 07:06:57.993279 +0800 CST m=+0.02` — which SQLite's `datetime()` returns NULL for, so **every** `ORDER BY created_at`, date range filter and month grouping was broken or impossible. The kernel carries **no** compatibility code for old values: `core.Time` accepts the canonical form (plus RFC3339 with an offset as client input) and nothing else. Old databases are converted by the one-off command `tools/legacy-time` before upgrading (`go run ./tools/legacy-time -db gcm.sqlite [-types types.yaml]`, idempotent, `-dry-run` available); a startup gate then fails loud if any time column is not canonical (`dba.H` and hand-written SQL bypass the type system, so only this check sees them — it also tells you to run the tool).
+- Archive is gone from the kernel: `archived_at`, `ArchiveNode`/`RestoreNode`, the archive/restore hooks, the `node is archived` conflict, the admin `POST /admin/nodes/{id}/archive` + `/restore` routes, and the `archived_at IS NULL` guard that every read path carried. Soft delete is a product policy ("下架 / 撤回 / 回收站"): express it with a state field of your own types plus a read-rule scope, or build a recycle bin at the project layer (a plugin later). **Data note:** the column is no longer created (the historical migration was edited) and the kernel carries no special-case code for old databases — a database migrated by an older version keeps a harmless always-NULL column, and rows that were archived become visible again.
+- Time is one format everywhere: `core.Time` (UTC, RFC3339, second precision, `…Z`). Node/Edge/Setting/AuthMethod/Session/Account time columns now store and read `2026-09-14T23:06:41Z`. Before this, the SQLite driver stored `time.Time.String()` — `2026-09-15 07:06:57.993279 +0800 CST m=+0.02` — which SQLite's `datetime()` returns NULL for, so **every** `ORDER BY created_at`, date range filter and month grouping was broken or impossible. The kernel carries **no** compatibility code for old values: `core.Time` accepts the canonical form (plus RFC3339 with an offset as client input) and nothing else. Old databases are converted by the one-off command `tools/legacy-time` before upgrading (`go run ./tools/legacy-time -db gcm.sqlite [-types types.yaml]`, idempotent, `-dry-run` available). The same tool has `-check` (read-only, one `COUNT(*)` per time column plus one per `timestamp` field, exits non-zero when something is not canonical) for CI/deploy — the kernel itself does **not** scan the database at startup: its own writes are type-safe, so the only way a value gets dirty is hand-written SQL (migrations, seeds, site code), which is a deploy-time concern.
+
+- The `timestamp` field kind stores that same canonical string now instead of Unix seconds, and its value is validated as exactly `types.TimeFormat` (offsets/milliseconds must be normalised by the caller). One format end to end means the frontend never guesses units and SQL can order/filter the JSON value as text. `tools/legacy-time -check` covers `timestamp` fields too (pass `-types`) — demo data and site migrations write `fields` JSON by hand and never go through `ValidateValue`, so that is where numbers used to come back in.
+- The format lives in one place: `types.TimeFormat` / `types.ParseTime` / `types.FormatTime`; `core.Time` delegates to it. `core.TimeFormat` is gone (v0: no aliases). SQL that writes times must produce the same string — `strftime('%Y-%m-%dT%H:%M:%SZ','now')` instead of SQLite's `datetime('now')` (space, no `Z`; that spelling is what kept dirty values coming back into the database).
+- Fixed: `SetSetting` wrote `updated_at` via `datetime('now')` — non-canonical, straight through the type system's blind spot.
 - `web.ReadRule` takes a fourth parameter, `*core.List[string]`: a read rule now declares both the row range and the fields the actor must not see. Existing rules add one ignored parameter.
 
 ### Added
@@ -29,7 +51,7 @@
 ### Fixed
 
 - `GetNodeByAddress` resolves addresses through a per-type index instead of scanning every node of every addressable type. The JSON path was bound as a parameter, which no index expression can match, so the global address index was unusable as a lookup. At 100k nodes: 1.7s → 129µs.
-- Relation membership (`in` on a ref/ref[] path) compiles to an uncorrelated subquery instead of a correlated `EXISTS`, so the edge set is built once instead of once per candidate row. At 100k nodes: 1.25s → 35ms.
+- Relation membership (`in` on a ref/refs path) compiles to an uncorrelated subquery instead of a correlated `EXISTS`, so the edge set is built once instead of once per candidate row. At 100k nodes: 1.25s → 35ms.
 
 ### Fixed
 
@@ -79,7 +101,7 @@ See `docs/scaling.md` for measured throughput, latency and storage from 1k to 1M
 - The unsafe mutation-only `Merge` operation is removed; use `PreviewMerge` until audited merge execution is available.
 - Public Node DELETE now archives; administrator DELETE remains the explicit permanent-delete path.
 - `InEdges` now filters the requested field and returns logical two-way results for symmetric/equivalence relations.
-- Composite fields reject any nested ref/ref[] Kind: previously such a declaration loaded successfully and stored raw IDs in `fields` JSON, bypassing edges, cardinality and delete policies.
+- Composite fields reject any nested ref/refs Kind: previously such a declaration loaded successfully and stored raw IDs in `fields` JSON, bypassing edges, cardinality and delete policies.
 - `Kind.Validate` now receives the `FieldDef`, so per-field value constraints such as select options are enforced by the Kind instead of a container switch.
 - `LoadTree(typeName)` becomes `LoadTree(ctx, typeName, scope)`; Core no longer requires publication or filters published Nodes itself.
 - `TypeDef.TemplateCandidates` is removed; template candidates belong to the web layer.
