@@ -77,6 +77,7 @@
           <template #default="{ row: r }">
             <component v-if="cellOf(c)" :is="cellOf(c)" mode="cell" :model-value="fieldOf2(r, c)"
                        :field="fieldDef(c)" :node="r" @open-node="openRef" />
+            <span v-else-if="isStruct(c)" class="cell-struct">{{ structSummary(r, c) }}</span>
             <span v-else class="cell-error">字段 {{ c }} 没有 kind</span>
           </template>
         </el-table-column>
@@ -97,6 +98,7 @@
           <template #default="{ row: r }">
             <component v-if="cellOf(c)" :is="cellOf(c)" mode="cell" :model-value="fieldOf2(r, c)"
                        :field="fieldDef(c)" :node="r" @open-node="openRef" />
+            <span v-else-if="isStruct(c)" class="cell-struct">{{ structSummary(r, c) }}</span>
             <span v-else class="cell-error">字段 {{ c }} 没有 kind</span>
           </template>
         </el-table-column>
@@ -209,6 +211,17 @@ export default {
             const def = this.typeDefs[this.query.type] || {}
             const field = (def.fields || []).find(f => f.name === name)
             return (field && field.label) || name
+        },
+        // 结构字段（array/object）没有组件文件: 列表里给个摘要, 不显示"缺组件"。
+        isStruct(name) {
+            const f = this.fieldDef(name)
+            return !!f && (f.kind === 'array' || f.kind === 'object')
+        },
+        structSummary(row, name) {
+            const v = this.fieldOf2(row, name)
+            if (Array.isArray(v)) return v.length + ' 项'
+            if (v && typeof v === 'object') return Object.keys(v).length + ' 个键'
+            return '—'
         },
         // 单元格: ref/refs 的值不在 fields 里（存 edges 表），只能取 expand 里的显示名 ——
         // 列表接口本来就批量展开了一层出边，这里只是把它用上。

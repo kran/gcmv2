@@ -26,6 +26,14 @@ types:
       - { name: publication_state, kind: select, options: [draft, published], default: draft }
       - { name: body, kind: richtext }
       - { name: category, kind: ref, to: category }
+      - name: slides
+        kind: array
+        label: 轮播图
+        item:
+          kind: object
+          fields:
+            - { name: image, kind: upload-image, required: true }
+            - { name: h1, kind: text }
   category:
     capabilities:
       publication: { field: publication_state, draft: draft, published: published }

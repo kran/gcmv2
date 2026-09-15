@@ -15,7 +15,6 @@
 
                 <!-- 结构：数组（元素为 object 时子字段递归，其它包一层复用） -->
                 <div v-if="f.kind === 'array'" class="fr-array">
-                    <template>
                         <div v-for="(item, i) in (get(f.name) || [])" :key="i" class="fr-card">
                             <div class="fr-card-bar">
                                 <span class="fr-card-idx">#{{ i + 1 }}</span>
@@ -38,7 +37,6 @@
                                 @update:model-value="setItem(f.name, i, $event.v)" />
                         </div>
                         <el-button size="small" @click="addItem(f)">+ 添加一项</el-button>
-                    </template>
                 </div>
 
                 <!-- 结构：对象（递归） -->
@@ -100,7 +98,29 @@ export default {
         editing: { type: Boolean, default: false },
     },
     emits: ['update:modelValue'],
+    data() {
+        return { structLogged: {} }   // 诊断去重（值没变就不重复打）
+    },
+    mounted() { this.logStruct() },
+    updated() { this.logStruct() },
     methods: {
+        // logStruct 诊断：结构字段（array/object）渲染不出来时, 打出它到底拿到了什么。
+        // mounted 时详情还没回来（那时是空的）, 所以 updated 时也要看 —— 值变了才打。
+        logStruct() {
+            ;(this.fields || []).forEach((f) => {
+                if (f.kind !== 'array' && f.kind !== 'object') return
+                const v = this.get(f.name)
+                const line = f.name + ' kind=' + f.kind +
+                    ' 值是数组=' + Array.isArray(v) + ' 条数=' + ((v && v.length) || 0) +
+                    ' item.kind=' + ((f.item && f.item.kind) || '(无 item!)') +
+                    ' item字段数=' + (((f.item && f.item.fields) || []).length) +
+                    ' 值=' + JSON.stringify(v) +
+                    ' 表单现有键=[' + Object.keys(this.modelValue || {}).join(',') + ']'
+                if (this.structLogged[f.name] === line) return
+                this.structLogged[f.name] = line
+                console.log('[struct] ' + line)
+            })
+        },
         // kind 名 → 组件（取不到文件时 Widgets 渲染"缺哪个文件"的错误块）
         widget(f) { return Widgets.resolve(f && f.kind) },
         get(name) { return this.modelValue ? this.modelValue[name] : undefined },

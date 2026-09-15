@@ -266,6 +266,24 @@ function checkWidgetInterface() {
 
 // 编辑器的引用标签必须来自"刚拉回来的详情"（full.expand）—— 用列表行的 r.expand 时，
 // 打开编辑器常常没有 expand，引用字段就只剩裸 id，点开下拉才补上（真实踩过）。
+// FieldRenderer 的 array 分支里曾经包了一层**没有指令**的 <template>：Vue 3 会把它编成
+// 真 <template> 元素（不是 fragment）, 内容惰性 → 卡片建出来了却永远不可见。
+// 规则：除了第 0 列的 SFC 根 template, 文件里不许有嵌套的 <template>。
+function checkNoNestedTemplate() {
+    const src = read(path.join(ADMIN_DIR, 'pages/FieldRenderer.vue'))
+    const problems = []
+    src.split('\n').forEach((line, i) => {
+        // 只有"没有指令"的嵌套 <template> 才是坑（带 v-if/v-for/v-slot/# 的会编成 fragment, 正常）
+        if (/^[ \t]+<template(?![^>]*(v-|#|:))[ >]/.test(line)) {
+            problems.push('FieldRenderer.vue:' + (i + 1) + ' 有嵌套的 <template>（无指令时内容不显示）')
+        }
+    })
+    let failed = 0
+    for (const problem of problems) { failed++; console.log('  FAIL ' + problem) }
+    if (!failed) console.log('  ok   FieldRenderer 没有嵌套 <template>（结构直接放在 v-if 元素里）')
+    return failed
+}
+
 function checkEditorRefLabels() {
     const src = read(path.join(ADMIN_DIR, 'pages/NodeEditDialog.vue'))
     const problems = []
@@ -749,6 +767,56 @@ async function checkRender() {
     } else {
         pass('正常时间值可以清空（回写 null）')
     }
+    // ⑬ array 是"结构"（没有组件文件），由 FieldRenderer 自己递归渲染：条目 + 上移/下移/
+    //    删除 + 「+ 添加一项」必须都在，子字段（object）也要递归出来。
+    renderErrors.length = 0
+    let arrEdited = null
+    const arrayHost = mount(FieldRenderer.default || FieldRenderer, {
+        // 用真实站点的形状（viicn slide）：4 条，image 是必填 upload-image 且值为空串。
+        fields: [{
+            name: 'slides', kind: 'array', label: '轮播图',
+            item: { kind: 'object', fields: [
+                { name: 'image', kind: 'upload-image', required: true, label: '图片' },
+                { name: 'h1', kind: 'text', label: '主标题' },
+            ] },
+        }],
+        modelValue: { slides: [
+            { image: '', h1: '深度战略合作' }, { image: '', h1: '战略研究驱动增长' },
+            { image: '', h1: '品牌点亮城市' }, { image: '', h1: '客户案例' },
+        ] },
+        'onUpdate:modelValue': (v) => { arrEdited = v },
+    }, stubs)
+    await tick()
+    const arrNodes = walk(arrayHost)
+    const arrTexts = arrNodes.map(n => n.text || '').join('|')
+    const arrTags = arrNodes.map(n => n.tag).join(',')
+    if (renderErrors.length) {
+        fail('array 渲染抛错: ' + renderErrors.join(' / '))
+    } else if (arrTexts.indexOf('#1') < 0) {
+        fail('array 没渲染出条目（应显示 #1）: tag=' + arrTags + ' text=' + JSON.stringify(arrTexts))
+    } else if (arrTexts.indexOf('添加一项') < 0) {
+        fail('array 没渲染出「+ 添加一项」按钮: ' + JSON.stringify(arrTexts))
+    } else if (arrTexts.indexOf('主标题') < 0) {
+        fail('array 的 object 子字段没递归渲染（缺「主标题」）: ' + JSON.stringify(arrTexts))
+    } else {
+        // 按钮的文字在子节点上（stub 里 <el-button><span>+ 添加一项</span></el-button>），
+        // 所以要按"子树文本"找按钮，不能只看按钮自己的 text。
+        const subText = (n) => walk(n).map(c => c.text || '').join('')
+        const addBtn = arrNodes.find(n => n.tag === 'el-button' && subText(n).indexOf('添加一项') >= 0)
+        const addClick = addBtn && (addBtn.props.onClick || addBtn.props['on-click'])
+        if (addBtn && !addClick) fail('添加按钮上挂的点击事件名不认识: ' + JSON.stringify(Object.keys(addBtn.props || {})))
+        if (!addBtn || typeof addClick !== 'function') {
+            fail('「+ 添加一项」按钮没有点击回调: ' + JSON.stringify(addBtn && Object.keys(addBtn.props || {})))
+        } else {
+            addClick()
+            await tick()
+            if (!arrEdited || !Array.isArray(arrEdited.slides) || arrEdited.slides.length !== 5) {
+                fail('点「+ 添加一项」没有往表单里加条目: ' + JSON.stringify(arrEdited))
+            } else {
+                pass('array 结构渲染完整（条目/子字段/添加按钮，加了能回流）')
+            }
+        }
+    }
     return failed
 }
 
@@ -765,7 +833,7 @@ async function main() {
     // 那个闸门就只是"打印了一行 FAIL"却不让命令失败（等于没写）。
     const parts = [checkAssets(), checkDestructiveWording(), checkDrawerClose(),
         checkTimestampWidget(), checkWidgetStyles(),
-        checkWidgetInterface(), checkEditorRefLabels()]
+        checkWidgetInterface(), checkEditorRefLabels(), checkNoNestedTemplate()]
     const failed = parts.reduce((a, b) => a + b, 0) +
         (mode === 'sfc' ? await checkSFC() : await checkRender())
     console.log(failed ? failed + ' 项失败' : '全部通过')

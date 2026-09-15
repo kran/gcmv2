@@ -46,6 +46,14 @@ types:
     fields:
       - { name: publication_state, kind: select, options: [draft, published], default: draft }
       - { name: body, kind: richtext }
+      - name: slides
+        kind: array
+        label: 轮播图
+        item:
+          kind: object
+          fields:
+            - { name: image, kind: upload-image, required: true }
+            - { name: h1, kind: text }
 `
 	tp := filepath.Join(dir, "types.yaml")
 	if err := os.WriteFile(tp, []byte(typesYAML), 0o644); err != nil {

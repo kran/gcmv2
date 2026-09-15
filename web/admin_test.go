@@ -115,6 +115,10 @@ func TestAdminTypesAndWidgetFiles(t *testing.T) {
 	for typeName, def := range body.Types {
 		for _, field := range def.Fields {
 			seen++
+			// array / object 是**结构**不是 kind：没有组件文件, 由 FieldRenderer 递归渲染。
+			if field.Kind == "array" || field.Kind == "object" {
+				continue
+			}
 			if !files[field.Kind] {
 				t.Errorf("%s 用了 kind %q，但没有 admin/widgets/%s.vue", typeName, field.Kind, field.Kind)
 			}
@@ -658,6 +662,37 @@ func TestAdminNodesRefFilterAndExpand(t *testing.T) {
 	}
 	if _, ok := detail["fields"].(map[string]any)["category"]; !ok {
 		t.Fatalf("详情 fields 缺引用 id: %s", w.Body.String())
+	}
+
+	// 结构字段（array）必须原样出现在详情里：前端 array 渲染靠 form.fields 里的这个值，
+	// 一旦被吞掉，编辑器里就只剩「轮播图 array」这一行标签，下面什么都没有。
+	arrID, err := s.Engine().CreateNode(t.Context(), &core.Node{Type: "article", Display: "带轮播",
+		Fields: core.Fields{"publication_state": "published", "slides": []any{
+			map[string]any{"image": "/uploads/a.png", "h1": "甲"},
+			map[string]any{"image": "/uploads/b.png", "h1": "乙"},
+		}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w = do(s, "GET", "/admin/nodes/"+itoa(arrID), nil, ck)
+	if w.Code != http.StatusOK {
+		t.Fatalf("array 详情 = %d: %s", w.Code, w.Body.String())
+	}
+	var arrDetail struct {
+		Fields map[string]any `json:"fields"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &arrDetail); err != nil {
+		t.Fatal(err)
+	}
+	slides, ok := arrDetail.Fields["slides"].([]any)
+	if !ok {
+		t.Fatalf("详情把 array 字段吞了（编辑器里会只剩标签行）: %s", w.Body.String())
+	}
+	if len(slides) != 2 {
+		t.Fatalf("array 条目数 = %d, want 2: %s", len(slides), w.Body.String())
+	}
+	if item, ok := slides[0].(map[string]any); !ok || item["h1"] != "甲" {
+		t.Fatalf("array 条目内容不对: %#v", slides[0])
 	}
 
 	// 树的端点（admin.view=tree 时前端走它）也必须与列表同形：parent 列要能显示
