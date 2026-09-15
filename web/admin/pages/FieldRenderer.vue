@@ -64,6 +64,30 @@
 
 // FieldRenderer 按类型定义递归渲染字段表单（design §9 复合字段）。
 // 自引用经 name: 'FieldRenderer' 实现（SFC 运行时编译无法自 import）。
+// 空值判定：字段不存在 / null / '' / [] 都算"没有值"。
+function blank(v) {
+    return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0)
+}
+
+// unchanged 判定"这次 update 等于没改"：控件初始化和格式归一化都会 emit 一遍
+// （时间选择器把空值变 null、富文本把 HTML 重新序列化……），照单全收就会出现
+// "点开什么都不动、关闭也问要不要保存"。
+function unchanged(before, after) {
+    if (blank(before) && blank(after)) return true
+    // 字段本来不存在（undefined）→ 控件初始化填了自己的空值（0/''/false）：
+    // 语义上"没有值", 不算用户修改（否则没 position 的节点点开就脏）。
+    if (before === undefined && (after === 0 || after === false || after === null)) return true
+    if (before === after) return true
+    if (before && after && typeof before === 'object' && typeof after === 'object') {
+        try {
+            return JSON.stringify(before) === JSON.stringify(after)
+        } catch (err) {
+            return false
+        }
+    }
+    return false
+}
+
 export default {
     name: 'FieldRenderer',
     props: {
@@ -83,6 +107,10 @@ export default {
         set(name, v) {
             const field = (this.fields || []).find(f => f.name === name)
             if (this.editing && field && field.immutable) return
+            if (unchanged(this.get(name), v)) return
+            // 空值之间不算修改：控件初始化时会把"字段不存在"归一成 null/''/[]
+            // （例：el-date-picker 空值 → null）。不减这一刀，点开什么都不动、
+            // 关闭时也会弹"有未保存修改"。
             this.$emit('update:modelValue', { ...(this.modelValue || {}), [name]: v })
         },
         setItem(name, i, v) {

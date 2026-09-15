@@ -49,6 +49,7 @@ export default {
             form: { display: '', revision: 0, fields: {} },
             saving: false, def: null,
             initial: '',   // 加载完成时的表单快照（判断"有没有未保存修改"）
+            rebaseline: null, // 打开后重设基线的定时器（控件归一化之后再取）
         }
     },
     computed: {
@@ -67,6 +68,7 @@ export default {
     watch: {
         visible(v) {
             if (!v) return
+            clearTimeout(this.rebaseline)
             this.saving = false
             if (this.isEdit) this.loadEdit()
             else this.loadCreate()
@@ -80,6 +82,29 @@ export default {
         },
         isDirty() {
             return this.initial !== '' && this.formSnapshot() !== this.initial
+        },
+        // dirtyDiff 诊断："没动过却提示有修改"时, 到底哪个字段变了。
+        // 输出到浏览器控制台（F12）—— 只需要加载时与现在的差异, 不参与业务。
+        dirtyDiff() {
+            try {
+                const before = JSON.parse(this.initial || '{"display":"","fields":{}}')
+                const after = JSON.parse(this.formSnapshot())
+                const diff = {}
+                const keys = new Set(Object.keys(before.fields || {}).concat(Object.keys(after.fields || {})))
+                keys.forEach((k) => {
+                    const was = (before.fields || {})[k]
+                    const now = (after.fields || {})[k]
+                    if (JSON.stringify(was) !== JSON.stringify(now)) {
+                        diff[k] = { 加载时: was, 现在: now }
+                    }
+                })
+                if ((before.display || '') !== (after.display || '')) {
+                    diff.display = { 加载时: before.display, 现在: after.display }
+                }
+                return diff
+            } catch (err) {
+                return { 诊断失败: String(err) }
+            }
         },
         // 抽屉自己的关闭入口（点遮罩 / ESC / ×）走 before-close；底部"取消"和保存成功是
         // 程序化关闭，所以也让它们走同一个检查。
@@ -95,6 +120,8 @@ export default {
                 proceed()
                 return
             }
+            console.warn('[dirty] 未保存修改的字段差异 node=' + ((this.node && this.node.id) || '?'),
+                JSON.parse(JSON.stringify(this.dirtyDiff())))
             ElMessageBox.confirm('表单有未保存的修改，关闭后这些修改会丢失。', '未保存的修改', {
                 type: 'warning', confirmButtonText: '放弃修改', cancelButtonText: '继续编辑',
             }).then(proceed).catch(function () {})
@@ -136,6 +163,18 @@ export default {
                 // 初次渲染只剩裸 id（点开下拉才补上）。
                 this.refExpand = full.expand || {}
                 this.initial = this.formSnapshot()
+                // 打开后下一帧再比一次：控件初始化若把某个字段写脏了, 这里立刻能看见
+                // （不用等用户点关闭）—— 给我看这一行。
+                // 控件（异步组件）加载之后会做格式归一化：时间选择器把同一个时刻换成别的
+                // 写法、富文本重新序列化 HTML……。基线必须是"打开后稳定下来的样子"，
+                // 否则用户什么都没动也会被判成有修改。先把差异打出来（方便诊断），再重设基线。
+                this.rebaseline = setTimeout(() => {
+                    if (!this.isDirty()) return
+                    console.warn('[dirty] 打开即脏（已把归一化后的状态当作基线）node=' +
+                        ((this.node && this.node.id) || '?') + ' type=' + ((this.node && this.node.type) || '?'),
+                        JSON.parse(JSON.stringify(this.dirtyDiff())))
+                    this.initial = this.formSnapshot()
+                }, 150)
             }).catch(() => {})
         },
         save() {

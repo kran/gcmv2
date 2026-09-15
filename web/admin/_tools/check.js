@@ -687,6 +687,68 @@ async function checkRender() {
             pass('编辑器链路通: 真实组件改值 → FieldRenderer 收到 update:modelValue')
         }
     }
+    // ⑪ 空值归一不算修改：控件初始化会把"字段不存在"归一成 null/''/[]，照单全收就会
+    //    出现"点开什么都不动、关闭也问要不要保存"（真实踩过：article 没有 publish_time，
+    //    el-date-picker 空值 → toCanonical(null) = null → 表单从 {} 变成 {publish_time:null}）。
+    renderErrors.length = 0
+    let blankEdited = 0
+    const blankHost = mount(FieldRenderer.default || FieldRenderer, {
+        fields: [{ name: 'publish_time', kind: 'timestamp' }, { name: 'title', kind: 'text' }],
+        modelValue: {},
+        'onUpdate:modelValue': () => { blankEdited++ },
+    }, stubs)
+    await tick()
+    const picker = walk(blankHost).find(n => n.tag === 'el-date-picker')
+    if (!picker) {
+        fail('编辑表单里没找到时间控件')
+    } else if (typeof picker.props['onUpdate:modelValue'] !== 'function') {
+        fail('时间控件的 update:model-value 没传下来')
+    } else {
+        picker.props['onUpdate:modelValue'](null)   // 控件把空值归一（初始化时就会发生）
+        if (blankEdited) {
+            fail('空值归一被当成用户修改了（点开不动也会提示"有未保存修改"）')
+        } else {
+            picker.props['onUpdate:modelValue'](new Date('2026-01-02T03:04:05Z'))
+            if (blankEdited !== 1) {
+                fail('真改了时间却没回流到表单: ' + blankEdited)
+            } else {
+                pass('空值归一不算修改；真改值才回流')
+            }
+        }
+    }
+    // ⑫ 老格式的时间值不许被静默清空：库里可能是纪元数字/老格式（迁移前），
+    //    选择器读不出来会 emit null —— 回写就等于把数据删了，还顺带误判"有未保存修改"。
+    renderErrors.length = 0
+    async function timestampEmit(modelValue) {
+        let emitted = 'none'
+        const host = mount(sandbox.Widgets.resolve('timestamp'), {
+            mode: 'edit', modelValue: modelValue,
+            field: { kind: 'timestamp', name: 'publish_time' }, defs: {},
+            'onUpdate:modelValue': (v) => { emitted = v },
+        }, stubs)
+        await tick()
+        const picker = walk(host).find(n => n.tag === 'el-date-picker')
+        if (!picker || typeof picker.props['onUpdate:modelValue'] !== 'function') {
+            fail('时间控件（edit 模式）没渲染出可用的选择器')
+            return { emitted: emitted, texts: '' }
+        }
+        picker.props['onUpdate:modelValue'](null)   // 选择器把解析不了的值归一成空
+        return { emitted: emitted, texts: walk(host).map(n => n.text || '').join('') }
+    }
+    const legacy = await timestampEmit(1790179200)          // 纪元秒（JSON 数字）
+    if (legacy.emitted !== 'none') {
+        fail('老格式（纪元数字）被控件回写成 ' + JSON.stringify(legacy.emitted) + ' —— 静默清空数据')
+    } else if (legacy.texts.indexOf('旧格式') < 0) {
+        fail('老格式的值没有提示出来（用户不知道库里是旧格式）: ' + JSON.stringify(legacy.texts))
+    } else {
+        pass('老格式时间值: 不回写 + 有提示')
+    }
+    const clearing = await timestampEmit('2026-01-02T03:04:05Z')
+    if (clearing.emitted !== null) {
+        fail('清空一个正常的时间值必须能回写 null（否则用户没法清空）: ' + JSON.stringify(clearing.emitted))
+    } else {
+        pass('正常时间值可以清空（回写 null）')
+    }
     return failed
 }
 
