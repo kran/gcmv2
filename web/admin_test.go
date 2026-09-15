@@ -659,6 +659,37 @@ func TestAdminNodesRefFilterAndExpand(t *testing.T) {
 	if _, ok := detail["fields"].(map[string]any)["category"]; !ok {
 		t.Fatalf("详情 fields 缺引用 id: %s", w.Body.String())
 	}
+
+	// 树的端点（admin.view=tree 时前端走它）也必须与列表同形：parent 列要能显示
+	// "子分类名 #id" 而不是裸 id —— 以前它自己拼 map，把 expand 丢了。
+	w = do(s, "GET", "/admin/tree?type=category", nil, ck)
+	if w.Code != http.StatusOK {
+		t.Fatalf("tree = %d: %s", w.Code, w.Body.String())
+	}
+	var treeResp struct {
+		Items []struct {
+			ID     int64          `json:"id"`
+			Fields map[string]any `json:"fields"`
+			Expand map[string]any `json:"expand"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &treeResp); err != nil {
+		t.Fatal(err)
+	}
+	withParent := 0
+	for _, item := range treeResp.Items {
+		if item.Fields["parent"] == nil {
+			continue
+		}
+		withParent++
+		ref, ok := item.Expand["parent"].(map[string]any)
+		if !ok || ref["display"] == "" || ref["id"] == nil {
+			t.Fatalf("tree 的 parent 列没展开（会显示裸 id）: id=%d expand=%#v", item.ID, item.Expand)
+		}
+	}
+	if withParent == 0 {
+		t.Fatal("tree 结果里没有带 parent 的分类")
+	}
 }
 
 // TestAdminSearchSort 引用选择器预载用的排序：sort 只在带 type 时可用。

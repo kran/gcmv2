@@ -808,23 +808,13 @@ func (b *backend) tree(ctx *CmsCtx) {
 		return
 	}
 	list := nodeValues(ptrs)
-	items := make([]map[string]any, 0, len(list))
-	ids := make([]int64, len(list))
-	for i := range list {
-		ids[i] = list[i].ID
-	}
-	full, err := b.eng.GetNodesByIDs(ctx.R.Context(), ids)
-	if err != nil {
+	// 与列表端点同形：Fields 完整 + 展开一层。树的 parent 列要显示"名称 #id"而不是裸 id
+	// —— admin.view=tree 时前端走的就是这个端点（以前这里手拼 map，把 expand 丢了）。
+	if err := b.expandNodesInto(ctx.R.Context(), list); err != nil {
 		b.internal(ctx, err)
 		return
 	}
-	for _, n := range full {
-		items = append(items, map[string]any{
-			"id": n.ID, "type": n.Type, "display": n.Display,
-			"revision": n.Revision, "fields": n.Fields,
-		})
-	}
-	_ = ctx.Json(http.StatusOK, map[string]any{"items": items})
+	_ = ctx.Json(http.StatusOK, map[string]any{"items": list})
 }
 
 // toAny int64 切片 → any 切片（dba expand 参数）。
