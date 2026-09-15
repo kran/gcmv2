@@ -48,7 +48,21 @@ func (f Fields) Has(name string) bool { _, ok := f[name]; return ok }
 func (f Fields) Map(name string) map[string]any { return cast.ToStringMap(f[name]) }
 
 // Slice 取数组（nil→空切片）。
-func (f Fields) Slice(name string) []any { return cast.ToSlice(f[name]) }
+// Slice 取多值字段。两种形态都认：读投影给的是 []int64，JSON 解码给的是 []any。
+func (f Fields) Slice(name string) []any {
+	switch v := f[name].(type) {
+	case nil:
+		return nil
+	case []int64:
+		out := make([]any, len(v))
+		for i := range v {
+			out[i] = v[i]
+		}
+		return out
+	default:
+		return cast.ToSlice(v)
+	}
+}
 
 // Scan 从 DB JSON 还原。
 func (f *Fields) Scan(v any) error {

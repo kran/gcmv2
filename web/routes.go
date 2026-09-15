@@ -3,13 +3,12 @@ package web
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/kran/gcmv2/core"
-	gquery "github.com/kran/gcmv2/query"
 	"github.com/kran/gcmv2/types"
 )
 
@@ -18,14 +17,9 @@ import (
 // nodeHandler /node/{id|address}: 纯数字按 id，否则按 addressable capability 查询。
 func (s *Site) nodeHandler(ctx *CmsCtx) {
 	raw := ctx.PathValue("id")
-	var n *core.Node
-	var err error
-	if id, e := strconv.ParseInt(raw, 10, 64); e == nil {
-		n, err = s.engine.GetNodeByID(ctx.R.Context(), id)
-	} else {
-		n, err = s.engine.GetNodeByAddress(ctx.R.Context(), raw)
-	}
-	if err != nil {
+	// id 或地址由引擎判断（纯数字先当 id, 查不到再当地址）
+	n, err := s.engine.GetNode(ctx.R.Context(), raw)
+	if err != nil && !errors.Is(err, core.ErrNotFound) {
 		slog.Error("node lookup failed", "path", raw, "err", err)
 		ctx.String(http.StatusInternalServerError, "500 internal server error")
 		return
@@ -134,15 +128,21 @@ func (s *Site) apiNodes(ctx *CmsCtx) {
 		ctx.Fail(err)
 		return
 	}
-	q := core.ListQuery{
-		Type: typ, Scope: scope, Sort: sort,
-		Page: gquery.Page{Number: page, Size: size},
-	}
-	list, total, err := s.engine.QueryPage(ctx.R.Context(), q)
+	q := core.NodeQuery{Type: typ, Scope: scope, Sort: sort}
+	total, err := s.engine.CountNodes(ctx.R.Context(), q, 0)
 	if err != nil {
 		// filter 编译错误 → 400（客户端参数）
 		ctx.String(http.StatusBadRequest, "api: "+err.Error())
 		return
+	}
+	var list []core.Node
+	if total > 0 {
+		ptrs, err := s.engine.GetNodes(ctx.R.Context(), q, size, (page-1)*size)
+		if err != nil {
+			ctx.String(http.StatusBadRequest, "api: "+err.Error())
+			return
+		}
+		list = nodeValues(ptrs)
 	}
 	if err := MaskNodes(ctx, ReadList, list); err != nil {
 		ctx.Fail(err)

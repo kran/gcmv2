@@ -23,7 +23,7 @@ func (s *Service) OutEdges(ctx context.Context, typeName string, from int64, fie
 	if err != nil {
 		return nil, 0, err
 	}
-	node, err := s.GetNodeByID(ctx, from)
+	node, err := s.nodeRow(ctx, from)
 	if err != nil {
 		return nil, 0, err
 	}

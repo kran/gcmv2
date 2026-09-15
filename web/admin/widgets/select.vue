@@ -15,8 +15,6 @@ export default {
         mode: { type: String, default: 'edit' },      // edit | cell
         field: { type: Object, default: () => ({}) },
         defs: { type: Object, default: () => ({}) },  // 类型定义表（ref 显示名用）
-        preset: { type: Array, default: () => [] },   // 引用已选值（编辑回显）
-        expand: { default: null },                    // 列表接口批量展开的引用目标
     },
     emits: ['update:modelValue'],
     methods: {

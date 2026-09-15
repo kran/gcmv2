@@ -42,7 +42,6 @@ type Capabilities struct {
 	Publication    *PublicationCapability `yaml:"publication,omitempty" json:"publication,omitempty"`
 	Authentication bool                   `yaml:"authentication,omitempty" json:"authentication,omitempty"`
 	Tree           *TreeCapability        `yaml:"tree,omitempty" json:"tree,omitempty"`
-	Relation       *RelationCapability    `yaml:"relation,omitempty" json:"relation,omitempty"`
 }
 
 type SearchableCapability struct {
@@ -64,22 +63,6 @@ type TreeCapability struct {
 	Parent string `yaml:"parent" json:"parent"`
 	Order  string `yaml:"order,omitempty" json:"order,omitempty"`
 }
-
-// RelationCapability marks a normal Node type as an attributed relation.
-// From and To name its required endpoint ref fields.
-type RelationCapability struct {
-	From string `yaml:"from" json:"from"`
-	To   string `yaml:"to" json:"to"`
-}
-
-// OnDelete controls permanent deletion of a referenced target.
-type OnDelete string
-
-const (
-	OnDeleteRestrict OnDelete = "restrict"
-	OnDeleteSetNull  OnDelete = "set_null"
-	OnDeleteCascade  OnDelete = "cascade"
-)
 
 // AdminView 仅影响后台展示，不参与数据校验和公开策略。
 type AdminView struct {
@@ -111,7 +94,6 @@ type FieldDef struct {
 	Symmetric   bool       `yaml:"symmetric" json:"symmetric"`     // 对称: 存一次查双向
 	Transitive  bool       `yaml:"transitive" json:"transitive"`   // 传递: 可达性遍历
 	Equivalence bool       `yaml:"equivalence" json:"equivalence"` // 等价类展开
-	OnDelete    OnDelete   `yaml:"on_delete,omitempty" json:"on_delete"`
 }
 
 // Types 容器: 每站点一个实例, 持有本容器注册的 kind + 类型定义。
@@ -341,12 +323,6 @@ func (t *Types) normalizeRelationDefaults(defs map[string]TypeDef) {
 			kind, ok := t.kinds[field.Kind]
 			if !ok || (kind.Class() != ClassRef && kind.Class() != ClassRefList) {
 				continue
-			}
-			if field.OnDelete == "" {
-				field.OnDelete = OnDeleteSetNull
-				if field.Required {
-					field.OnDelete = OnDeleteRestrict
-				}
 			}
 		}
 		defs[typeName] = td

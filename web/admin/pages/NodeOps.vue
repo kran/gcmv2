@@ -77,7 +77,7 @@ export default {
         },
         doDelete() {
             var r = this.node
-            // 这里是永久删除（engine.DeleteNode，按 on_delete 处理，被必填引用指向会拒绝）——
+            // 这里是永久删除（engine.DeleteNode；被任何引用指向都会拒绝）——
             // 和"归档"不是一回事：归档节点连后台列表都查不到，所以措辞必须写明永久，别让人当软删点。
             ElMessageBox.confirm('永久删除 #' + r.id + ' ？不可撤销，且被引用时可能被拒绝。', '确认',
                 { type: 'warning', confirmButtonText: '永久删除' })
@@ -94,8 +94,9 @@ export default {
             this.expandDialog.visible = true
             this.expandDialog.loading = true
             this.expandDialog.node = null
-            window.$api.get('/admin/expand', { node: r.id }).then((res) => {
-                this.expandDialog.node = res.node || null
+            // 详情接口自带 auto expand（与列表/编辑器同形）
+            window.$api.get('/admin/nodes/' + r.id).then((res) => {
+                this.expandDialog.node = res || null
                 this.expandDialog.fields = this.expandDialog.node ? Object.keys(this.expandDialog.node.expand || {}) : []
             }).catch(() => { this.expandDialog.node = null })
                 .finally(() => { this.expandDialog.loading = false })

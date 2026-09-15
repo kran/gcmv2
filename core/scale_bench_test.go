@@ -321,7 +321,7 @@ func (f *scaleFixture) reportWrites(t *testing.T, ctx context.Context) {
 	samples := f.sampleIDs(min(200, len(f.articleIDs)))
 	var update, publish []time.Duration
 	for i, id := range samples {
-		node, err := f.service.GetNodeByID(ctx, id)
+		node, err := f.service.nodeRow(ctx, id)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -362,31 +362,28 @@ func (f *scaleFixture) reportReads(t *testing.T, ctx context.Context) {
 	slow := max(3, iterations/4)
 
 	measure(t, "列表页(已发布+发表时间序,25条)", iterations, func() {
-		_, _, err := f.service.QueryPage(ctx, ListQuery{
+		_, _, err := countAndRead(t, f.service, NodeQuery{
 			Type: "article", Scope: published, Sort: listSort,
-			Page: gquery.Page{Number: 1, Size: 25},
-		})
+		}, 25, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
 	})
 
 	measure(t, "列表页(不带 total, 只取 25 条)", iterations, func() {
-		_, err := f.service.Query(ctx, ListQuery{
+		_, err := f.service.GetNodes(ctx, NodeQuery{
 			Type: "article", Scope: published, Sort: listSort,
-			Page: gquery.Page{Number: 1, Size: 25},
-		})
+		}, 25, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
 	})
 
 	measure(t, "列表页(无索引字段排序: views)", slow, func() {
-		_, _, err := f.service.QueryPage(ctx, ListQuery{
+		_, _, err := countAndRead(t, f.service, NodeQuery{
 			Type: "article", Scope: published,
 			Sort: []gquery.SortField{gquery.Desc(gquery.Field("views"))},
-			Page: gquery.Page{Number: 1, Size: 25},
-		})
+		}, 25, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -397,31 +394,29 @@ func (f *scaleFixture) reportReads(t *testing.T, ctx context.Context) {
 		ids[i] = id
 	}
 	measure(t, "子树过滤(只取页, CountLimit 10)", slow, func() {
-		_, _, err := f.service.QueryPage(ctx, ListQuery{
+		_, _, err := countAndReadLimit(t, f.service, NodeQuery{
 			Type: "article", Scope: published, Where: gquery.OneOf(gquery.Ref("categories"), ids...),
-			Sort: listSort, Page: gquery.Page{Number: 1, Size: 25}, CountLimit: 10,
-		})
+			Sort: listSort,
+		}, 25, 0, 10)
 		if err != nil {
 			t.Fatal(err)
 		}
 	})
 
 	measure(t, fmt.Sprintf("分类子树过滤(%d 个分类)+排序", len(f.subtree)), slow, func() {
-		_, _, err := f.service.QueryPage(ctx, ListQuery{
+		_, _, err := countAndRead(t, f.service, NodeQuery{
 			Type: "article", Scope: published,
 			Where: gquery.OneOf(gquery.Ref("categories"), ids...), Sort: listSort,
-			Page: gquery.Page{Number: 1, Size: 25},
-		})
+		}, 25, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
 	})
 
 	measure(t, "深翻页(第 100 页)", iterations, func() {
-		_, _, err := f.service.QueryPage(ctx, ListQuery{
+		_, _, err := countAndRead(t, f.service, NodeQuery{
 			Type: "article", Scope: published, Sort: listSort,
-			Page: gquery.Page{Number: 100, Size: 25},
-		})
+		}, 25, 2475)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -460,14 +455,14 @@ func (f *scaleFixture) reportReads(t *testing.T, ctx context.Context) {
 
 	measure(t, "地址查询(slug, 唯一索引)", slow, func() {
 		idx := rand.Intn(len(f.articleIDs))
-		_, err := f.service.GetNodeByAddress(ctx, fmt.Sprintf("article-%d", idx))
+		_, err := f.service.GetNode(ctx, fmt.Sprintf("article-%d", idx))
 		if err != nil {
 			t.Fatal(err)
 		}
 	})
 
 	measure(t, "主键详情", iterations, func() {
-		_, err := f.service.GetNodeByID(ctx, f.articleIDs[rand.Intn(len(f.articleIDs))])
+		_, err := f.service.nodeRow(ctx, f.articleIDs[rand.Intn(len(f.articleIDs))])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -633,23 +628,22 @@ func (f *scaleFixture) reportPlans(t *testing.T, ctx context.Context) {
 		run  func()
 	}{
 		{"列表页(已发布+发表时间序)", func() {
-			_, _, _ = f.service.QueryPage(ctx, ListQuery{
+			_, _, _ = countAndRead(t, f.service, NodeQuery{
 				Type: "article", Scope: published, Sort: listSort,
-				Page: gquery.Page{Number: 1, Size: 25},
-			})
+			}, 25, 0)
 		}},
 		{"地址查询(slug)", func() {
-			_, _ = f.service.GetNodeByAddress(ctx, "article-1")
+			_, _ = f.service.GetNode(ctx, "article-1")
 		}},
 		{"分类子树过滤+排序", func() {
 			ids := make([]any, 0, len(f.subtree))
 			for _, id := range f.subtree {
 				ids = append(ids, id)
 			}
-			_, _, _ = f.service.QueryPage(ctx, ListQuery{
+			_, _, _ = countAndRead(t, f.service, NodeQuery{
 				Type: "article", Scope: published, Where: gquery.OneOf(gquery.Ref("categories"), ids...),
-				Sort: listSort, Page: gquery.Page{Number: 1, Size: 25},
-			})
+				Sort: listSort,
+			}, 25, 0)
 		}},
 		{"全文检索", func() {
 			_, _, _ = f.service.Search(ctx, SearchQuery{
@@ -726,7 +720,7 @@ func (f *scaleFixture) reportConcurrent(t *testing.T, ctx context.Context) {
 			default:
 			}
 			id := f.articleIDs[i%len(f.articleIDs)]
-			node, err := f.service.GetNodeByID(ctx, id)
+			node, err := f.service.nodeRow(ctx, id)
 			if err != nil {
 				writeErr = err
 				return
@@ -748,10 +742,9 @@ func (f *scaleFixture) reportConcurrent(t *testing.T, ctx context.Context) {
 				default:
 				}
 				start := time.Now()
-				_, _, err := f.service.QueryPage(ctx, ListQuery{
+				_, _, err := countAndRead(t, f.service, NodeQuery{
 					Type: "article", Scope: published, Sort: listSort,
-					Page: gquery.Page{Number: 1, Size: 25},
-				})
+				}, 25, 0)
 				if err != nil {
 					readErr = err
 					return

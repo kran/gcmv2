@@ -74,8 +74,20 @@ window.Widgets = (function () {
         return /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i.test(String(path || ''))
     }
 
+    // refOption 引用目标的选项标签 —— 引用选择器/回显/列表单元格都走这里:
+    // $api.refLabel 决定显示名, 后面永远缀 #id（同名节点靠它区分; 少了一个都认不出来）。
+    function refOption(node, defs) {
+        if (!node) return null
+        return {
+            id: node.id,
+            type: node.type,
+            label: window.$api.refLabel(node, (defs || {})[node.type] || null) + ' #' + node.id,
+        }
+    }
+
     return {
         resolve: resolve,
+        refOption: refOption,
         truncate: truncate, plain: plain, localTime: localTime, localDate: localDate,
         fileName: fileName, isImage: isImage,
     }

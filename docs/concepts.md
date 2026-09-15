@@ -44,7 +44,7 @@
 | 概念 | 位置 | 职责 |
 |---|---|---|
 | `TypeDef` | `types/types.go` | 一个 NodeType 的完整定义：Fields + Constraints + Capabilities + Admin |
-| `FieldDef` | `types/types.go` | 字段：name/label/kind/to/required/default/immutable/options/item/fields/algebra/on_delete |
+| `FieldDef` | `types/types.go` | 字段：name/label/kind/to/required/default/immutable/options/item/fields/algebra |
 | `Constraints` | `types/types.go` | 类型级数据库约束：`unique` / `indexes`（标量组合，引用不参与） |
 | `Capabilities` | `types/types.go` | 运行时能力开关（见 2.3） |
 | `AdminView` | `types/types.go` | 后台展示元数据：list/tree、icon、columns |
@@ -52,7 +52,6 @@
 | `Kind` | `types/kind.go` | 字段值类型契约：`Name/Validate/IsEmpty/Class/QueryOps/ValidateField` |
 | `Class` | `types/kind.go` | 值存哪里：`ClassField`（fields JSON）/ `ClassRef`（1 条 Edge）/ `ClassRefList`（N 条 Edge） |
 | `QueryOps` | `types/kind.go` | Kind 声明的查询能力：Equal/Ordered/Text/Sortable |
-| `OnDelete` | `types/capability.go` | 永久删除目标时的策略：restrict / set_null / cascade |
 | `Seg`（未导出） | `types/` | — |
 
 **13 个内置 Kind**（kind 名即前端控件名）：
@@ -88,7 +87,6 @@ upload-image    upload-file     gallery
 | `symmetric` | 字段级布尔 | 无向：存一条 Edge，读写双向解释 |
 | `transitive` | 字段级布尔 | 有向可达：Traverse / Subtree，写入检环 |
 | `equivalence` | 字段级布尔 | 无向等价类：EquivalenceClass |
-| `on_delete` | 字段级枚举 | 永久删除目标时的 incoming 处理 |
 | 树 | `capabilities.tree` | parent（self ref）+ order（可排序字段），写入检环 |
 | 关系 Node | `capabilities.relation` | from/to 两个 required 单 ref，声明"这个 Node 是一段关系" |
 
@@ -101,7 +99,6 @@ upload-image    upload-file     gallery
 | `publication` | field + draft/published 取值 | `IsPublished`、**公网读默认策略**、published_only 过滤 |
 | `authentication` | 布尔 | 该 Type 可成为认证主体（Realm 指向它） |
 | `tree` | parent + order | LoadTree / Subtree / Ancestors |
-| `relation` | from + to | cascade 白名单、关系端点语义（后台 UI 待实现） |
 
 ### 2.4 Schema 校验规则（fail-loud 点）
 
@@ -109,7 +106,7 @@ upload-image    upload-file     gallery
 - Kind 存在、嵌套 Kind 存在、嵌套字段约束
 - 复合结构内禁止 ref/refs；array 不能声明 fields；object 不能声明 item；object 子字段不重名
 - ref 必须声明 `to` 且目标 Type 存在；代数互斥且必须 self-ref
-- `set_null` 不能用于 required；`cascade` 只能用于 relation endpoint
+- 删除语义只有一种：**被引用就不许删**（restrict）；`on_delete` / `relation` capability 已移除（v0.9.4）
 - publication 字段必须支持相等且 draft ≠ published；tree.parent 必须是 self 单 ref；tree.order 必须可排序
 - addressable 字段必须是 slug kind；unique 必须是 global
 - 约束组只能含标量字段、不能重复
@@ -227,7 +224,6 @@ web（8 个）:
 | `Traverse/Subtree/Ancestors` | 图原语（要求 transitive 或 tree.parent） |
 | `EquivalenceClass` | 等价类（要求 equivalence） |
 | `OutEdges/InEdges` | 边分页（无向关系双向语义） |
-| `RelationReport` / `RelationIssue` | 只读完整性报告（11 种问题类型） |
 | `DeleteRestrictedError` / `IncomingReference` | 永久删除被引用阻止时的结构化信息 |
 | `MergePreview` / `MergeFieldConflict` / `MergeCredential` | 只读合并预览（执行未开放） |
 | `Tree` / `TreeNode` | 内存树：Roots/Children/Parent/Ancestors/Subtree |
@@ -319,7 +315,7 @@ highlight   代码高亮
 
 | 层 | 概念数 | 明细 |
 |---|---|---|
-| Schema 定义 | 10 | TypeDef/FieldDef/Constraints/Capabilities/AdminView/Types/Kind/Class/QueryOps/OnDelete |
+| Schema 定义 | 9 | TypeDef/FieldDef/Constraints/Capabilities/AdminView/Types/Kind/Class/QueryOps |
 | Kind | 13 + 2 结构语法 | 见 2.1 |
 | Capability | 6 | searchable/addressable/publication/authentication/tree/relation |
 | 关系代数 | 3 + 2 | symmetric/transitive/equivalence + tree + relation |
@@ -343,7 +339,6 @@ highlight   代码高亮
 | authentication + AuthRealm | association 的 `member` 在用 |
 | `relation` capability | **无真实使用者**（只有测试） |
 | `equivalence` | **无真实使用者**（只有测试；association 用不上） |
-| `on_delete: cascade` | **无真实使用者**（association 全是默认） |
 | 读授权事件 | association 的读动作 `my_content` + 公开读默认（publication）在用 |
 | 写授权事件 | association 为 article/event/supply 各注册 create/update/delete 规则（身份 + 字段 + 加工） |
 | 按角色的字段集 | web 测试覆盖（会员只写 body，编辑还能写发布状态）；association 无编辑流程 |
@@ -351,7 +346,6 @@ highlight   代码高亮
 | Lisp 前端 | Admin 列表 filter、模板 filterList |
 | QuerySpec | Admin `/admin/query/{type}` |
 | `MergePreview` | 只有测试（执行未开放） |
-| `RelationReport` | Admin `/integrity/relations` |
 | `AdminPanel` | 插件扩展点，association 未用 |
 | `Setting` | association 用 `site.name` / `site.logo`；Admin 设置页 |
 | `backup` / `oss` / `highlight` / `sitemap` | 挂载但功能边界窄 |
@@ -377,7 +371,7 @@ highlight   代码高亮
 三层"当前只有测试使用者"的概念：
 
 ```text
-关系语义层:  relation · equivalence · symmetric · on_delete:cascade
+关系语义层:  equivalence · symmetric（`relation` / `on_delete` 已移除）
 授权层:      ActorAPIKey（读/写授权事件已成为主路径，不再是“只有测试用”的概念）
 运维/合并层: MergePreview
 ```

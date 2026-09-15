@@ -10,14 +10,17 @@ import (
 
 func queryAll(t *testing.T, service *Service, typeName string, where gquery.Expr) []Node {
 	t.Helper()
-	list, _, err := service.QueryPage(t.Context(), ListQuery{
+	nodes, _, err := countAndRead(t, service, NodeQuery{
 		Type: typeName, Where: where, Scope: BypassPolicy(),
-		Page: gquery.Page{Number: 1, Size: 100},
-	})
+	}, 100, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return list
+	out := make([]Node, 0, len(nodes))
+	for _, n := range nodes {
+		out = append(out, *n)
+	}
+	return out
 }
 
 func TestQueryBuilderScalarAndLogic(t *testing.T) {
@@ -126,10 +129,9 @@ func TestQuerySchemaValidation(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := s.Query(t.Context(), ListQuery{
+			_, err := s.GetNodes(t.Context(), NodeQuery{
 				Type: "article", Where: test.where, Scope: BypassPolicy(),
-				Page: gquery.Page{Size: 10},
-			})
+			}, 10, 0)
 			if !errors.Is(err, test.want) {
 				t.Fatalf("error = %v, want %v", err, test.want)
 			}
@@ -139,7 +141,7 @@ func TestQuerySchemaValidation(t *testing.T) {
 
 func TestQueryRequiresType(t *testing.T) {
 	s := newTestService(t)
-	_, err := s.Query(t.Context(), ListQuery{Page: gquery.Page{Size: 10}})
+	_, err := s.GetNodes(t.Context(), NodeQuery{}, 10, 0)
 	if !errors.Is(err, ErrInvalidQuery) {
 		t.Fatalf("error = %v", err)
 	}
@@ -149,9 +151,9 @@ func TestQueryHonorsCanceledContext(t *testing.T) {
 	s := newTestService(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err := s.Query(ctx, ListQuery{
-		Type: "article", Scope: BypassPolicy(), Page: gquery.Page{Size: 10},
-	})
+	_, err := s.GetNodes(ctx, NodeQuery{
+		Type: "article", Scope: BypassPolicy(),
+	}, 10, 0)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want context.Canceled", err)
 	}
@@ -170,7 +172,7 @@ func TestWriteAndGraphHonorCanceledContext(t *testing.T) {
 		t.Fatalf("CreateNode error = %v, want context.Canceled", err)
 	}
 	display := "patched"
-	current, _ := s.GetNodeByID(t.Context(), child)
+	current, _ := s.nodeRow(t.Context(), child)
 	if err := s.PatchNode(ctx, child, &NodePatch{Revision: &current.Revision, Display: &display}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("PatchNode error = %v, want context.Canceled", err)
 	}
@@ -183,7 +185,7 @@ func TestWriteAndGraphHonorCanceledContext(t *testing.T) {
 	if _, err := s.Traverse(ctx, "category", child, "parent", 5); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Traverse error = %v, want context.Canceled", err)
 	}
-	if _, err := s.GetNodeByID(ctx, child); !errors.Is(err, context.Canceled) {
+	if _, err := s.nodeRow(ctx, child); !errors.Is(err, context.Canceled) {
 		t.Fatalf("GetNodeByID error = %v, want context.Canceled", err)
 	}
 	if err := s.RebuildSearch(ctx); !errors.Is(err, context.Canceled) {

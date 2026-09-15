@@ -2,6 +2,8 @@ package core
 
 import (
 	"errors"
+	"fmt"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -122,7 +124,8 @@ types:
 		t.Fatalf("a1 logical in: %d", total3)
 	}
 	for _, pair := range [][2]int64{{a1, a2}, {a2, a1}} {
-		has, err := s.HasRef(t.Context(), pair[0], "related", pair[1])
+		ids, err := s.RefIDs(t.Context(), pair[0], "related")
+		has := slices.Contains(ids, pair[1])
 		if err != nil || !has {
 			t.Fatalf("HasRef(%d,%d) = %v, %v", pair[0], pair[1], has, err)
 		}
@@ -131,10 +134,16 @@ types:
 	if len(list) != 1 || list[0].ID != a2 {
 		t.Fatalf("symmetric query = %#v", list)
 	}
-	expanded, err := s.Expand(t.Context(), a2, gquery.Expand(gquery.Ref("related")))
+	// 展开是读完之后的独立一步：先读节点, 再补引用目标
+	roots, err := s.GetNodesByIDs(t.Context(), []int64{a2})
 	if err != nil {
 		t.Fatal(err)
 	}
+	expandedList, err := s.Expand(t.Context(), roots, gquery.Expand(gquery.Ref("related")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expanded := expandedList[0]
 	refs, ok := expanded.Expand["related"].([]*Node)
 	if !ok || len(refs) != 1 || refs[0].ID != a1 {
 		t.Fatalf("symmetric expand = %#v", expanded.Expand["related"])
@@ -174,7 +183,7 @@ func TestPreviewMergeReportsConflictsWithoutMutation(t *testing.T) {
 	if !preview.RequiresResolution || len(preview.FieldConflicts) == 0 || len(preview.IncomingEdges) != 1 {
 		t.Fatalf("preview = %#v", preview)
 	}
-	if node, _ := s.GetNodeByID(t.Context(), personA); node == nil {
+	if node, _ := s.nodeRow(t.Context(), personA); node == nil {
 		t.Fatal("preview must not mutate source")
 	}
 }
@@ -292,21 +301,80 @@ func TestReferenceReadAPI(t *testing.T) {
 	if err != nil || len(ids) != 2 || ids[0] != personA || ids[1] != personB {
 		t.Fatalf("RefIDs = %v, %v", ids, err)
 	}
-	has, err := s.HasRef(t.Context(), article, "authors", personB)
-	if err != nil || !has {
-		t.Fatalf("HasRef = %v, %v", has, err)
+	authorIDs, err := s.RefIDs(t.Context(), article, "authors")
+	if err != nil || !slices.Contains(authorIDs, personB) {
+		t.Fatalf("RefIDs(authors) = %v, %v", authorIDs, err)
 	}
-	full, err := s.FullNode(t.Context(), article)
-	if err != nil || len(full.Values.Slice("authors")) != 2 || full.Node.Fields.Has("authors") {
-		t.Fatalf("FullNode = %#v, %v", full, err)
+	// 值：引用 id 补全进 Fields；存储：引用仍然只在 edges，不进 nodes.fields 的 JSON。
+	raw, err := s.nodeRow(t.Context(), article)
+	if err != nil {
+		t.Fatal(err)
+	}
+	full, err := s.GetNode(t.Context(), article)
+	if err != nil || len(full.Fields.Slice("authors")) != 2 || raw.Fields.Has("authors") {
+		t.Fatalf("FullNode = %#v（原始行 = %#v）, %v", full, raw, err)
 	}
 	root, _ := s.CreateNode(t.Context(), &Node{Type: "category", Display: "root", Fields: Fields{"name": "root"}})
 	child, _ := s.CreateNode(t.Context(), &Node{Type: "category", Display: "child", Fields: Fields{"name": "child", "parent": root}})
-	parent, found, err := s.RefID(t.Context(), child, "parent")
-	if err != nil || !found || parent != root {
-		t.Fatalf("RefID = %d, %v, %v", parent, found, err)
+	// 单引用的值走读投影的 Fields（RefIDs 只管多引用字段）
+	childFull, err := s.GetNode(t.Context(), child)
+	if err != nil || childFull.Fields["parent"] != root {
+		t.Fatalf("FullNode(parent) = %#v, %v", childFull, err)
 	}
-	if _, _, err := s.RefID(t.Context(), article, "authors"); err == nil {
-		t.Fatal("RefID must reject refs")
+	// RefIDs 只管多引用字段：对别的字段 fail-loud（不猜、不返回空）
+	if _, err := s.RefIDs(t.Context(), article, "body"); err == nil {
+		t.Fatal("RefIDs 对非 refs 字段必须报错")
+	}
+}
+
+// TestFullNodeRoundTrip 读投影出来的值必须能原样写回：引用读成 int64 / []int64，
+// 标量原样；空的多引用字段也要能回写。写回后引用数/顺序不变（是替换不是叠加）。
+func TestFullNodeRoundTrip(t *testing.T) {
+	s := newTestService(t)
+	mk := func(n *Node) int64 {
+		id, err := s.CreateNode(t.Context(), n)
+		if err != nil {
+			t.Fatalf("创建 %s 失败: %v", n.Display, err)
+		}
+		return id
+	}
+	cat := mk(&Node{Type: "category", Display: "c", Fields: Fields{"publication_state": "published"}})
+	pa := mk(&Node{Type: "person", Display: "a", Fields: Fields{"name": "a"}})
+	pb := mk(&Node{Type: "person", Display: "b", Fields: Fields{"name": "b"}})
+	full := mk(&Node{Type: "article", Display: "full", Fields: Fields{
+		"body": "body", "categories": []int64{cat}, "authors": []int64{pa, pb},
+	}})
+	partial := mk(&Node{Type: "article", Display: "partial", Fields: Fields{"body": "b"}})
+
+	for _, id := range []int64{full, partial} {
+		before, err := s.GetNode(t.Context(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rev := before.Revision
+		if err := s.PatchNode(t.Context(), id, &NodePatch{Revision: &rev, Fields: before.Fields}); err != nil {
+			t.Fatalf("原样写回失败 %#v: %v", before.Fields, err)
+		}
+		after, err := s.GetNode(t.Context(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"body"} {
+			if fmt.Sprint(before.Fields[name]) != fmt.Sprint(after.Fields[name]) {
+				t.Fatalf("%s 写回后变了: %v → %v", name, before.Fields[name], after.Fields[name])
+			}
+		}
+		// 引用字段（单引用是多引用的一种形态，这里两个都是 refs 字段）
+		for _, name := range []string{"authors", "categories"} {
+			a1, a2 := before.Fields.Slice(name), after.Fields.Slice(name)
+			if len(a1) != len(a2) {
+				t.Fatalf("%s 写回后数量变了: %v → %v", name, a1, a2)
+			}
+			for i := range a1 {
+				if a1[i] != a2[i] {
+					t.Fatalf("%s 写回后变了: %v → %v", name, a1, a2)
+				}
+			}
+		}
 	}
 }

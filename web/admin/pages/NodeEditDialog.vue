@@ -15,7 +15,7 @@
                 <el-input v-model="form.display" placeholder="公共显示文本（列表/搜索/导航显示）" />
             </div>
             <field-renderer v-if="def" :fields="def.fields" v-model="form.fields"
-                            :ref-preset="form.refPreset || {}" :defs="defs"
+                            :node="{ fields: form.fields, expand: refExpand }" :defs="defs"
                             :editing="isEdit" />
         </el-form>
         <template #footer>
@@ -45,7 +45,8 @@ export default {
     emits: ['update:visible', 'changed'],
     data() {
         return {
-            form: { display: '', revision: 0, fields: {}, refPreset: {} },
+        refExpand: {},
+            form: { display: '', revision: 0, fields: {} },
             saving: false, def: null,
             initial: '',   // 加载完成时的表单快照（判断"有没有未保存修改"）
         }
@@ -72,7 +73,7 @@ export default {
         },
     },
     methods: {
-        // 快照只含会被提交的东西（display + 声明字段）: refPreset 是回显用的、异步到，
+        // 快照只含会被提交的东西（display + 声明字段）: refExpand 是回显用的、异步到，
         // 不参与比较，否则"刚打开就显示未保存"。
         formSnapshot() {
             return JSON.stringify({ display: this.form.display || '', fields: this.form.fields || {} })
@@ -104,12 +105,18 @@ export default {
             ;((this.def && this.def.fields) || []).forEach(function (f) {
                 if (f.default !== undefined && f.default !== null) defaults[f.name] = structuredClone(f.default)
             })
-            this.form = { display: '', revision: 0, fields: defaults, refPreset: {} }
+            this.form = { display: '', revision: 0, fields: defaults }
             if (this.presetField && this.presetValue) {
                 this.form.fields[this.presetField] = this.presetValue
                 // ref 字段显示名（否则只显示裸 id）
                 if (this.presetLabel) {
-                    this.form.refPreset[this.presetField] = [{ id: this.presetValue, label: this.presetLabel }]
+                    // 与 expand 项同形（id/type/display）—— 选择器与单元格共用同一套标签
+                    var fd = ((this.def || {}).fields || []).find((f) => f.name === this.presetField)
+                    this.refExpand[this.presetField] = [{
+                        id: this.presetValue,
+                        type: (fd && fd.to) || '',
+                        display: this.presetLabel,
+                    }]
                 }
             }
             this.initial = this.formSnapshot()
@@ -123,21 +130,12 @@ export default {
                     display: full.display || '',
                     revision: full.revision,
                     fields: full.fields || {},
-                    refPreset: {},
                 }
-                // 引用回显: expand * → refPreset（已选值显示标题, 非裸 id）
+                // 引用标签来自详情响应自带的 expand（与列表接口同形），不再单独请求。
+                // 用刚拉回来的详情（full）—— 列表行 r 常常没有 expand，那会让引用字段
+                // 初次渲染只剩裸 id（点开下拉才补上）。
+                this.refExpand = full.expand || {}
                 this.initial = this.formSnapshot()
-                window.$api.get('/admin/expand', { node: r.id, expr: '*' }).then((ex) => {
-                    var expand = (ex.node && ex.node.expand) || {}
-                    var preset = {}
-                    Object.keys(expand).forEach((f) => {
-                        var v = expand[f]
-                        var items = Array.isArray(v) ? v : (v ? [v] : [])
-                        preset[f] = items.map((n) => ({ id: n.id,
-                            label: window.$api.refLabel(n, this.defs[n.type] || null) + ' #' + n.id }))
-                    })
-                    this.form.refPreset = preset
-                }).catch(() => {})
             }).catch(() => {})
         },
         save() {

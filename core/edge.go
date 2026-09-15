@@ -150,8 +150,18 @@ func refIDs(ts *types.Types, f types.FieldDef, v any) ([]int64, error) {
 		}
 		return []int64{id}, nil
 	case types.ClassRefList:
-		arr, ok := v.([]any)
-		if !ok {
+		// 读投影给的是 []int64（读出来的值要能原样写回）；HTTP JSON 解码给的是 []any。
+		// 两者都认，其它类型 fail-loud。
+		var arr []any
+		switch list := v.(type) {
+		case []int64:
+			arr = make([]any, len(list))
+			for i := range list {
+				arr[i] = list[i]
+			}
+		case []any:
+			arr = list
+		default:
 			return nil, fmt.Errorf("core: refs value: expects array, got %T", v)
 		}
 		ids := make([]int64, 0, len(arr))
@@ -197,7 +207,7 @@ func (s *Service) fieldOnType(typeName, field string) (types.FieldDef, bool, err
 
 // AddEdge manually inserts one schema-validated reference.
 func (s *Service) AddEdge(ctx context.Context, from, to int64, fieldName string, sort int) (int64, error) {
-	fromNode, err := s.GetNodeByID(ctx, from)
+	fromNode, err := s.nodeRow(ctx, from)
 	if err != nil {
 		return 0, err
 	}

@@ -9,19 +9,15 @@ import (
 	gquery "github.com/kran/gcmv2/query"
 )
 
-// ListQuery is the single structured query contract. Type and an explicit
-// server-created Scope are required.
-type ListQuery struct {
-	Type   string
-	Where  gquery.Expr
-	Scope  QueryScope
-	Sort   []gquery.SortField
-	Expand []gquery.ExpandPath
-	Page   gquery.Page
-	// CountLimit 限制 total 的统计代价（大表列表页）。
-	// 0 = 默认 DefaultCountLimit; CountExact = 精确计数; >0 = 自定义上限。
-	// 命中数超过上限时返回上限值 —— 即"至少这么多", 调用方按上限渲染（如"10000+"）。
-	CountLimit int
+// NodeQuery 描述"选哪些节点"：类型 + 服务端范围 + 条件 + 排序。
+//
+// 不含分页、不含展开 —— 分页在 GetNodes 的 limit/offset 上，展开是读完之后的独立一步
+// Expand。三件事各只有一处：选什么 / 取哪一段 / 补什么（计数因此不会被分页污染）。
+type NodeQuery struct {
+	Type  string
+	Where gquery.Expr
+	Scope QueryScope
+	Sort  []gquery.SortField
 }
 
 const (
@@ -29,35 +25,46 @@ const (
 	// 10 万行量级约 17ms、百万行约 170ms, 而列表页本身只要 ~0.7ms。
 	// 上限同时决定"能翻到第几页"（10000/25 = 400 页）, 低于它时 total 精确。
 	DefaultCountLimit = 10_000
-	// CountExact 传 CountLimit: CountExact 时精确统计（小表/后台导出用）。
+	// CountExact 传 CountNodes 的 countLimit: 精确统计（小表/后台导出用）。
 	CountExact = -1
+	// MaxPageSize 单次取行的上限（分页读）。
+	MaxPageSize = 10_000
 )
 
-// QueryPage executes a paginated schema-aware query.
-// total 是截断计数（见 ListQuery.CountLimit）: 超过上限即返回上限, 不再扫完整个匹配集。
-func (s *Service) QueryPage(ctx context.Context, query ListQuery) ([]Node, int64, error) {
-	query.Page = normalizePage(query.Page)
-	total, err := s.countQuery(ctx, query)
+// GetNodes 读节点列表。Fields 一律完整（引用 id 已在其中）；limit 0 = 不限。
+func (s *Service) GetNodes(ctx context.Context, q NodeQuery, limit, offset int) ([]*Node, error) {
+	if limit < 0 || offset < 0 {
+		return nil, fmt.Errorf("%w: limit/offset must not be negative", ErrInvalidQuery)
+	}
+	if limit > MaxPageSize {
+		return nil, fmt.Errorf("%w: page size exceeds %d", ErrQueryTooComplex, MaxPageSize)
+	}
+	db, err := s.buildQuery(ctx, q)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
-	if total == 0 {
-		return nil, 0, nil
+	if limit > 0 {
+		db = db.Add("LIMIT #{1} OFFSET #{2}", limit, offset)
 	}
-	nodes, err := s.Query(ctx, query)
+	nodes, err := db.FetchList[Node]()
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
-	return nodes, total, nil
+	// 读投影：引用 id 补进 Fields（一次批量, SQL 次数与行数无关）。
+	if err := s.hydrateFields(ctx, nodes); err != nil {
+		return nil, err
+	}
+	return nodePtrs(nodes), nil
 }
 
-// countQuery 截断计数: 只数到上限就停（LIMIT 让扫描提前结束）。
-func (s *Service) countQuery(ctx context.Context, query ListQuery) (int64, error) {
-	limit := query.CountLimit
+// CountNodes 计数（独立读）。countLimit 0 = DefaultCountLimit, CountExact = 精确。
+// 超过上限返回上限值（"至少这么多"）—— 大表列表页不必扫完整个匹配集。
+func (s *Service) CountNodes(ctx context.Context, q NodeQuery, countLimit int) (int64, error) {
+	limit := countLimit
 	if limit == 0 {
 		limit = DefaultCountLimit
 	}
-	where, err := s.buildWhere(ctx, query)
+	where, err := s.buildWhere(ctx, q)
 	if err != nil {
 		return 0, err
 	}
@@ -65,11 +72,11 @@ func (s *Service) countQuery(ctx context.Context, query ListQuery) (int64, error
 	if limit > 0 {
 		total, err = s.db.WithCtx(ctx).Add(`SELECT COUNT(1) FROM (SELECT nodes.id FROM nodes
 			WHERE type = #{1} AND #{2} LIMIT #{3})`,
-			query.Type, where, limit+1).FetchOne[int64]()
+			q.Type, where, limit+1).FetchOne[int64]()
 	} else {
 		total, err = s.db.WithCtx(ctx).Add(`SELECT COUNT(1) FROM nodes
 			WHERE type = #{1} AND #{2}`,
-			query.Type, where).FetchOne[int64]()
+			q.Type, where).FetchOne[int64]()
 	}
 	if err != nil {
 		return 0, err
@@ -83,32 +90,7 @@ func (s *Service) countQuery(ctx context.Context, query ListQuery) (int64, error
 	return *total, nil
 }
 
-// Query executes a schema-aware query without a count query.
-func (s *Service) Query(ctx context.Context, query ListQuery) ([]Node, error) {
-	if query.Page.Size <= 0 {
-		return nil, fmt.Errorf("%w: query size must be positive", ErrInvalidQuery)
-	}
-	db, err := s.buildQuery(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	if query.Page.Size > 0 {
-		if query.Page.Size > 10_000 {
-			return nil, fmt.Errorf("%w: page size exceeds 10000", ErrQueryTooComplex)
-		}
-		page := max(query.Page.Number, 1)
-		db = db.Add("LIMIT #{1} OFFSET #{2}", query.Page.Size, (page-1)*query.Page.Size)
-	}
-	nodes, err := db.FetchList[Node]()
-	if err != nil {
-		return nil, err
-	}
-	if err := s.expandQueryNodes(ctx, nodes, query.Expand); err != nil {
-		return nil, err
-	}
-	return nodes, nil
-}
-
+// normalizePage 分页参数归一（页码从 1 起、每页 1..100；搜索路径仍用）。
 func normalizePage(page gquery.Page) gquery.Page {
 	if page.Number <= 0 {
 		page.Number = 1
@@ -122,7 +104,7 @@ func normalizePage(page gquery.Page) gquery.Page {
 	return page
 }
 
-func (s *Service) buildQuery(ctx context.Context, query ListQuery) (*dba.SQL, error) {
+func (s *Service) buildQuery(ctx context.Context, query NodeQuery) (*dba.SQL, error) {
 	where, err := s.buildWhere(ctx, query)
 	if err != nil {
 		return nil, err
@@ -138,7 +120,7 @@ func (s *Service) buildQuery(ctx context.Context, query ListQuery) (*dba.SQL, er
 }
 
 // buildWhere 服务端范围 AND 用户条件（计数与取行共用同一份过滤）。
-func (s *Service) buildWhere(ctx context.Context, query ListQuery) (dba.Node, error) {
+func (s *Service) buildWhere(ctx context.Context, query NodeQuery) (dba.Node, error) {
 	if query.Type == "" {
 		return dba.Node{}, fmt.Errorf("%w: type required", ErrInvalidQuery)
 	}
@@ -196,28 +178,4 @@ func (s *Service) compileSort(ctx context.Context, typeName string, fields []gqu
 		parts = append(parts, `nodes."id" DESC`)
 	}
 	return strings.Join(parts, ", "), nil
-}
-
-func (s *Service) expandQueryNodes(ctx context.Context, nodes []Node, paths []gquery.ExpandPath) error {
-	if len(paths) == 0 || len(nodes) == 0 {
-		return nil
-	}
-	ids := make([]int64, len(nodes))
-	for i := range nodes {
-		ids[i] = nodes[i].ID
-	}
-	expanded, err := s.ExpandMany(ctx, ids, paths...)
-	if err != nil {
-		return err
-	}
-	byID := make(map[int64]*Node, len(expanded))
-	for _, node := range expanded {
-		byID[node.ID] = node
-	}
-	for i := range nodes {
-		if node := byID[nodes[i].ID]; node != nil {
-			nodes[i].Expand = node.Expand
-		}
-	}
-	return nil
 }

@@ -47,10 +47,10 @@ func TestSQLiteConcurrentReadWrite(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for range readsPerReader {
-				_, _, err := svc.QueryPage(t.Context(), ListQuery{
+				_, _, err := countAndRead(t, svc, NodeQuery{
 					Type: "article", Where: gquery.True(),
-					Scope: BypassPolicy(), Page: gquery.Page{Size: 10},
-				})
+					Scope: BypassPolicy(),
+				}, 10, 0)
 				if err != nil {
 					errs <- fmt.Errorf("reader %d: %w", reader, err)
 					return
@@ -64,10 +64,9 @@ func TestSQLiteConcurrentReadWrite(t *testing.T) {
 		t.Fatalf("concurrent access failed: %v", err)
 	}
 
-	_, total, err := svc.QueryPage(t.Context(), ListQuery{
+	_, total, err := countAndRead(t, svc, NodeQuery{
 		Type: "article", Where: gquery.True(), Scope: BypassPolicy(),
-		Page: gquery.Page{Size: 1},
-	})
+	}, 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

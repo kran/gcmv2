@@ -327,13 +327,13 @@ func TestSiteHandlerMasksWithMaskNodes(t *testing.T) {
 	site, _ := maskTestSite(t)
 	maskTestMember(t, site)
 	ctx := maskCtx(site)
-	items, _, err := site.Engine().QueryPage(t.Context(), core.ListQuery{
+	ptrs, err := site.Engine().GetNodes(t.Context(), core.NodeQuery{
 		Type: "member", Scope: core.BypassPolicy(),
-		Page: gquery.Page{Size: 10},
-	})
+	}, 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	items := nodeValues(ptrs)
 	if err := MaskNodes(ctx, ReadList, items); err != nil {
 		t.Fatal(err)
 	}

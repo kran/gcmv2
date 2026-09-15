@@ -285,17 +285,16 @@ func (b *backend) upload(ctx *CmsCtx) {
 	saveUpload(b.uploadDir, ctx)
 }
 
-// saveUpload 处理 multipart 上传: 大小上限 → 扩展名白名单 → 随机文件名 →
-// 落 uploads。admin 后台上传与前台 API 上传共用。
+// saveUpload 处理 multipart 上传: 扩展名白名单 → 随机文件名 → 落 uploads。
+// 大小上限由部署侧（nginx client_max_body_size）负责。admin 后台上传与前台 API 上传共用。
 func saveUpload(uploadDir string, ctx *CmsCtx) {
 	if uploadDir == "" {
 		ctx.Fail(BadRequest("uploads disabled"))
 		return
 	}
-	maxBytes := int64(8 << 20) // 8MB 硬上限
-	ctx.R.Body = http.MaxBytesReader(ctx.W, ctx.R.Body, maxBytes)
-	if err := ctx.R.ParseMultipartForm(maxBytes); err != nil {
-		ctx.Fail(Errorf(http.StatusRequestEntityTooLarge, CodeUploadInvalid, "file too large (max 8MB)"))
+	// 上传大小不在这里限制（部署侧 nginx 拦）；这里只管扩展名白名单与落盘。
+	if err := ctx.R.ParseMultipartForm(0); err != nil {
+		ctx.Fail(Errorf(http.StatusBadRequest, CodeUploadInvalid, "invalid multipart form"))
 		return
 	}
 	f, fh, err := ctx.R.FormFile("file")
@@ -422,13 +421,11 @@ func (s *Site) mountAdmin() {
 			authed.Get("/search", b.search)
 			authed.Get("/tree", b.tree)
 			authed.Get("/inbound", b.inbound)
-			authed.Get("/expand", b.expand)
 			authed.Post("/password", b.changePassword)
 			authed.Get("/settings", b.listSettings)
 			authed.Post("/settings", b.setSetting)
 			authed.Delete("/settings/{key}", b.deleteSetting)
 			authed.Post("/search/rebuild", b.rebuildSearch)
-			authed.Get("/integrity/relations", b.relationIntegrity)
 			authed.Get("/merge/preview", b.mergePreview)
 			// fire AdminMount（传 authed 组 — 插件挂受保护端点; 组件已建）
 			if err := s.engine.Hooks().Fire(HookAdminMount, authed); err != nil {
@@ -570,22 +567,28 @@ func (b *backend) listNodes(ctx *CmsCtx) {
 	if len(sortFields) == 0 {
 		sortFields = []gquery.SortField{gquery.Desc(gquery.System("id"))}
 	}
-	list, total, err := b.eng.QueryPage(ctx.R.Context(), core.ListQuery{
-		Type: typ, Where: where, Scope: core.BypassPolicy(), Sort: sortFields,
-		Page: gquery.Page{Number: page, Size: size},
-	})
+	q := core.NodeQuery{Type: typ, Where: where, Scope: core.BypassPolicy(), Sort: sortFields}
+	total, err := b.eng.CountNodes(ctx.R.Context(), q, 0)
 	if err != nil {
 		b.fail(ctx, err) // 查询错误 → 422 invalid_query / query_too_complex
 		return
 	}
-	// 列表默认展开全部出边 ref 字段（一层, 批量 — 查询次数=字段数, 与页大小无关）
-	expanded, err := b.expandMany(ctx.R.Context(), list)
-	if err != nil {
-		b.internal(ctx, err)
-		return
+	// 与详情/编辑器同形：Fields 完整（GetNodes 已补引用 id）+ Expand 一层。
+	var list []core.Node
+	if total > 0 {
+		ptrs, err := b.eng.GetNodes(ctx.R.Context(), q, size, (page-1)*size)
+		if err != nil {
+			b.fail(ctx, err)
+			return
+		}
+		list = nodeValues(ptrs)
+		if err := b.expandNodesInto(ctx.R.Context(), list); err != nil {
+			b.internal(ctx, err)
+			return
+		}
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{
-		"items": expanded, "total": total, "page": page, "size": size,
+		"items": list, "total": total, "page": page, "size": size,
 	})
 }
 
@@ -608,44 +611,55 @@ func (b *backend) queryNodes(ctx *CmsCtx) {
 		page.Size = 20
 	}
 	page.Size = min(page.Size, 100)
-	list, total, err := b.eng.QueryPage(ctx.R.Context(), core.ListQuery{
-		Type: typeName, Where: where, Scope: core.BypassPolicy(), Sort: sortFields, Page: page,
-	})
+	q := core.NodeQuery{Type: typeName, Where: where, Scope: core.BypassPolicy(), Sort: sortFields}
+	total, err := b.eng.CountNodes(ctx.R.Context(), q, 0)
 	if err != nil {
 		b.fail(ctx, err)
 		return
 	}
+	var list []core.Node
+	if total > 0 {
+		ptrs, err := b.eng.GetNodes(ctx.R.Context(), q, page.Size, (page.Number-1)*page.Size)
+		if err != nil {
+			b.fail(ctx, err)
+			return
+		}
+		list = nodeValues(ptrs)
+	}
 	// 与列表端点同一种形状：批量展开一层出边 ref。不展开的话调用方拿到的是裸 id，
 	// 界面上引用列只能是空的。
-	items, err := b.expandMany(ctx.R.Context(), list)
-	if err != nil {
+	if err := b.expandNodesInto(ctx.R.Context(), list); err != nil {
 		b.internal(ctx, err)
 		return
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{
-		"items": items, "total": total, "page": page.Number, "size": page.Size,
+		"items": list, "total": total, "page": page.Number, "size": page.Size,
 	})
 }
 
-// expandMany 列表批量展开全部出边 ref 字段 — "*" 引擎语义（core 解析）。
-// 根节点直接用列表已经查出来的行: 按 ids 回表再读一遍整页是白读。
-func (b *backend) expandMany(ctx context.Context, nodes []core.Node) ([]core.Node, error) {
+// expandNodesInto 就地展开一层（按类型自动声明的引用）。根节点用列表已查出的行,
+// 不回表重读 —— 展开是"给已加载节点补目标", 不是另一种列表读。
+func (b *backend) expandNodesInto(ctx context.Context, nodes []core.Node) error {
 	if len(nodes) == 0 {
-		return nodes, nil
+		return nil
 	}
-	roots := make([]*core.Node, len(nodes))
+	ptrs := make([]*core.Node, len(nodes))
 	for i := range nodes {
-		roots[i] = &nodes[i]
+		ptrs[i] = &nodes[i]
 	}
-	expanded, err := b.eng.ExpandNodes(ctx, roots, b.eng.AutoExpand(nodes[0].Type)...)
-	if err != nil {
-		return nil, err
+	_, err := b.eng.Expand(ctx, ptrs)
+	return err
+}
+
+// nodeValues 指针切片 → 值切片（渲染层按值走）。
+func nodeValues(nodes []*core.Node) []core.Node {
+	out := make([]core.Node, len(nodes))
+	for i, n := range nodes {
+		if n != nil {
+			out[i] = *n
+		}
 	}
-	out := make([]core.Node, 0, len(expanded))
-	for _, p := range expanded {
-		out = append(out, *p)
-	}
-	return out, nil
+	return out
 }
 
 func (b *backend) createNode(ctx *CmsCtx) {
@@ -682,7 +696,7 @@ func (b *backend) getNode(ctx *CmsCtx) {
 		ctx.Fail(BadRequest("invalid id"))
 		return
 	}
-	editable, err := b.eng.FullNode(ctx.R.Context(), id)
+	node, err := b.eng.GetNode(ctx.R.Context(), id)
 	if errors.Is(err, core.ErrNotFound) {
 		ctx.Fail(NotFound("not found"))
 		return
@@ -691,9 +705,12 @@ func (b *backend) getNode(ctx *CmsCtx) {
 		b.internal(ctx, err)
 		return
 	}
-	node := editable.Node
-	node.Fields = editable.Values
-	_ = ctx.Json(http.StatusOK, &node)
+	// 详情与列表同形：Fields 完整 + Expand 一层（自动声明的引用）。
+	if _, err := b.eng.ExpandNode(ctx.R.Context(), node); err != nil {
+		b.internal(ctx, err)
+		return
+	}
+	_ = ctx.Json(http.StatusOK, node)
 }
 
 func (b *backend) updateNode(ctx *CmsCtx) {
@@ -702,7 +719,7 @@ func (b *backend) updateNode(ctx *CmsCtx) {
 		ctx.Fail(BadRequest("invalid id"))
 		return
 	}
-	existing, err := b.eng.GetNodeByID(ctx.R.Context(), id)
+	existing, err := b.eng.GetNode(ctx.R.Context(), id)
 	if err != nil {
 		b.internal(ctx, err)
 		return
@@ -783,19 +800,20 @@ func (b *backend) tree(ctx *CmsCtx) {
 		ctx.Fail(BadRequest("type required"))
 		return
 	}
-	list, err := b.eng.Query(ctx.R.Context(), core.ListQuery{
-		Type: typ, Scope: core.BypassPolicy(), Page: gquery.Page{Size: 10000},
-	})
+	ptrs, err := b.eng.GetNodes(ctx.R.Context(), core.NodeQuery{
+		Type: typ, Scope: core.BypassPolicy(),
+	}, 10_000, 0)
 	if err != nil {
 		b.internal(ctx, err)
 		return
 	}
+	list := nodeValues(ptrs)
 	items := make([]map[string]any, 0, len(list))
 	ids := make([]int64, len(list))
 	for i := range list {
 		ids[i] = list[i].ID
 	}
-	full, err := b.eng.FullNodes(ctx.R.Context(), ids)
+	full, err := b.eng.GetNodesByIDs(ctx.R.Context(), ids)
 	if err != nil {
 		b.internal(ctx, err)
 		return
@@ -803,7 +821,7 @@ func (b *backend) tree(ctx *CmsCtx) {
 	for _, n := range full {
 		items = append(items, map[string]any{
 			"id": n.ID, "type": n.Type, "display": n.Display,
-			"revision": n.Revision, "fields": n.Values,
+			"revision": n.Revision, "fields": n.Fields,
 		})
 	}
 	_ = ctx.Json(http.StatusOK, map[string]any{"items": items})
@@ -832,7 +850,7 @@ func (b *backend) inbound(ctx *CmsCtx) {
 	ids := []int64{nodeID}
 	if ctx.Query("subtree") == "1" {
 		// 分支节点类型 → Subtree（图原语）
-		n, err := b.eng.GetNodeByID(ctx.R.Context(), nodeID)
+		n, err := b.eng.GetNode(ctx.R.Context(), nodeID)
 		if err != nil || n == nil {
 			ctx.Fail(NotFound("node not found"))
 			return
@@ -889,7 +907,6 @@ func (b *backend) inbound(ctx *CmsCtx) {
 	_ = ctx.Json(http.StatusOK, map[string]any{"items": items, "total": total})
 }
 
-// expand 引用展开预览：文本只作为 typed ExpandPath 的管理端输入前端。
 func (b *backend) expand(ctx *CmsCtx) {
 	nodeID := ctx.QueryNum("node", 0)
 	expr := ctx.Query("expr")
@@ -903,15 +920,18 @@ func (b *backend) expand(ctx *CmsCtx) {
 		root *core.Node
 		err  error
 	)
-	if expr == "" || expr == "*" {
-		root, err = b.eng.ExpandAuto(ctx.R.Context(), nodeID)
-	} else {
-		paths, perr := gquery.ParseExpand(expr)
-		if perr != nil {
-			b.fail(ctx, perr)
-			return
+	root, err = b.eng.GetNode(ctx.R.Context(), nodeID)
+	if err == nil {
+		if expr == "" || expr == "*" {
+			root, err = b.eng.ExpandNode(ctx.R.Context(), root)
+		} else {
+			paths, perr := gquery.ParseExpand(expr)
+			if perr != nil {
+				b.fail(ctx, perr)
+				return
+			}
+			root, err = b.eng.ExpandNode(ctx.R.Context(), root, paths...)
 		}
-		root, err = b.eng.Expand(ctx.R.Context(), nodeID, paths...)
 	}
 	if errors.Is(err, core.ErrNotFound) {
 		ctx.Fail(NotFound("not found"))
@@ -980,15 +1000,6 @@ func (b *backend) mergePreview(ctx *CmsCtx) {
 	_ = ctx.Json(http.StatusOK, preview)
 }
 
-func (b *backend) relationIntegrity(ctx *CmsCtx) {
-	report, err := b.eng.CheckRelations(ctx.R.Context())
-	if err != nil {
-		b.internal(ctx, err)
-		return
-	}
-	_ = ctx.Json(http.StatusOK, report)
-}
-
 func (b *backend) rebuildSearch(ctx *CmsCtx) {
 	if err := b.eng.RebuildSearch(ctx.R.Context()); err != nil {
 		b.internal(ctx, err)
@@ -1022,15 +1033,22 @@ func (b *backend) search(ctx *CmsCtx) {
 		return
 	}
 	if typ != "" {
-		list, total, err := b.eng.QueryPage(ctx.R.Context(), core.ListQuery{
-			Type: typ, Where: where, Scope: core.BypassPolicy(), Sort: sortFields,
-			Page: gquery.Page{Number: page, Size: size},
-		})
+		q := core.NodeQuery{Type: typ, Where: where, Scope: core.BypassPolicy(), Sort: sortFields}
+		total, err := b.eng.CountNodes(ctx.R.Context(), q, 0)
 		if err != nil {
 			// 查询错误走 fail（→ 422），不是 internal（→ 500）：和 listNodes/queryNodes 一致。
 			// 排序字段不可排（kind 没声明 Sortable）就属于这类客户端错误。
 			b.fail(ctx, err)
 			return
+		}
+		var list []core.Node
+		if total > 0 {
+			ptrs, err := b.eng.GetNodes(ctx.R.Context(), q, size, (page-1)*size)
+			if err != nil {
+				b.fail(ctx, err)
+				return
+			}
+			list = nodeValues(ptrs)
 		}
 		_ = ctx.Json(http.StatusOK, map[string]any{"items": list, "total": total})
 		return
@@ -1039,15 +1057,20 @@ func (b *backend) search(ctx *CmsCtx) {
 	items := make([]core.Node, 0)
 	var total int64
 	for _, typeName := range b.eng.Types().Names() {
-		list, count, err := b.eng.QueryPage(ctx.R.Context(), core.ListQuery{
-			Type: typeName, Where: where, Scope: core.BypassPolicy(),
-			Page: gquery.Page{Number: page, Size: size},
-		})
+		q := core.NodeQuery{Type: typeName, Where: where, Scope: core.BypassPolicy()}
+		count, err := b.eng.CountNodes(ctx.R.Context(), q, 0)
 		if err != nil {
 			b.fail(ctx, err)
 			return
 		}
-		items = append(items, list...)
+		if count > 0 {
+			ptrs, err := b.eng.GetNodes(ctx.R.Context(), q, size, (page-1)*size)
+			if err != nil {
+				b.fail(ctx, err)
+				return
+			}
+			items = append(items, nodeValues(ptrs)...)
+		}
 		total += count
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.Time.After(items[j].UpdatedAt.Time) })

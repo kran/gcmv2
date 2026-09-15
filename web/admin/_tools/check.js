@@ -104,7 +104,7 @@ function checkAssets() {
 }
 
 // ── ⓪b 破坏性操作：措辞与行为必须对得上 ──────────────────────────────
-// NodeOps 的"删除"调的是 deleteNode（永久删除，按 on_delete 处理），而归档节点连后台列表
+// NodeOps 的"删除"调的是 deleteNode（永久删除；被引用则拒绝），而归档节点连后台列表
 // 都查不到（所有读路径都写死 archived_at IS NULL）—— 措辞含糊 = 运营当软删点下去。
 // 编辑抽屉必须能"点外面就关"，且关之前要拦一下未保存的修改。
 // 曾经写死 :close-on-click-modal="false" / :close-on-press-escape="false" —— 只能点关闭按钮，
@@ -233,6 +233,57 @@ function checkTimestampWidget() {
 }
 
 // ── ① 编译校验：每个页面都能被 SFC 加载器编译 ────────────────────────
+// 组件接口只有 node / field / mode：引用目标一律从 node.expand 取。
+// 组件一旦重新长出 kind 专用 prop，父组件就又要知道"谁需要什么"，契约就退回去了。
+// 引擎侧同理：只有一条读投影，不许再出现独立的 /admin/expand 出口。
+function checkWidgetInterface() {
+    const problems = []
+    for (const file of fs.readdirSync(path.join(ADMIN_DIR, 'widgets'))) {
+        if (!file.endsWith('.vue')) continue
+        const src = read(path.join(ADMIN_DIR, 'widgets', file))
+        for (const prop of ['preset', 'expand']) {
+            if (new RegExp('^\\s*' + prop + ': \\{', 'm').test(src)) {
+                problems.push('widgets/' + file + ' 又长出 kind 专用 prop「' + prop + '」（应该从 node 取）')
+            }
+        }
+    }
+    const walkFiles = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+        const full = path.join(dir, e.name)
+        return e.isDirectory() ? walkFiles(full) : [full]
+    })
+    for (const file of walkFiles(ADMIN_DIR)) {
+        if (!/\.(js|vue)$/.test(file)) continue
+        if (file.indexOf(path.sep + '_tools' + path.sep) >= 0) continue // 闸门自己的源码里有这个字符串
+        if (read(file).indexOf("'/admin/expand'") >= 0) {
+            problems.push(path.relative(ADMIN_DIR, file) + ' 又出现 /admin/expand（读投影只有一条）')
+        }
+    }
+    let failed = 0
+    for (const problem of problems) { failed++; console.log('  FAIL ' + problem) }
+    if (!failed) console.log('  ok   组件接口只有 node/field/mode；没有复活 /admin/expand')
+    return failed
+}
+
+// 编辑器的引用标签必须来自"刚拉回来的详情"（full.expand）—— 用列表行的 r.expand 时，
+// 打开编辑器常常没有 expand，引用字段就只剩裸 id，点开下拉才补上（真实踩过）。
+function checkEditorRefLabels() {
+    const src = read(path.join(ADMIN_DIR, 'pages/NodeEditDialog.vue'))
+    const problems = []
+    if (!/this\.refExpand = full\.expand/.test(src)) {
+        problems.push('loadEdit 没有用详情的 full.expand 填引用标签（引用字段会只剩裸 id）')
+    }
+    if (/this\.refExpand = r\.expand/.test(src)) {
+        problems.push('loadEdit 用了列表行的 r.expand（打开编辑器时它常常是空的）')
+    }
+    if (!/:node="\{ fields: form\.fields, expand: refExpand \}"/.test(src)) {
+        problems.push('没把 node 上下文传给字段渲染器（组件拿不到 node.expand）')
+    }
+    let failed = 0
+    for (const problem of problems) { failed++; console.log('  FAIL ' + problem) }
+    if (!failed) console.log('  ok   编辑器引用标签来自详情 expand（不是列表行）')
+    return failed
+}
+
 async function checkSFC() {
     const { loadComponent } = loadRuntime()
     let failed = 0
@@ -431,7 +482,7 @@ async function checkRender() {
     }
     const RefWidget = await loadComponent('/widgets/ref.vue')
     const wMethods = (RefWidget.default || RefWidget).methods
-    const fctx = { found: [], loading: false, loaded: false, preset: [], defs: {},
+    const fctx = { found: [], loading: false, loaded: false, node: { expand: {} }, defs: {},
         field: { name: 'category', to: 'category', kind: 'ref' }, $emit: () => {} }
     for (const name of Object.keys(wMethods)) fctx[name] = wMethods[name].bind(fctx)
     const refField = { name: 'category', to: 'category', kind: 'ref' }
@@ -574,8 +625,9 @@ async function checkRender() {
         richtext: { text: '正文' }, number: { text: '3' }, bool: { text: '✓' },
         select: { text: 'draft' }, timestamp: { text: '2026' },
         'upload-image': { imgs: 1, src: '/uploads/a.png' }, 'upload-file': { text: 'a.mp4' },
-        gallery: { imgs: 2 }, ref: { text: '引用目标', link: true },
-        refs: { text: '引用目标', link: true },
+        // 引用单元格必须"显示名 + #id"：少了 #id 同名节点就分不出来（曾经把标签简化掉过一次）
+        gallery: { imgs: 2 }, ref: { text: '引用目标', link: true, hash: '#1' },
+        refs: { text: '引用目标', link: true, hash: '#1' },
     }
     const tick = () => new Promise(r => setTimeout(r, 50))
     for (const kind of Object.keys(samples)) {
@@ -583,8 +635,9 @@ async function checkRender() {
         const host = mount({
             render() {
                 return Vue.h(sandbox.Widgets.resolve(kind), {
-                    mode: 'cell', modelValue: samples[kind], field: { kind },
-                    expand: { display: '引用目标' },
+                    mode: 'cell', modelValue: samples[kind], field: { kind, name: 'ref' },
+                    // 引用目标从 node.expand 取（组件接口：node + field + mode）
+                    node: { expand: { ref: [{ id: 1, type: 'category', display: '引用目标' }] } },
                 })
             },
         }, {}, stubs)
@@ -602,6 +655,8 @@ async function checkRender() {
                 '，实际 ' + JSON.stringify(texts) + '（tree=' + JSON.stringify(nodes.map(n => n.tag)) + '）')
         } else if (want.link && !nodes.some(n => n.tag === 'a' && n.props.class === 'w-ref-link')) {
             fail(kind + ' 的 cell 不是链接（引用应该能点开目标节点的编辑表单）')
+        } else if (want.hash && texts.indexOf(want.hash) < 0) {
+            fail(kind + ' 的 cell 少了 #id 后缀（引用标签必须是 显示名 + #id）: ' + JSON.stringify(texts))
         } else if (want.imgs && imgs.length !== want.imgs) {
             fail(kind + ' 的 cell 图片数 = ' + imgs.length + '，期望 ' + want.imgs)
         } else if (want.src && !imgs.some(n => n.props.src === want.src)) {
@@ -647,7 +702,8 @@ async function main() {
     // 每项闸门返回失败条数；顺序 = 输出顺序。加总后决定退出码 —— 漏掉哪一项，
     // 那个闸门就只是"打印了一行 FAIL"却不让命令失败（等于没写）。
     const parts = [checkAssets(), checkDestructiveWording(), checkDrawerClose(),
-        checkTimestampWidget(), checkWidgetStyles()]
+        checkTimestampWidget(), checkWidgetStyles(),
+        checkWidgetInterface(), checkEditorRefLabels()]
     const failed = parts.reduce((a, b) => a + b, 0) +
         (mode === 'sfc' ? await checkSFC() : await checkRender())
     console.log(failed ? failed + ' 项失败' : '全部通过')

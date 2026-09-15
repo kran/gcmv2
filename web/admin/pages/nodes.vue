@@ -76,7 +76,7 @@
         <el-table-column v-for="c in adminColumns" :key="c" :label="fieldLabel(c)" min-width="130" show-overflow-tooltip>
           <template #default="{ row: r }">
             <component v-if="cellOf(c)" :is="cellOf(c)" mode="cell" :model-value="fieldOf2(r, c)"
-                       :field="fieldDef(c)" :expand="expandOf(r, c)" @open-node="openRef" />
+                       :field="fieldDef(c)" :node="r" @open-node="openRef" />
             <span v-else class="cell-error">字段 {{ c }} 没有 kind</span>
           </template>
         </el-table-column>
@@ -96,7 +96,7 @@
         <el-table-column v-for="c in adminColumns" :key="c" :label="fieldLabel(c)" min-width="130" show-overflow-tooltip>
           <template #default="{ row: r }">
             <component v-if="cellOf(c)" :is="cellOf(c)" mode="cell" :model-value="fieldOf2(r, c)"
-                       :field="fieldDef(c)" :expand="expandOf(r, c)" @open-node="openRef" />
+                       :field="fieldDef(c)" :node="r" @open-node="openRef" />
             <span v-else class="cell-error">字段 {{ c }} 没有 kind</span>
           </template>
         </el-table-column>
@@ -228,7 +228,6 @@ export default {
         },
         // 引用值不在 fields 里（存 edges），列表接口批量展开在 node.expand
         fieldOf2(node, name) { return node.fields ? node.fields[name] : undefined },
-        expandOf(node, name) { return (node.expand || {})[name] || null },
         async loadTypes() {
             const res = await window.$api.types()
             this.typeDefs = res.types || {}

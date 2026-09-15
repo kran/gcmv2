@@ -75,7 +75,7 @@ func newTestService(t *testing.T) *Service {
 
 func patchCurrent(t *testing.T, s *Service, id int64, patch *NodePatch) error {
 	t.Helper()
-	node, err := s.GetNodeByID(t.Context(), id)
+	node, err := s.nodeRow(t.Context(), id)
 	if err != nil {
 		return err
 	}
@@ -141,7 +141,7 @@ func TestCreateAndGet(t *testing.T) {
 	if id == 0 {
 		t.Fatal("id = 0")
 	}
-	n, err := s.GetNodeByID(t.Context(), id)
+	n, err := s.nodeRow(t.Context(), id)
 	if err != nil || n == nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestCreateRefs(t *testing.T) {
 		t.Fatalf("edges = %+v", edges)
 	}
 	// fields 不含 ref
-	n, _ := s.GetNodeByID(t.Context(), id)
+	n, _ := s.nodeRow(t.Context(), id)
 	if _, ok := n.Fields["categories"]; ok {
 		t.Fatal("ref leaked into fields")
 	}
@@ -196,7 +196,7 @@ func TestPatchFieldsAndRevision(t *testing.T) {
 	if err := patchCurrent(t, s, id, &NodePatch{Fields: Fields{"slug": "b", "publication_state": "published"}}); err != nil {
 		t.Fatal(err)
 	}
-	n, _ := s.GetNodeByID(t.Context(), id)
+	n, _ := s.nodeRow(t.Context(), id)
 	if n.Fields.Str("slug") != "b" || n.Fields.Str("publication_state") != "published" || n.Fields.Int("position") != 3 {
 		t.Fatalf("patch fields = %+v", n)
 	}
@@ -211,7 +211,7 @@ func TestPatchSlugEmpty(t *testing.T) {
 	if err := patchCurrent(t, s, id, &NodePatch{Fields: Fields{"slug": ""}}); err != nil {
 		t.Fatal(err)
 	}
-	n, _ := s.GetNodeByID(t.Context(), id)
+	n, _ := s.nodeRow(t.Context(), id)
 	if n.Fields.Str("slug") != "" {
 		t.Fatalf("slug should be cleared, got %q", n.Fields.Str("slug"))
 	}
@@ -226,7 +226,7 @@ func TestPatchFieldsMerge(t *testing.T) {
 	if err := patchCurrent(t, s, id, &NodePatch{Fields: map[string]any{"body": "新"}}); err != nil {
 		t.Fatal(err)
 	}
-	n, _ := s.GetNodeByID(t.Context(), id)
+	n, _ := s.nodeRow(t.Context(), id)
 	if n.Fields["body"] != "新" {
 		t.Fatalf("body = %v", n.Fields["body"])
 	}
@@ -244,7 +244,7 @@ func TestPatchFieldsNullDelete(t *testing.T) {
 	if err := patchCurrent(t, s, id, &NodePatch{Fields: map[string]any{"body": nil}}); err != nil {
 		t.Fatal(err)
 	}
-	n, _ := s.GetNodeByID(t.Context(), id)
+	n, _ := s.nodeRow(t.Context(), id)
 	if _, ok := n.Fields["body"]; ok {
 		t.Fatalf("body should be deleted: %v", n.Fields)
 	}
@@ -288,7 +288,7 @@ func TestPatchNoOp(t *testing.T) {
 	if err := s.PatchNode(t.Context(), id, &NodePatch{}); err != nil {
 		t.Fatal(err)
 	}
-	n, _ := s.GetNodeByID(t.Context(), id)
+	n, _ := s.nodeRow(t.Context(), id)
 	if n.Fields["title"] != "t" {
 		t.Fatal("fields changed by empty patch")
 	}
@@ -355,7 +355,7 @@ func TestCreateDefaultsAndAddress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	node, err := s.GetNodeByAddress(t.Context(), "defaulted")
+	node, err := s.GetNode(t.Context(), "defaulted")
 	if err != nil || node == nil || node.ID != id {
 		t.Fatalf("address lookup: node=%#v err=%v", node, err)
 	}
@@ -367,7 +367,7 @@ func TestCreateDefaultsAndAddress(t *testing.T) {
 func TestPatchRevisionConflict(t *testing.T) {
 	s := newTestService(t)
 	id, _ := s.CreateNode(t.Context(), &Node{Type: "article", Display: "before", Fields: Fields{"title": "before"}})
-	node, _ := s.GetNodeByID(t.Context(), id)
+	node, _ := s.nodeRow(t.Context(), id)
 	staleRevision := node.Revision
 	first := "first"
 	if err := s.PatchNode(t.Context(), id, &NodePatch{Revision: &staleRevision, Display: &first}); err != nil {
@@ -411,7 +411,7 @@ func TestDelete(t *testing.T) {
 	if err := s.DeleteNode(t.Context(), id); err != nil {
 		t.Fatal(err)
 	}
-	n, _ := s.GetNodeByID(t.Context(), id)
+	n, _ := s.nodeRow(t.Context(), id)
 	if n != nil {
 		t.Fatal("node still exists")
 	}
@@ -430,20 +430,19 @@ func TestQueryPage(t *testing.T) {
 		s.CreateNode(t.Context(), &Node{Type: "article", Display: "t",
 			Fields: map[string]any{"title": "t" + string(rune('a'+i)), "views": i, "position": i}})
 	}
-	list, total, err := s.QueryPage(t.Context(), ListQuery{
-		Type: "article", Scope: BypassPolicy(), Page: gquery.Page{Number: 1, Size: 2},
-	})
+	list, total, err := countAndRead(t, s, NodeQuery{
+		Type: "article", Scope: BypassPolicy(),
+	}, 2, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if total != 5 || len(list) != 2 {
 		t.Fatalf("total=%d list=%d", total, len(list))
 	}
-	list, _, err = s.QueryPage(t.Context(), ListQuery{
+	list, _, err = countAndRead(t, s, NodeQuery{
 		Type: "article", Scope: BypassPolicy(),
 		Sort: []gquery.SortField{gquery.Desc(gquery.Field("views"))},
-		Page: gquery.Page{Number: 1, Size: 5},
-	})
+	}, 5, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -453,10 +452,9 @@ func TestQueryPage(t *testing.T) {
 	for _, path := range []gquery.Path{
 		gquery.System("id DESC"), gquery.System("id; DELETE FROM nodes"), gquery.Field("missing"),
 	} {
-		_, _, err := s.QueryPage(t.Context(), ListQuery{
+		_, _, err := countAndRead(t, s, NodeQuery{
 			Type: "article", Scope: BypassPolicy(), Sort: []gquery.SortField{gquery.Asc(path)},
-			Page: gquery.Page{Number: 1, Size: 5},
-		})
+		}, 5, 0)
 		if err == nil {
 			t.Fatalf("unsafe sort field %q must fail", path.Field)
 		}
@@ -491,7 +489,7 @@ func TestPatchDisplayEmpty(t *testing.T) {
 	if err := patchCurrent(t, s, id, &NodePatch{Display: &ok}); err != nil {
 		t.Fatal(err)
 	}
-	n, _ := s.GetNodeByID(t.Context(), id)
+	n, _ := s.nodeRow(t.Context(), id)
 	if n.Display != "新名字" {
 		t.Fatalf("display = %q", n.Display)
 	}

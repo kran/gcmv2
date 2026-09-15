@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -12,11 +13,11 @@ import (
 //
 // Web 层的读有两个层次，别混：
 //
-//	CmsCtx.ReadPage / ReadOne / ReadAddress / ReadFull / ReadSearch
+//	CmsCtx.ReadPage / ReadNode / ReadTree / ReadSearch
 //	    解析读规则（行范围 + 字段掩码）→ 调引擎 → 套字段掩码。数据跨出进程前
 //	    最后一步由这里保证：调用方不需要自己拼 Scope，也不需要自己调 MaskNode。
 //
-//	engine.Query / GetNodeByID / FullNode / ...
+//	engine.GetNode / GetNodes / CountNodes / Expand / ...
 //	    内核原语：没有身份、没有策略。后台、插件、迁移以及"系统自己要看"的代码
 //	    走这里 —— 那是显式的可信调用，不是这里的替代品。
 //
@@ -25,67 +26,65 @@ import (
 //
 // 不可见的节点返回 (nil, nil)：与 API 的 404 语义一致，怎么回由调用方决定。
 
-// ReadPage 按读规则取一页（q.Type 必填；q.Scope 必须留空）。
-// 展开（q.Expand）由引擎完成，展开出来的节点按各自类型的读规则裁字段。
-func (c *CmsCtx) ReadPage(action ReadAction, q core.ListQuery) ([]core.Node, int64, error) {
+// ReadPage 按读规则取一页（q.Type 必填；q.Scope 必须留空）。limit 0 = 不限。
+//
+// 展开与掩码都在这里完成：Fields 完整（引用 id 在里面）、Expand 已按类型自动展开一层、
+// 字段按读规则裁过。展开出来的目标也过同一套掩码 —— 引用不会变成掩码的旁路。
+func (c *CmsCtx) ReadPage(action ReadAction, q core.NodeQuery, limit, offset int) ([]core.Node, int64, error) {
 	scope, err := c.resolve(action, q.Type, q.Scope)
 	if err != nil {
 		return nil, 0, err
 	}
 	q.Scope = scope
-	nodes, total, err := c.site.engine.QueryPage(c.R.Context(), q)
+	total, err := c.site.engine.CountNodes(c.R.Context(), q, 0)
 	if err != nil {
 		return nil, 0, err
 	}
-	if err := MaskNodes(c, action, nodes); err != nil {
+	if total == 0 {
+		return nil, 0, nil
+	}
+	ptrs, err := c.site.engine.GetNodes(c.R.Context(), q, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	nodes := nodeValues(ptrs)
+	if err := c.expandAndMask(action, nodes); err != nil {
 		return nil, 0, err
 	}
 	return nodes, total, nil
 }
 
-// ReadOne 按 id 取单节点（不可见 → nil）。
-func (c *CmsCtx) ReadOne(action ReadAction, id int64) (*core.Node, error) {
-	node, err := c.site.engine.GetNodeByID(c.R.Context(), id)
-	if err != nil || node == nil {
-		return nil, err
+// expandAndMask 就地展开一层（按类型自动声明）再按读规则裁字段。
+func (c *CmsCtx) expandAndMask(action ReadAction, nodes []core.Node) error {
+	ptrs := make([]*core.Node, len(nodes))
+	for i := range nodes {
+		ptrs[i] = &nodes[i]
 	}
-	ok, err := c.visible(action, node)
-	if err != nil || !ok {
-		return nil, err
+	if _, err := c.site.engine.Expand(c.R.Context(), ptrs); err != nil {
+		return err
 	}
-	return MaskNode(c, action, node)
+	return MaskNodes(c, action, nodes)
 }
 
-// ReadAddress 按 addressable capability 取单节点（不可见 → nil）。
-func (c *CmsCtx) ReadAddress(action ReadAction, address string) (*core.Node, error) {
-	node, err := c.site.engine.GetNodeByAddress(c.R.Context(), address)
-	if err != nil || node == nil {
-		return nil, err
-	}
-	ok, err := c.visible(action, node)
-	if err != nil || !ok {
-		return nil, err
-	}
-	return MaskNode(c, action, node)
-}
-
-// ReadFull 取单节点并带上 ref 值（编辑表单用：客户端需要知道当前选中了哪些引用）。
-// 可见性与字段掩码与 ReadOne 相同（先合并 ref 值，再裁字段）。
-func (c *CmsCtx) ReadFull(action ReadAction, id int64) (*core.Node, error) {
-	full, err := c.site.engine.FullNode(c.R.Context(), id)
+// ReadNode 单节点读：ref 是 int/int64（id）或 string（数字先当 id、否则当地址），
+// 与引擎 GetNode 同一套定位。读规则（行范围）→ 展开一层 → 字段掩码都做完；
+// 不可见 → (nil, nil)。
+func (c *CmsCtx) ReadNode(action ReadAction, ref any) (*core.Node, error) {
+	node, err := c.site.engine.GetNode(c.R.Context(), ref)
 	if err != nil {
-		if err == core.ErrNotFound {
+		if errors.Is(err, core.ErrNotFound) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	ok, err := c.visible(action, &full.Node)
+	ok, err := c.visible(action, node)
 	if err != nil || !ok {
 		return nil, err
 	}
-	node := full.Node
-	node.Fields = full.Values
-	return MaskNode(c, action, &node)
+	if _, err := c.site.engine.ExpandNode(c.R.Context(), node); err != nil {
+		return nil, err
+	}
+	return MaskNode(c, action, node)
 }
 
 // ReadTree 按读规则加载树，返回已裁字段的嵌套结构（客户端渲染树用）。
@@ -140,10 +139,10 @@ func (c *CmsCtx) visible(action ReadAction, node *core.Node) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	rows, err := c.site.engine.Query(c.R.Context(), core.ListQuery{
+	rows, err := c.site.engine.GetNodes(c.R.Context(), core.NodeQuery{
 		Type: node.Type, Where: gquery.EQ(gquery.System("id"), node.ID),
-		Scope: scope, Page: gquery.Page{Size: 1},
-	})
+		Scope: scope,
+	}, 1, 0)
 	if err != nil {
 		return false, err
 	}

@@ -13,7 +13,7 @@ import (
 //	CmsCtx.CreateNode / UpdateNode / DeleteNode
 //	    "客户端发起的写"：触发 web.write.<action>.<type> 规则（身份判断 + 允许字段
 //	    + 就地加工）→ 调引擎 → 返回裁剪过的节点。
-//	    DeleteNode 是永久删除（按字段 on_delete 处理引用），和 HTTP DELETE 同一套语义：
+//	    DeleteNode 是永久删除（被引用则拒绝），和 HTTP DELETE 同一套语义：
 //	    站点自己写 handler 时用它，不必自己 Fire 事件。
 //
 //	"下线 / 撤回"不是内核概念：用类型自己的状态字段表达，并在读规则里限制范围。
@@ -55,7 +55,7 @@ func (c *CmsCtx) UpdateNode(id int64, patch *core.NodePatch) (*core.Node, error)
 	if patch == nil {
 		return nil, fmt.Errorf("web: update needs a patch")
 	}
-	existing, err := c.site.engine.GetNodeByID(c.R.Context(), id)
+	existing, err := c.site.engine.GetNode(c.R.Context(), id)
 	if err != nil {
 		return nil, err
 	}
@@ -79,14 +79,14 @@ func (c *CmsCtx) UpdateNode(id int64, patch *core.NodePatch) (*core.Node, error)
 	return c.readBack(id)
 }
 
-// DeleteNode 走删除规则，然后永久删除（按字段 on_delete 处理引用）。站点自己写
+// DeleteNode 走删除规则，然后永久删除（被引用则拒绝）。站点自己写
 // handler 时调它。
 //
 // 注意顺序：本入口只有 id，必须先读节点才知道类型，因此是"先读、后 Fire 规则"。
 // 不能让匿名访客据此区分"节点是否存在"的场景（比如通用路由），应该先用路径上的
 // 类型 Fire 一次写规则做 gate —— 公共 DELETE 路由就是这么做的。
 func (c *CmsCtx) DeleteNode(id int64) error {
-	existing, err := c.site.engine.GetNodeByID(c.R.Context(), id)
+	existing, err := c.site.engine.GetNode(c.R.Context(), id)
 	if err != nil {
 		return err
 	}
@@ -123,7 +123,7 @@ func assertAllowed(action WriteAction, typeName string, allowed *core.List[strin
 // readBack 写响应里的节点按 ReadView 规则裁字段 —— "注册规则 ⇒ 输出已裁"对写响应
 // 同样成立。
 func (c *CmsCtx) readBack(id int64) (*core.Node, error) {
-	node, err := c.site.engine.GetNodeByID(c.R.Context(), id)
+	node, err := c.site.engine.GetNode(c.R.Context(), id)
 	if err != nil || node == nil {
 		return nil, err
 	}

@@ -57,17 +57,18 @@ func Mount(s *web.Site, opts Options) {
 					ctx.Error(http.StatusInternalServerError, "sitemap policy: "+err.Error())
 					return
 				}
-				items, err := s.Engine().Query(ctx.R.Context(), core.ListQuery{
+				items, err := s.Engine().GetNodes(ctx.R.Context(), core.NodeQuery{
 					Type:  typeName,
 					Scope: scope,
 					Sort:  []gquery.SortField{gquery.Asc(gquery.System("id"))},
-					Page:  gquery.Page{Size: 10000},
-				})
+				}, 10_000, 0)
 				if err != nil {
 					ctx.Error(http.StatusInternalServerError, "sitemap: "+err.Error())
 					return
 				}
-				list = append(list, items...)
+				for _, n := range items {
+					list = append(list, *n)
+				}
 			}
 			set := urlset{
 				Xmlns: "http://www.sitemaps.org/schemas/sitemap/0.9",

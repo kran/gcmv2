@@ -33,63 +33,34 @@ func (s *Service) nodesByIDs(ctx context.Context, ids []int64) ([]Node, error) {
 	return ordered, nil
 }
 
-// Expand loads one Node and applies typed relation paths.
-func (s *Service) Expand(ctx context.Context, id int64, paths ...gquery.ExpandPath) (*Node, error) {
-	nodes, err := s.ExpandMany(ctx, []int64{id}, paths...)
+// Expand 给"已经加载好的"节点补上引用目标（一层）。paths 为空 = 按类型自动声明展开。
+//
+// 展开是读完之后的独立一步：Read 只给值（Fields 里是引用 id），要目标节点才调它。
+// 不按 ids 再回表读一遍根节点 —— 调用方通常刚读过它们。
+func (s *Service) Expand(ctx context.Context, nodes []*Node, paths ...gquery.ExpandPath) ([]*Node, error) {
+	if len(paths) == 0 {
+		if len(nodes) == 0 {
+			return nodes, nil
+		}
+		paths = s.autoExpand(nodes[0].Type)
+	}
+	return s.expandNodes(ctx, nodes, paths...)
+}
+
+// ExpandNode 单个节点的 Expand（PocketBase 的 ExpandRecord 同款：一行包装）。
+func (s *Service) ExpandNode(ctx context.Context, n *Node, paths ...gquery.ExpandPath) (*Node, error) {
+	out, err := s.Expand(ctx, []*Node{n}, paths...)
 	if err != nil {
 		return nil, err
 	}
-	if len(nodes) == 0 {
+	if len(out) == 0 {
 		return nil, ErrNotFound
 	}
-	return nodes[0], nil
+	return out[0], nil
 }
 
-// ExpandMany expands relation paths without N+1 queries. Every path hop is
-// validated against the current Type; incoming hops include their source Type.
-// 已持有节点行的调用方（列表/模板）应用 ExpandNodes, 不要按 ids 再回表读一遍。
-func (s *Service) ExpandMany(ctx context.Context, ids []int64, paths ...gquery.ExpandPath) ([]*Node, error) {
-	nodes, err := s.nodesByIDs(ctx, ids)
-	if err != nil {
-		return nil, err
-	}
-	roots := make([]*Node, len(nodes))
-	for i := range nodes {
-		roots[i] = &nodes[i]
-	}
-	return s.ExpandNodes(ctx, roots, paths...)
-}
-
-// ExpandAuto 展开一个节点"自动声明"的全部引用路径。路径取决于节点类型，所以由内核读一次
-// 节点自己决定；调用方不必为了拿类型先查一次节点、再让 Expand 查第二遍。
-func (s *Service) ExpandAuto(ctx context.Context, id int64) (*Node, error) {
-	nodes, err := s.ExpandAutoMany(ctx, []int64{id})
-	if err != nil {
-		return nil, err
-	}
-	return nodes[0], nil
-}
-
-// ExpandAutoMany 是 ExpandAuto 的批量形态: 路径取第一个节点的类型(列表端点同口径),
-// 根节点只读一次。
-func (s *Service) ExpandAutoMany(ctx context.Context, ids []int64) ([]*Node, error) {
-	nodes, err := s.nodesByIDs(ctx, ids)
-	if err != nil {
-		return nil, err
-	}
-	if len(nodes) == 0 {
-		return nil, ErrNotFound
-	}
-	roots := make([]*Node, len(nodes))
-	for i := range nodes {
-		roots[i] = &nodes[i]
-	}
-	return s.ExpandNodes(ctx, roots, s.AutoExpand(nodes[0].Type)...)
-}
-
-// ExpandNodes 对"已经加载好的"根节点套用展开路径（ExpandMany / ExpandAuto* 共用）。
-// 供已持有节点的调用方直接复用: 为拿类型或为展开把同一批行再 SELECT 一遍是白读。
-func (s *Service) ExpandNodes(ctx context.Context, roots []*Node, paths ...gquery.ExpandPath) ([]*Node, error) {
+// expandNodes 展开的实现（内部）：paths 已确定, 根节点已加载。
+func (s *Service) expandNodes(ctx context.Context, roots []*Node, paths ...gquery.ExpandPath) ([]*Node, error) {
 	if len(paths) == 0 || len(roots) == 0 {
 		return roots, nil
 	}
@@ -113,8 +84,8 @@ func (s *Service) ExpandNodes(ctx context.Context, roots []*Node, paths ...gquer
 	return roots, nil
 }
 
-// AutoExpand returns all outgoing references declared by one Type.
-func (s *Service) AutoExpand(typeName string) []gquery.ExpandPath {
+// autoExpand 返回一个类型声明的全部出边引用路径（内部：读选项用的默认展开集）。
+func (s *Service) autoExpand(typeName string) []gquery.ExpandPath {
 	td, ok := s.types.Type(typeName)
 	if !ok {
 		return nil

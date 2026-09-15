@@ -44,13 +44,13 @@
                 <!-- 结构：对象（递归） -->
                 <div v-else-if="f.kind === 'object'" class="fr-object">
                     <field-renderer :fields="f.fields || []" :model-value="get(f.name) || {}"
-                        :defs="defs" :editing="editing"
+                        :defs="defs" :editing="editing" :node="node"
                         @update:model-value="set(f.name, $event)" />
                 </div>
 
                 <!-- 叶值：kind 名对应的组件（编辑模式） -->
                 <component v-else-if="widget(f)" :is="widget(f)" mode="edit" :model-value="get(f.name)"
-                    :field="f" :defs="defs" :preset="(refPreset || {})[f.name]"
+                    :field="f" :defs="defs" :node="node"
                     @update:model-value="set(f.name, $event)" />
                 <!-- 字段没有 kind（类型定义坏了）：组件缺失由 Widgets 那边的错误组件显示 -->
                 <div v-else class="fr-error">
@@ -69,8 +69,8 @@ export default {
     props: {
         fields: { type: Array, default: () => [] },
         modelValue: { type: Object, default: () => ({}) },
-        // 引用预置: {fieldName: [{id, label}]} — 编辑回显已选值（expand 结果）
-        refPreset: { type: Object, default: () => ({}) },
+        // 当前节点上下文：组件从它取引用目标（node.expand）
+        node: { type: Object, default: () => ({}) },
         // 类型定义表（refLabel 显示兜底用）: {typeName: TypeDef}
         defs: { type: Object, default: () => ({}) },
         editing: { type: Boolean, default: false },

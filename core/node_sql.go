@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,14 +28,65 @@ var (
 )
 
 // invalidFields 包装 Schema/值校验错误（Web 边界据此返回 422）。
+// nodePtrs 值切片 → 指针切片（读面统一返回 *Node）。
+func nodePtrs(nodes []Node) []*Node {
+	out := make([]*Node, len(nodes))
+	for i := range nodes {
+		out[i] = &nodes[i]
+	}
+	return out
+}
+
+// GetNode 单个读：Fields 一律完整（引用 id 已在其中）。不存在返回 ErrNotFound。
+//
+// ref 直接给"节点是什么"：int / int64 = id，非空 string = 地址（addressable 的全局地址）。
+// 别的类型 fail-loud —— 定位方式就这两种，不做包装类型。
+func (s *Service) GetNode(ctx context.Context, ref any) (*Node, error) {
+	var row *Node
+	var err error
+	switch v := ref.(type) {
+	case int64:
+		row, err = s.nodeRow(ctx, v)
+	case int:
+		row, err = s.nodeRow(ctx, int64(v))
+	case string:
+		if v == "" {
+			return nil, fmt.Errorf("%w: empty ref", ErrInvalidQuery)
+		}
+		// 字符串先当 id（纯数字），不是 id 或者查不到再当地址 —— 调用方不必自己判断
+		// （路由里的 /node/{id_or_address} 就是这样）。
+		if refID, perr := strconv.ParseInt(v, 10, 64); perr == nil {
+			row, err = s.nodeRow(ctx, refID)
+		}
+		if err == nil && row == nil {
+			row, err = s.nodeRowByAddress(ctx, v)
+		}
+	default:
+		return nil, fmt.Errorf("%w: GetNode needs an id (int64) or an address (string), got %T",
+			ErrInvalidQuery, ref)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if row == nil {
+		return nil, ErrNotFound
+	}
+	nodes := []Node{*row}
+	if err := s.hydrateFields(ctx, nodes); err != nil {
+		return nil, err
+	}
+	return &nodes[0], nil
+}
+
 func invalidFields(err error) error {
 	return fmt.Errorf("%w: %w", ErrInvalidFields, err)
 }
 
 // ── 读 ────────────────────────────────────────
 
-// GetNodeByID 按 id 取节点; 不存在返回 (nil, nil)。
-func (s *Service) GetNodeByID(ctx context.Context, id int64) (*Node, error) {
+// nodeRow 按 id 取"存储行"（只有标量 Fields, 没有引用 id）—— 写入路径与索引重建用。
+// 公开读走 GetNode（Fields 完整）。不存在返回 (nil, nil)。
+func (s *Service) nodeRow(ctx context.Context, id int64) (*Node, error) {
 	n, err := s.db.WithCtx(ctx).Select("nodes", `id = #{1}`, id).FetchOne[Node]()
 	if err != nil {
 		return nil, err
@@ -45,8 +97,8 @@ func (s *Service) GetNodeByID(ctx context.Context, id int64) (*Node, error) {
 	return n, nil
 }
 
-// GetNodeByAddress 按 addressable capability 的全局地址查节点。
-func (s *Service) GetNodeByAddress(ctx context.Context, address string) (*Node, error) {
+// nodeRowByAddress 按 addressable capability 的全局地址查"存储行"（同上, 内部用）。
+func (s *Service) nodeRowByAddress(ctx context.Context, address string) (*Node, error) {
 	if address == "" {
 		return nil, nil
 	}
@@ -161,7 +213,7 @@ func (s *Service) PatchNode(ctx context.Context, id int64, patch *NodePatch) err
 	if patch == nil {
 		return errors.New("core: patch: nil patch")
 	}
-	existing, err := s.GetNodeByID(ctx, id)
+	existing, err := s.nodeRow(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -262,9 +314,9 @@ func (s *Service) PatchNode(ctx context.Context, id int64, patch *NodePatch) err
 // ── 写: Delete ────────────────────────────────
 
 // DeleteNode permanently deletes a Node after applying every incoming
-// reference's on_delete policy in one transaction.
+// incoming references in one transaction.
 func (s *Service) DeleteNode(ctx context.Context, id int64) error {
 	return s.db.WithCtx(ctx).Transaction(func(tx *dba.SQL) error {
-		return s.deleteNodeTx(tx, id, make(map[int64]bool))
+		return s.deleteNodeTx(tx, id)
 	})
 }

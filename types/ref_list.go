@@ -11,7 +11,7 @@ const KindRefList = "refs"
 
 func (refListKind) Name() string { return KindRefList }
 func (refListKind) Validate(_ FieldDef, v any) error {
-	arr, ok := v.([]any)
+	arr, ok := asAnySlice(v)
 	if !ok {
 		return fmt.Errorf("expects array of node ids, got %T", v)
 	}
@@ -23,7 +23,7 @@ func (refListKind) Validate(_ FieldDef, v any) error {
 	return nil
 }
 func (refListKind) IsEmpty(v any) bool {
-	arr, ok := v.([]any)
+	arr, ok := asAnySlice(v)
 	return !ok || len(arr) == 0
 }
 func (refListKind) Class() Class       { return ClassRefList }

@@ -71,10 +71,9 @@ func TestDefaultReadScopeUsesPublicationCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	items, total, err := site.Engine().QueryPage(t.Context(), core.ListQuery{
+	items, total, err := countAndRead(t, site.Engine(), core.NodeQuery{
 		Type: "article", Where: gquery.True(), Scope: scope,
-		Page: gquery.Page{Number: 1, Size: 20},
-	})
+	}, 20, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,10 +101,9 @@ func TestDefaultReadScopePerReadAction(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", action, err)
 		}
-		_, total, err := site.Engine().QueryPage(t.Context(), core.ListQuery{
+		_, total, err := countAndRead(t, site.Engine(), core.NodeQuery{
 			Type: "article", Where: gquery.True(), Scope: scope,
-			Page: gquery.Page{Number: 1, Size: 20},
-		})
+		}, 20, 0)
 		if err != nil {
 			t.Fatalf("%s: %v", action, err)
 		}
@@ -116,10 +114,9 @@ func TestDefaultReadScopePerReadAction(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", action, err)
 		}
-		_, total, err = site.Engine().QueryPage(t.Context(), core.ListQuery{
+		_, total, err = countAndRead(t, site.Engine(), core.NodeQuery{
 			Type: "guestbook", Where: gquery.True(), Scope: denied,
-			Page: gquery.Page{Number: 1, Size: 20},
-		})
+		}, 20, 0)
 		if err != nil {
 			t.Fatalf("%s: %v", action, err)
 		}
@@ -160,9 +157,9 @@ func TestReadRuleNarrowsScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	items, err := site.Engine().Query(t.Context(), core.ListQuery{
-		Type: "article", Where: gquery.True(), Scope: scope, Page: gquery.Page{Size: 20},
-	})
+	items, err := getNodes(t, site.Engine(), core.NodeQuery{
+		Type: "article", Where: gquery.True(), Scope: scope,
+	}, 20, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,9 +171,9 @@ func TestReadRuleNarrowsScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	items, err = site.Engine().Query(t.Context(), core.ListQuery{
-		Type: "article", Where: gquery.True(), Scope: denied, Page: gquery.Page{Size: 20},
-	})
+	items, err = getNodes(t, site.Engine(), core.NodeQuery{
+		Type: "article", Where: gquery.True(), Scope: denied,
+	}, 20, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

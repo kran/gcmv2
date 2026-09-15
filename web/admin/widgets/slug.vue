@@ -13,8 +13,6 @@ export default {
         mode: { type: String, default: 'edit' },      // edit | cell
         field: { type: Object, default: () => ({}) },
         defs: { type: Object, default: () => ({}) },
-        preset: { type: Array, default: () => [] },
-        expand: { default: null },
     },
     emits: ['update:modelValue'],
     methods: {

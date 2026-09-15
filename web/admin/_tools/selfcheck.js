@@ -32,6 +32,12 @@ const CASES = [
     ['引用必须是链接', 'render', 'widgets/ref.vue', 'class="w-ref-link"', 'class="w-plain"'],
     ['点引用要能打开抽屉', 'render', 'pages/nodes.vue', 'typeName: target.type }', "typeName: '' }"],
     ['编辑器链路（穿异步组件）', 'render', 'widgets/text.vue', "this.$emit('update:modelValue', v)", 'void v'],
+    ['组件接口闸门（kind 专用 prop 复活）', 'sfc', 'widgets/text.vue',
+        '    props: {\n', '    props: {\n        preset: { type: Array, default: () => [] },\n'],
+    ['编辑器引用标签闸门（用了列表行的 expand）', 'sfc', 'pages/NodeEditDialog.vue',
+        'this.refExpand = full.expand', 'this.refExpand = r.expand'],
+    ['组件接口闸门（复活 /admin/expand）', 'sfc', 'pages/NodeOps.vue',
+        'this.expandDialog.loading = true', "this.expandDialog.loading = true; window.$api.get('/admin/expand')"],
 ]
 
 let bad = 0

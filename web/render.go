@@ -84,20 +84,19 @@ func (e *Render) queryFuncs(c *CmsCtx) template.FuncMap {
 	return template.FuncMap{
 		// ── 查询原语 ─────────────────────────
 		// get: 单节点（id 兼容 JSON float64 / int64）。
-		// 走 CmsCtx.ReadOne（与 API 的 view 路径同一条规则）：不可见 → nil，
+		// 走 CmsCtx.ReadNode（与 API 的 view 路径同一条规则）：不可见 → nil，
 		// 隐藏字段已被裁掉。
 		"get": func(id any) *core.Node {
 			nid, err := types.ToID(id)
 			fail(err)
-			node, err := c.ReadOne(ReadView, nid)
+			node, err := c.ReadNode(ReadView, nid)
 			fail(err)
 			return node
 		},
 		// list: 公开类型列表 —— 行范围与字段掩码与 API 共用同一条读规则（ReadList）。
 		"list": func(typ string, page, size int) []core.Node {
-			list, _, err := c.ReadPage(ReadList, core.ListQuery{
-				Type: typ, Page: gquery.Page{Number: page, Size: size},
-			})
+			list, _, err := c.ReadPage(ReadList, core.NodeQuery{Type: typ},
+				pageSize(page, size), pageOffset(page, size))
 			fail(err)
 			return list
 		},
@@ -123,8 +122,8 @@ func (e *Render) queryFuncs(c *CmsCtx) template.FuncMap {
 		// 字段掩码按各节点自己的类型套用（与 get 同源）。
 		"outRefs": func(from int64, field string, page, size int) []core.Node {
 			return e.targets(c, true, func() ([]core.Edge, int64, error) {
-				n, err := eng.GetNodeByID(c.R.Context(), from)
-				if err != nil || n == nil {
+				n, err := eng.GetNode(c.R.Context(), from)
+				if err != nil {
 					return nil, 0, fmt.Errorf("outRefs: node %d not found", from)
 				}
 				return eng.OutEdges(c.R.Context(), n.Type, from, field, page, size)
@@ -153,9 +152,8 @@ func (e *Render) queryFuncs(c *CmsCtx) template.FuncMap {
 		"filterList": func(typ, expr string, params map[string]any, page, size int) []core.Node {
 			where, err := gquery.ParseLisp(expr, params)
 			fail(err)
-			list, _, err := c.ReadPage(ReadList, core.ListQuery{
-				Type: typ, Where: where, Page: gquery.Page{Number: page, Size: size},
-			})
+			list, _, err := c.ReadPage(ReadList, core.NodeQuery{Type: typ, Where: where},
+				pageSize(page, size), pageOffset(page, size))
 			fail(err)
 			return list
 		},
@@ -226,15 +224,20 @@ func expandTemplateNodes(c *CmsCtx, eng core.Engine, expression string, ids []in
 		err      error
 	)
 	if strings.TrimSpace(expression) == "" || strings.TrimSpace(expression) == "*" {
-		// 路径取决于节点类型: 交给内核读一次节点自己决定。不要为了拿类型先 GetNodeByID,
-		// 紧接着 ExpandMany 又把同一批行读第二遍。
-		expanded, err = eng.ExpandAutoMany(c.R.Context(), ids)
+		// 展开是读完之后的独立一步：先按 id 读节点（Fields 已完整），再补引用目标
+		// （不传路径 = 按类型自动声明）。
+		nodes, err := eng.GetNodesByIDs(c.R.Context(), ids)
+		fail(err)
+		expanded, err = eng.Expand(c.R.Context(), nodes)
+		fail(err)
 	} else {
 		paths, perr := gquery.ParseExpand(expression)
 		fail(perr)
-		expanded, err = eng.ExpandMany(c.R.Context(), ids, paths...)
+		nodes, err := eng.GetNodesByIDs(c.R.Context(), ids)
+		fail(err)
+		expanded, err = eng.Expand(c.R.Context(), nodes, paths...)
+		fail(err)
 	}
-	fail(err)
 	// 展开出来的节点可能属于不同（甚至不可见）类型：行范围 trusted，但字段按
 	// 各自类型读规则裁（ReadView —— 与单独取该节点同源）。
 	expanded, err = maskNodesPtr(c, ReadView, expanded)
@@ -261,7 +264,7 @@ func nodeIDs(nodes []core.Node) []int64 {
 // wantTo: 取 to_node（出边目标）; false 取 from_node（入边来源）。
 // graph 模板函数桥: 查节点类型（模板场景只有 id）后转发图原语。
 func (e *Render) graph(c *CmsCtx, start int64, field string, maxHops int, fn func(context.Context, string, int64, string, int) ([]int64, error)) []int64 {
-	n, err := e.eng.GetNodeByID(c.R.Context(), start)
+	n, err := e.eng.GetNode(c.R.Context(), start)
 	if err != nil || n == nil {
 		fail(fmt.Errorf("graph: node %d not found", start))
 		return nil
@@ -280,7 +283,7 @@ func (e *Render) targets(c *CmsCtx, wantTo bool, q func() ([]core.Edge, int64, e
 		if wantTo {
 			id = ed.ToNode
 		}
-		n, err := e.eng.GetNodeByID(c.R.Context(), id)
+		n, err := e.eng.GetNode(c.R.Context(), id)
 		fail(err)
 		if n == nil {
 			continue
@@ -409,4 +412,19 @@ func (e *Render) funcMap(c *CmsCtx) template.FuncMap {
 	maps.Copy(m, e.queryFuncs(c)) // 查询原语按请求 Context 构造
 	maps.Copy(m, e.funcs)
 	return m
+}
+
+// pageSize / pageOffset 模板层页码（从 1 起）→ limit/offset。
+func pageSize(page, size int) int {
+	if size <= 0 {
+		size = 20
+	}
+	return min(size, 100)
+}
+
+func pageOffset(page, size int) int {
+	if page <= 1 {
+		return 0
+	}
+	return (page - 1) * pageSize(page, size)
 }

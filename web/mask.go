@@ -102,7 +102,14 @@ func maskExpand(c *CmsCtx, action ReadAction, in map[string]any) (map[string]any
 		case *core.Node:
 			masked, err := MaskNode(c, action, typed)
 			if err != nil {
-				return nil, false, err
+				// 目标类型对这个动作没有读规则 → 整条引用不下发（fail-closed,
+				// 不因为展开而在响应里泄漏不该看的节点, 也不该让整个读失败）。
+				if !changed {
+					out = maps.Clone(in)
+					changed = true
+				}
+				delete(out, key)
+				continue
 			}
 			if masked == typed {
 				continue
@@ -114,10 +121,13 @@ func maskExpand(c *CmsCtx, action ReadAction, in map[string]any) (map[string]any
 			out[key] = masked
 		case []*core.Node:
 			list, listCopied := typed, false
+			dropped := false
 			for i, child := range typed {
 				masked, err := MaskNode(c, action, child)
 				if err != nil {
-					return nil, false, err
+					// 同上：不可读的目标整个引用不下发。
+					dropped = true
+					break
 				}
 				if masked == child {
 					continue
@@ -127,6 +137,14 @@ func maskExpand(c *CmsCtx, action ReadAction, in map[string]any) (map[string]any
 					listCopied = true
 				}
 				list[i] = masked
+			}
+			if dropped {
+				if !changed {
+					out = maps.Clone(in)
+					changed = true
+				}
+				delete(out, key)
+				continue
 			}
 			if !listCopied {
 				continue

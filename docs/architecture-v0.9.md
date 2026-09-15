@@ -125,15 +125,13 @@ Lisp 只是受限文本前端，不直接生成 SQL，也不是公网业务参�
 
 ### 2.8 默认保守，破坏性操作显式
 
-- 公共 DELETE 是永久删除（按字段 `on_delete` 处理引用）。
+- 公共 DELETE 是永久删除；被引用则拒绝（restrict）。
 - 时间只有一种表示：`types.TimeFormat`（UTC + RFC3339 + 秒精度 + `…Z`）。时间列走 `core.Time`，
   `timestamp` 字段走同一格式的字符串 —— 库里、JSON、筛选值是同一个字符串。
   内核不为老数据留兼容分支，**启动时也不扫全表**：老库升级前跑一次性命令
   `tools/legacy-time`（`-check` 只检查，退出码非 0 = 需要先迁移）。
 - 归档（软删除）不是内核概念：要"下线/撤回"就用类型自己的状态字段，并在读规则里限制范围。
-- required ref 默认 `restrict`。
-- 可选 ref 默认 `set_null`。
-- `cascade` 只允许关系 Node endpoint。
+- 删除语义只有一种：被引用就不许删（restrict；`on_delete` 与 `relation` capability 已于 v0.9.4 移除）。
 - 不安全的直接 Merge 已删除；只有 Preview，没有隐式执行。
 
 ### 2.9 v0 期间不维护伪兼容
@@ -207,7 +205,7 @@ Compiler 不根据 `number`、`timestamp`、`select` 等具体名字推断能力
 ```
 
 原因是嵌套引用没有路径可落 Edge：若降级成标量存进 `fields` JSON，就只剩裸 ID，
-没有外键、基数、删除策略，`CheckRelations` 也看不到。“数组/对象里带引用”的正确
+没有外键、基数，反查也做不到。“数组/对象里带引用”的正确
 建模是关系 Node。
 
 ### 3.4 Capability
@@ -381,7 +379,7 @@ page, total, err := ctx.ReadPage(actionMyContent, q) // 站点自定义读动作
 // 写（"客户端发起的写"：Fire 写规则 → 引擎 → 返回裁剪过的节点）
 node, err := ctx.CreateNode(&core.Node{...})
 node, err := ctx.UpdateNode(id, &core.NodePatch{...})
-err := ctx.DeleteNode(id)   // 走 WriteDelete 规则; 永久删除（按字段 on_delete）
+err := ctx.DeleteNode(id)   // 走 WriteDelete 规则; 永久删除（被引用则拒绝）
 ```
 
 两条硬规则：
@@ -451,22 +449,17 @@ Anonymous / Node / Admin / APIKey
 
 ### 3.13 删除路径
 
-- 内核只有一种删除：执行所有入边的 `on_delete` 策略（restrict/set_null/cascade）后物理删除。
+- 内核只有一种删除：**有入边就拒绝**（restrict, 错误带出引用方）; 没有入边则物理删除并清掉自己的出边。
+  （原 `on_delete` 策略与完整性报告 `CheckRelations` 已在 v0.9.4 移除。）
 - 归档/软删除**不属于内核**：它是产品策略（"下架 / 撤回 / 回收站"），用类型自己的状态字段
   + 读规则范围表达；想做成可恢复的回收站，也放在项目层（或以后的插件）里做。
 
-### 3.14 Relation Integrity Report
+### 3.14 ~~Relation Integrity Report~~
 
-`CheckRelations(ctx)` 是只读检查，不自动修复数据。它可以发现：
-
-- 悬空 source/target
-- 未声明引用字段
-- target Type 不匹配
-- 重复 Edge
-- 单 ref 多边
-- required ref 缺失
-- Edge 元数据与 Schema 不一致
-- 无向边未规范化
+~~`CheckRelations(ctx)` 只读完整性报告~~ —— **已于 v0.9.4 移除**（没有真实使用方；健康检查用
+`PRAGMA integrity_check` + 站点自己的查询）。原先它能发现：悬空 source/target、未声明引用字段、
+target Type 不匹配、重复 Edge、单 ref 多边、required ref 缺失、Edge 元数据与 Schema 不一致、
+无向边未规范化。
 - transitive/tree 环
 
 ### 3.15 错误契约
@@ -693,7 +686,7 @@ Admin/Core permanent delete
 - Node 移除固定 `slug/status/sort`。
 - 增加 `revision`（`archived_at` 已在 v0.9.3 移除）。
 - TypeDef 分离 Fields、Constraints、Capabilities、Admin。
-- searchable/addressable/publication/authentication/tree/relation capability。
+- searchable/addressable/publication/authentication/tree capability（`relation` 已移除）。
 - 字段默认值和 immutable。
 - 标量唯一约束和表达式/partial indexes。
 - Kind 自描述 QueryOps。
@@ -752,8 +745,7 @@ Admin/Core permanent delete
 - `OutEdges`、`InEdges`、Query、Expand 和 Ref API 的无向语义。
 - `InEdges` 字段过滤。
 - transitive/tree 环检测与遍历能力检查。
-- `on_delete` 默认值和 restrict/set_null/cascade。
-- cascade 仅用于 relation capability endpoint。
+- ~~`on_delete` 默认值和 restrict/set_null/cascade~~（已移除, 只剩 restrict）。
 - EditableNode 和 Typed Ref API。
 - 只读 Relation Integrity Report。
 - 只读 Merge Preview；旧危险 Merge 已删除。
@@ -785,7 +777,7 @@ Admin/Core permanent delete
 - 写：CreateNode / PatchNode / DeleteNode / AddEdge / RemoveEdge
 - 读：Query / QueryPage / GetNodeByID / GetNodeByAddress / LoadTree
 - 图：Traverse / Subtree / Ancestors / EquivalenceClass / OutEdges / InEdges
-- 关系：RefID / RefIDs / HasRef / FullNode / FullNodes / CheckRelations / PreviewMerge
+- 关系：RefIDs / PreviewMerge / Expand
 - 检索：Search / SearchIndex.Rebuild / RebuildSearch
 - 认证：RegisterAuth / FindAuth / AddMethod / RemoveMethod / Session 全套
 - 配置：Setting 全套；迁移：Migrator.Up / UpDir
@@ -814,7 +806,8 @@ Admin/Core permanent delete
 
 ### 6.4 关系 Node 后台体验
 
-relation capability 已可声明，关系 Node 可通过普通 Node API 管理；尚未实现：
+关系 Node（带属性的关系）用普通 Node + 两个端点 ref 表达，通过普通 Node API 管理；
+（原 `relation` capability 已移除。）尚未实现：
 
 - 实体详情中的关系 Tab
 - from/to 两侧的内联列表
@@ -835,7 +828,7 @@ relation capability 已可声明，关系 Node 可通过普通 Node API 管理�
 - 关系 Node 唯一冲突处理
 - auth_methods 迁移规则
 - Session 撤销规则
-- required/on_delete 再校验
+- required 再校验
 - 审计记录
 - 全事务回滚测试
 
@@ -887,7 +880,7 @@ relation capability 已可声明，关系 Node 可通过普通 Node API 管理�
 5. 新 Edge 不能指向不存在或类型错误的 Node。
 6. 单 ref 的最终基数由数据库约束兜底。
 7. symmetric/equivalence 只存一条 canonical Edge。
-8. 删除必须执行 on_delete（内核只有永久删除，没有软删除）。
+8. 删除必须有入边检查（内核只有永久删除，没有软删除）。
 9. 所有列表、详情、搜索和导出必须具有显式 Scope。
 10. 管理旁路必须写出 `BypassPolicy()`，不能依赖空值。
 12. 数据完整性修复必须显式执行，检查器不得静默改数据。
@@ -941,7 +934,6 @@ v0.9 当前包含三项核心迁移：
 3. 执行 Site migration，搬迁旧字段或插入业务数据。
 4. 若 Site migration 直接写入 Edge，调用 `SyncRelationSchema(ctx)`。
 5. 重建 Search Index。
-6. 执行 `CheckRelations()`。
 7. 执行 `PRAGMA integrity_check` 和 `PRAGMA foreign_key_check`。
 8. 验证后才删除旧备份或旧迁移中间表。
 

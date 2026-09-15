@@ -36,7 +36,7 @@ func (s *Service) LoadTree(ctx context.Context, typeName string, scope QueryScop
 	if tree.Order != "" {
 		sort = []gquery.SortField{gquery.Asc(gquery.Field(tree.Order)), gquery.Asc(gquery.System("id"))}
 	}
-	db, err := s.buildQuery(ctx, ListQuery{Type: typeName, Scope: scope, Sort: sort})
+	db, err := s.buildQuery(ctx, NodeQuery{Type: typeName, Scope: scope, Sort: sort})
 	if err != nil {
 		return nil, err
 	}

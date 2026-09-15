@@ -77,7 +77,7 @@ func (c *CmsCtx) Actor() Actor {
 	if !ok {
 		return c.actor
 	}
-	node, err := c.site.engine.GetNodeByID(c.R.Context(), session.NodeID)
+	node, err := c.site.engine.GetNode(c.R.Context(), session.NodeID)
 	if err != nil || node == nil || node.Type != realm.NodeType {
 		return c.actor
 	}
@@ -98,7 +98,7 @@ func (c *CmsCtx) Principal() (*core.Node, error) {
 	if c.principalLoaded {
 		return c.principal, nil
 	}
-	node, err := c.site.engine.GetNodeByID(c.R.Context(), actor.NodeID)
+	node, err := c.site.engine.GetNode(c.R.Context(), actor.NodeID)
 	if err != nil {
 		return nil, err
 	}

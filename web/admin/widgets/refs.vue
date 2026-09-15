@@ -23,18 +23,23 @@ export default {
         mode: { type: String, default: 'edit' },      // edit | cell
         field: { type: Object, default: () => ({}) },
         defs: { type: Object, default: () => ({}) },  // 类型定义表（ref 显示名用）
-        preset: { type: Array, default: () => [] },   // 引用已选值（编辑回显）
-        expand: { default: null },                    // 列表接口批量展开的引用目标
+        node: { type: Object, default: () => ({}) },  // 当前节点（引用标签从 node.expand 取）
     },
     emits: ['update:modelValue', 'open-node'],
     computed: {
-        options() { return [...(this.preset || []), ...this.found] },
+        options() { return [...this.preset, ...this.found] },
+        // 引用目标来自 node.expand（列表与详情接口同形）
+        refList() {
+            let list = (this.node.expand || {})[this.field.name]
+            if (!list) return []
+            return Array.isArray(list) ? list.filter(Boolean) : [list]
+        },
+        preset() {
+            return this.refList.map(n => window.Widgets.refOption(n, this.defs))
+        },
         // cell 用：每个引用 {id, type, label}
         targets() {
-            let list = this.expand
-            if (!list) return []
-            if (!Array.isArray(list)) list = [list]
-            return list.filter(Boolean).map(n => ({ id: n.id, type: n.type, label: n.display || '#' + n.id }))
+            return this.refList.map(n => window.Widgets.refOption(n, this.defs))
         },
     },
     data() { return { found: [], loading: false, loaded: false } },
@@ -48,10 +53,7 @@ export default {
             if (sort) params.sort = sort
             try {
                 const res = await window.$api.search(params)
-                this.found = (res.items || []).map(n => ({
-                    id: n.id,
-                    label: window.$api.refLabel(n, this.defs[n.type] || null) + ' #' + n.id,
-                }))
+                this.found = (res.items || []).map(n => window.Widgets.refOption(n, this.defs))
             } catch (_) { this.found = [] }
             this.loading = false
         },

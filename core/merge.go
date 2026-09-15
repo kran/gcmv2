@@ -27,8 +27,8 @@ type MergeCredential struct {
 
 // MergePreview is a read-only description of all state affected by a merge.
 type MergePreview struct {
-	Source             *EditableNode        `json:"source"`
-	Target             *EditableNode        `json:"target"`
+	Source             *Node                `json:"source"`
+	Target             *Node                `json:"target"`
 	SuggestedValues    Fields               `json:"suggested_values"`
 	FieldConflicts     []MergeFieldConflict `json:"field_conflicts"`
 	IncomingEdges      []Edge               `json:"incoming_edges"`
@@ -45,7 +45,7 @@ func (s *Service) PreviewMerge(ctx context.Context, sourceID, targetID int64) (*
 	if sourceID == targetID {
 		return nil, errors.New("core: merge preview: source equals target")
 	}
-	full, err := s.FullNodes(ctx, []int64{sourceID, targetID})
+	full, err := s.GetNodesByIDs(ctx, []int64{sourceID, targetID})
 	if err != nil {
 		return nil, err
 	}
@@ -57,12 +57,12 @@ func (s *Service) PreviewMerge(ctx context.Context, sourceID, targetID int64) (*
 	}
 	preview := &MergePreview{
 		Source: full[0], Target: full[1],
-		SuggestedValues: make(Fields, len(full[0].Values)+len(full[1].Values)),
+		SuggestedValues: make(Fields, len(full[0].Fields)+len(full[1].Fields)),
 		FieldConflicts:  make([]MergeFieldConflict, 0),
 	}
-	maps.Copy(preview.SuggestedValues, full[1].Values)
-	for field, sourceValue := range full[0].Values {
-		targetValue, exists := full[1].Values[field]
+	maps.Copy(preview.SuggestedValues, full[1].Fields)
+	for field, sourceValue := range full[0].Fields {
+		targetValue, exists := full[1].Fields[field]
 		if !exists || targetValue == nil {
 			preview.SuggestedValues[field] = sourceValue
 			continue

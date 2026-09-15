@@ -151,11 +151,9 @@ Core migration `00011_edge_integrity.sql` adds storage-only `single_ref` and `sy
 Reference fields support:
 
 ```yaml
-- { name: account, kind: ref, to: account, required: true, on_delete: restrict }
-- { name: owner, kind: ref, to: member, on_delete: set_null }
 ```
 
-Defaults are `restrict` for required references and `set_null` for optional references. `cascade` is accepted only on endpoint fields of a Type declaring a relation capability.
+References no longer take `on_delete` (removed in v0.9.4): deletion is always restricted while a reference exists.
 
 Applications that insert edges through raw SQL migrations must run:
 
@@ -165,7 +163,7 @@ err := site.Engine().SyncRelationSchema(ctx)
 
 after those site migrations. The old `FullFields` API is replaced by `FullNode`/`FullNodes`, whose `EditableNode.Values` explicitly contains scalar values plus ref IDs. Existing direct `Merge` calls must be removed; `PreviewMerge` is read-only until conflict resolution and audit-backed merge execution are implemented.
 
-Composite fields (`array` / `object`) must not contain `ref` or `refs` sub-fields. Such a declaration used to load successfully and store raw node IDs inside `fields` JSON, so it had no edge, no cardinality, no delete policy, and was invisible to `CheckRelations`. Types that used this shape must be remodelled as a relation Node; the Schema loader now rejects them with a `kind ref cannot be nested in array/object` error.
+Composite fields (`array` / `object`) must not contain `ref` or `refs` sub-fields. Such a declaration used to load successfully and store raw node IDs inside `fields` JSON, so it had no edge, no cardinality, and no reverse lookup. Types that used this shape must be remodelled as a relation Node; the Schema loader now rejects them with a `kind ref cannot be nested in array/object` error.
 
 ### 时间格式（v0.9.3）
 
@@ -179,4 +177,4 @@ go run ./tools/legacy-time -db gcm.sqlite -types types.yaml [-dry-run]
 
 停服 → 跑工具 → 启动新版。没跑的库会在启动时失败并提示这条命令（内核不做兼容）。
 
-Public `DELETE /api/nodes/{type}/{id}` permanently deletes (running the fields' `on_delete` handlers for incoming references), and so does `DELETE /admin/nodes/{id}`, which can return HTTP 409 for restricted references. The archive/restore API and the `archived_at` column were **removed in v0.9.3**: soft delete belongs to the project layer (use a state field of your own types), and there is no recycle bin in the kernel.
+Public `DELETE /api/nodes/{type}/{id}` permanently deletes (refused while any reference exists, HTTP 409 for restricted references), and so does `DELETE /admin/nodes/{id}`. The archive/restore API and the `archived_at` column were **removed in v0.9.3**: soft delete belongs to the project layer (use a state field of your own types), and there is no recycle bin in the kernel.

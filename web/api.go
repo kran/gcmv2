@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/kran/cho"
@@ -87,7 +88,7 @@ func (s *Site) apiViewNode(ctx *CmsCtx) {
 		return
 	}
 	// URL 类型必须与存储类型一致（不能拿另一个类型的 id 探测）。
-	node, err := ctx.ReadOne(ReadView, id)
+	node, err := ctx.ReadNode(ReadView, id)
 	if err != nil {
 		ctx.Fail(err)
 		return
@@ -117,7 +118,11 @@ func (s *Site) apiUpdateNode(ctx *CmsCtx) {
 		ctx.Fail(err)
 		return
 	}
-	existing, err := s.engine.GetNodeByID(ctx.R.Context(), id)
+	existing, err := s.engine.GetNode(ctx.R.Context(), id)
+	if errors.Is(err, core.ErrNotFound) {
+		ctx.Fail(NotFound("not found"))
+		return
+	}
 	if err != nil {
 		ctx.Fail(err)
 		return
@@ -155,7 +160,7 @@ func (s *Site) apiUpdateNode(ctx *CmsCtx) {
 	_ = ctx.Json(http.StatusOK, map[string]any{"ok": true})
 }
 
-// apiDeleteNode DELETE /api/nodes/{type}/{id} — 写规则（归属）→ 永久删除（按字段 on_delete）。
+// apiDeleteNode DELETE /api/nodes/{type}/{id} — 写规则（归属）→ 永久删除（被引用则拒绝）。
 func (s *Site) apiDeleteNode(ctx *CmsCtx) {
 	typ := ctx.PathValue("type")
 	if _, ok := s.engine.Types().Type(typ); !ok {
@@ -176,7 +181,11 @@ func (s *Site) apiDeleteNode(ctx *CmsCtx) {
 		ctx.Fail(err)
 		return
 	}
-	existing, err := s.engine.GetNodeByID(ctx.R.Context(), id)
+	existing, err := s.engine.GetNode(ctx.R.Context(), id)
+	if errors.Is(err, core.ErrNotFound) {
+		ctx.Fail(NotFound("not found"))
+		return
+	}
 	if err != nil {
 		ctx.Fail(err)
 		return

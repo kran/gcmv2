@@ -20,16 +20,25 @@ export default {
         mode: { type: String, default: 'edit' },      // edit | cell
         field: { type: Object, default: () => ({}) },
         defs: { type: Object, default: () => ({}) },  // 类型定义表（ref 显示名用）
-        preset: { type: Array, default: () => [] },   // 引用已选值（编辑回显）
-        expand: { default: null },                    // 列表接口批量展开的引用目标
+        node: { type: Object, default: () => ({}) },  // 当前节点（引用标签从 node.expand 取）
     },
     emits: ['update:modelValue', 'open-node'],
     computed: {
-        options() { return [...(this.preset || []), ...this.found] },
+        options() { return [...this.preset, ...this.found] },
+        // 引用目标来自 node.expand（列表与详情接口同形，都是展开一层）
+        expandOne() {
+            const list = (this.node.expand || {})[this.field.name]
+            return Array.isArray(list) ? list[0] : (list || null)
+        },
+        // 编辑回显：已选值显示标题而不是裸 id
+        preset() {
+            const one = this.expandOne
+            return one ? [window.Widgets.refOption(one, this.defs)] : []
+        },
         // cell 用：{id, type, label} —— 有 id 就能点开那个节点的编辑表单
         target() {
-            const one = Array.isArray(this.expand) ? this.expand[0] : this.expand
-            if (one) return { id: one.id, type: one.type, label: one.display || '#' + one.id }
+            const one = this.expandOne
+            if (one) return window.Widgets.refOption(one, this.defs)
             return this.modelValue ? { id: this.modelValue, label: '#' + this.modelValue } : null
         },
     },
@@ -44,10 +53,7 @@ export default {
             if (sort) params.sort = sort
             try {
                 const res = await window.$api.search(params)
-                this.found = (res.items || []).map(n => ({
-                    id: n.id,
-                    label: window.$api.refLabel(n, this.defs[n.type] || null) + ' #' + n.id,
-                }))
+                this.found = (res.items || []).map(n => window.Widgets.refOption(n, this.defs))
             } catch (_) { this.found = [] }
             this.loading = false
         },

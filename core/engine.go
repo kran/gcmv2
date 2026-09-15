@@ -20,17 +20,12 @@ type Engine interface {
 	PatchNode(ctx context.Context, id int64, patch *NodePatch) error
 	DeleteNode(ctx context.Context, id int64) error
 
-	// ── 读 ──
-	QueryPage(ctx context.Context, q ListQuery) ([]Node, int64, error)
-	Query(ctx context.Context, q ListQuery) ([]Node, error)
-	GetNodeByID(ctx context.Context, id int64) (*Node, error)
-	GetNodeByAddress(ctx context.Context, address string) (*Node, error)
-	RefID(ctx context.Context, nodeID int64, field string) (int64, bool, error)
+	// ── 读（Fields 一律完整：引用 id 已在其中; 内部行读不对外）──
+	GetNode(ctx context.Context, ref any) (*Node, error)
+	GetNodesByIDs(ctx context.Context, ids []int64) ([]*Node, error)
+	GetNodes(ctx context.Context, q NodeQuery, limit, offset int) ([]*Node, error)
+	CountNodes(ctx context.Context, q NodeQuery, countLimit int) (int64, error)
 	RefIDs(ctx context.Context, nodeID int64, field string) ([]int64, error)
-	HasRef(ctx context.Context, nodeID int64, field string, targetID int64) (bool, error)
-	FullNode(ctx context.Context, id int64) (*EditableNode, error)
-	FullNodes(ctx context.Context, ids []int64) ([]*EditableNode, error)
-	CheckRelations(ctx context.Context) (RelationReport, error)
 	PreviewMerge(ctx context.Context, sourceID, targetID int64) (*MergePreview, error)
 
 	// ── Schema 同步（启动/运维；做 DDL，不是读） ──
@@ -44,18 +39,13 @@ type Engine interface {
 	OutEdges(ctx context.Context, typeName string, from int64, field string, page, size int) ([]Edge, int64, error)
 	InEdges(ctx context.Context, to int64, field string, page, size int) ([]Edge, int64, error)
 
-	// ── 搜索/展开 ──
+	// ── 搜索 ──
 	Search(ctx context.Context, query SearchQuery) ([]Node, int64, error)
 	RebuildSearch(ctx context.Context) error
 	EquivalenceClass(ctx context.Context, typeName string, start int64, field string, maxHops int) ([]int64, error)
-	Expand(ctx context.Context, id int64, paths ...query.ExpandPath) (*Node, error)
-	ExpandAuto(ctx context.Context, id int64) (*Node, error)
-	ExpandAutoMany(ctx context.Context, ids []int64) ([]*Node, error)
-	ExpandMany(ctx context.Context, ids []int64, paths ...query.ExpandPath) ([]*Node, error)
-	// ExpandNodes 对已加载的根节点套用展开路径(不读库) —— 列表/模板已持有行时用它,
-	// 避免为了拿类型或为了展开再 SELECT 一遍同一批行。
-	ExpandNodes(ctx context.Context, roots []*Node, paths ...query.ExpandPath) ([]*Node, error)
-	AutoExpand(typeName string) []query.ExpandPath
+	// ── 展开（读完之后的独立一步：给已加载的节点补引用目标）──
+	Expand(ctx context.Context, nodes []*Node, paths ...query.ExpandPath) ([]*Node, error)
+	ExpandNode(ctx context.Context, n *Node, paths ...query.ExpandPath) (*Node, error)
 
 	// ── 认证（opaque credentials + Realm-bound sessions） ──
 	RegisterAuth(ctx context.Context, nodeType, method, identifier string, data Fields, n *Node) (int64, error)

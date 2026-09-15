@@ -381,7 +381,7 @@ func (c *queryCompiler) compileRelated(expr gquery.Related, typeName, nodeRef st
 func (c *queryCompiler) resolveSet(set gquery.Set, expectedType string) ([]any, error) {
 	switch value := set.(type) {
 	case gquery.Subtree:
-		root, err := c.service.GetNodeByAddress(c.ctx, value.Address)
+		root, err := c.service.nodeRowByAddress(c.ctx, value.Address)
 		if err != nil {
 			return nil, err
 		}

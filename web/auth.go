@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -79,11 +80,14 @@ func AuthSession(ctx *CmsCtx, realm AuthRealm, nodeID int64) (string, error) {
 	if !ok || configured.NodeType != realm.NodeType {
 		return "", fmt.Errorf("web: auth realm %q is not configured", realm.Name)
 	}
-	node, err := ctx.site.engine.GetNodeByID(ctx.R.Context(), nodeID)
+	node, err := ctx.site.engine.GetNode(ctx.R.Context(), nodeID)
+	if errors.Is(err, core.ErrNotFound) {
+		return "", fmt.Errorf("web: node %d does not belong to auth realm %q", nodeID, realm.Name)
+	}
 	if err != nil {
 		return "", err
 	}
-	if node == nil || node.Type != realm.NodeType {
+	if node.Type != realm.NodeType {
 		return "", fmt.Errorf("web: node %d does not belong to auth realm %q", nodeID, realm.Name)
 	}
 	token, err := ctx.site.engine.CreateSession(ctx.R.Context(), realm.Name, nodeID)

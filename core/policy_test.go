@@ -25,10 +25,10 @@ func TestPolicyScopeCannotBeWeakenedByUserWhere(t *testing.T) {
 	}
 
 	scope := PolicyScope(gquery.EQ(gquery.Field("publication_state"), "published"))
-	items, total, err := service.QueryPage(t.Context(), ListQuery{
+	ptrs, total, err := countAndRead(t, service, NodeQuery{
 		Type: "article", Where: gquery.True(), Scope: scope,
-		Page: gquery.Page{Number: 1, Size: 20},
-	})
+	}, 20, 0)
+	items := nodeValues(ptrs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,9 +46,10 @@ func TestPolicyScopeNilDeniesAll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	items, err := service.Query(t.Context(), ListQuery{
-		Type: "article", Scope: PolicyScope(nil), Page: gquery.Page{Size: 20},
-	})
+	ptrs, err := service.GetNodes(t.Context(), NodeQuery{
+		Type: "article", Scope: PolicyScope(nil),
+	}, 20, 0)
+	items := nodeValues(ptrs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,9 +60,9 @@ func TestPolicyScopeNilDeniesAll(t *testing.T) {
 
 func TestQueryWithoutPolicyScopeFails(t *testing.T) {
 	service := newTestService(t)
-	_, err := service.Query(t.Context(), ListQuery{
-		Type: "article", Page: gquery.Page{Size: 20},
-	})
+	_, err := service.GetNodes(t.Context(), NodeQuery{
+		Type: "article",
+	}, 20, 0)
 	if !errors.Is(err, ErrInvalidQuery) {
 		t.Fatalf("error = %v, want ErrInvalidQuery", err)
 	}

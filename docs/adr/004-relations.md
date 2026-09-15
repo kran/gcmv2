@@ -260,6 +260,9 @@ query.Incoming("activity", "contact")
 
 ## 关系 Node 的后台体验
 
+> **后续变更（v0.9.4）**：`relation` capability 已从内核移除（只有校验、没有运行时行为，
+> 且真实应用零使用）。下文提到它的段落都按"历史设计"读；语义化关系仍用普通 Node 表达。
+
 声明 relation capability 后，后台可以提供：
 
 - 在 from 实体详情显示关系列表
@@ -346,7 +349,7 @@ edges 至少需要：
 - [x] ref/refs 基数由应用校验和数据库约束保证。
 - [x] 删除策略有 restrict/set_null/cascade 测试。
 - [x] 永久删除执行 on_delete（软删除/归档已于 v0.9.3 移出内核）。
-- [x] relation capability 的关系 Node 仍通过通用 Node API 管理。
+- [x] ~~relation capability~~（已移除）的关系 Node 仍通过通用 Node API 管理。
 - [x] 关系查询和 Expand 经过逐跳 Schema 校验，并支持 symmetric 语义。
 - [x] EditableNode/RefID/RefIDs/HasRef 不再让业务代码误读 Node.Fields。
 - [x] 数据完整性检查可发现悬空、未知字段、目标类型、基数、required、元数据和环问题。

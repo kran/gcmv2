@@ -139,9 +139,8 @@ func (s *Site) Start() http.Handler { return s.Setup() }
 
 // CmsCtxMaker cho 工厂（建请求 ctx）。
 func (s *Site) CmsCtxMaker(w http.ResponseWriter, r *http.Request) *CmsCtx {
-	// 请求体硬上限（写在一个地方，插件路由也覆盖到）；JSON 解码在 BindStrictJSON 里再收紧。
+	// 请求体大小由部署侧（nginx client_max_body_size）限制, 内核不管。
 	if r.Body != nil {
-		r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	}
 	return &CmsCtx{BaseContext: cho.MakeBaseContext(w, r), site: s}
 }

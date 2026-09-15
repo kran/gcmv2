@@ -8,7 +8,7 @@ import (
 	gquery "github.com/kran/gcmv2/query"
 )
 
-// 读入口（CmsCtx.ReadPage / ReadOne / ReadAddress / ReadFull / ReadSearch）：
+// 读入口（CmsCtx.ReadPage / ReadNode / ReadSearch / ReadTree）：
 // 解析读规则 → 调引擎 → 裁字段，一步到位；调用方不能自带 Scope。
 
 // 站点自定义读动作：同一个类型在不同入口用不同规则（association 的 my_content）。
@@ -30,7 +30,7 @@ func TestReadEntryUsesRequestedAction(t *testing.T) {
 	}
 
 	// ReadList 的规则是"匿名裁 phone/contact"
-	page, _, err := ctx.ReadPage(ReadList, core.ListQuery{Type: "member", Page: gquery.Page{Size: 10}})
+	page, _, err := ctx.ReadPage(ReadList, core.NodeQuery{Type: "member"}, 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,9 +42,9 @@ func TestReadEntryUsesRequestedAction(t *testing.T) {
 	}
 
 	// my_content 的规则只裁 contact
-	node, err := ctx.ReadOne("my_content", id)
+	node, err := ctx.ReadNode("my_content", id)
 	if err != nil || node == nil {
-		t.Fatalf("ReadOne(my_content) = %#v, %v", node, err)
+		t.Fatalf("ReadNode(my_content) = %#v, %v", node, err)
 	}
 	if node.Fields["phone"] != "138" {
 		t.Fatalf("自定义动作应保留 phone: %#v", node.Fields)
@@ -58,13 +58,13 @@ func TestReadEntryUsesRequestedAction(t *testing.T) {
 func TestReadEntryRejectsCallerScope(t *testing.T) {
 	site, _ := maskTestSite(t)
 	ctx := maskCtx(site)
-	_, _, err := ctx.ReadPage(ReadList, core.ListQuery{
-		Type: "member", Scope: core.BypassPolicy(), Page: gquery.Page{Size: 10},
-	})
+	_, _, err := ctx.ReadPage(ReadList, core.NodeQuery{
+		Type: "member", Scope: core.BypassPolicy(),
+	}, 10, 0)
 	if err == nil {
 		t.Fatal("自带 BypassPolicy 的读应报错")
 	}
-	if _, err := ctx.ReadOne(ReadView, 1); err != nil {
+	if _, err := ctx.ReadNode(ReadView, 1); err != nil {
 		t.Fatalf("ReadOne 不该报错: %v", err)
 	}
 }
@@ -91,14 +91,14 @@ func TestReadEntryHonorsRowScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	node, err := ctx.ReadOne(ReadView, pending)
+	node, err := ctx.ReadNode(ReadView, pending)
 	if err != nil || node != nil {
 		t.Fatalf("不可见节点应返回 nil: %#v, %v", node, err)
 	}
-	if node, err := ctx.ReadOne(ReadView, visible); err != nil || node == nil {
+	if node, err := ctx.ReadNode(ReadView, visible); err != nil || node == nil {
 		t.Fatalf("可见节点应返回节点: %#v, %v", node, err)
 	}
-	address, err := ctx.ReadAddress(ReadView, "no-such-address")
+	address, err := ctx.ReadNode(ReadView, "no-such-address")
 	if err != nil || address != nil {
 		t.Fatalf("不存在的地址应返回 nil: %#v, %v", address, err)
 	}
@@ -121,17 +121,16 @@ func TestReadFullIncludesRefsAndMasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 会员没有 ref 字段，用 article 的规则验证 ref 值：这里只验证 Fields 里带 ref 值
-	// 与掩码同时成立 —— 给 member 加一条 ref 不可行，于是直接用 Bypass 写边后读回。
-	full, err := ctx.ReadFull(ReadView, id)
+	// 读投影本来就带引用值（Fields 完整），ReadOne 也带掩码 —— 两者同时成立。
+	full, err := ctx.ReadNode(ReadView, id)
 	if err != nil || full == nil {
-		t.Fatalf("ReadFull = %#v, %v", full, err)
+		t.Fatalf("ReadOne = %#v, %v", full, err)
 	}
 	if full.Fields["name"] != "张三" {
-		t.Fatalf("ReadFull 丢了字段: %#v", full.Fields)
+		t.Fatalf("ReadOne 丢了字段: %#v", full.Fields)
 	}
 	if _, ok := full.Fields["phone"]; ok {
-		t.Fatalf("ReadFull 未裁字段: %#v", full.Fields)
+		t.Fatalf("ReadOne 未裁字段: %#v", full.Fields)
 	}
 	_ = target
 }

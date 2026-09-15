@@ -159,11 +159,11 @@ func TestWriteRulesBoundFieldsAndTypes(t *testing.T) {
 		} `json:"node"`
 	}
 	decodeBody(t, w, &created)
-	full, err := s.Engine().FullNode(t.Context(), created.ID)
+	full, err := s.Engine().GetNode(t.Context(), created.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := full.Values.Str("publication_state"); got != "published" {
+	if got := full.Fields.Str("publication_state"); got != "published" {
 		t.Fatalf("hook field = %q, want published", got)
 	}
 	// 注册过的 update 同样只接受白名单字段。

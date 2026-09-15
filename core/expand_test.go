@@ -47,10 +47,14 @@ func TestExpandReadsRootOnce(t *testing.T) {
 
 	rootReads := func(queries []string) int {
 		// 日志格式是 "<sql> <args>", 根节点那次的 args 恰好只有它自己。
+		// 单节点读是按 id 直查（WHERE id = ?）; 批量读是 id IN (…)。
 		want := " " + fmt.Sprintf("[%d]", art)
 		n := 0
 		for _, q := range queries {
-			if strings.Contains(q, "FROM nodes WHERE id IN") && strings.HasSuffix(q, want) {
+			if !strings.HasSuffix(q, want) {
+				continue
+			}
+			if strings.Contains(q, `FROM "nodes" WHERE id = ?`) || strings.Contains(q, "FROM nodes WHERE id IN") {
 				n++
 			}
 		}
@@ -58,33 +62,33 @@ func TestExpandReadsRootOnce(t *testing.T) {
 	}
 
 	mark := len(taken())
-	if _, err := s.ExpandAuto(t.Context(), art); err != nil {
+	if _, err := expandAuto(t, s, art); err != nil {
 		t.Fatal(err)
 	}
 	if got := rootReads(taken()[mark:]); got != 1 {
-		t.Fatalf("ExpandAuto 读了根节点 %d 次, 期望 1: %v", got, taken()[mark:])
+		t.Fatalf("自动展开读了根节点 %d 次, 期望 1: %v", got, taken()[mark:])
 	}
 
 	// ExpandAutoMany 同理（模板渲染走这条路）。
 	mark = len(taken())
-	if _, err := s.ExpandAutoMany(t.Context(), []int64{art}); err != nil {
+	if _, err := expandAutoMany(t, s, []int64{art}); err != nil {
 		t.Fatal(err)
 	}
 	if got := rootReads(taken()[mark:]); got != 1 {
-		t.Fatalf("ExpandAutoMany 读了根节点 %d 次, 期望 1: %v", got, taken()[mark:])
+		t.Fatalf("批量自动展开读了根节点 %d 次, 期望 1: %v", got, taken()[mark:])
 	}
 
-	// ExpandNodes: 根节点是调用方给的, 一次库都不该读。
+	// Expand: 根节点是调用方给的, 一次库都不该读。
 	nodes, err := s.nodesByIDs(t.Context(), []int64{art})
 	if err != nil || len(nodes) != 1 {
 		t.Fatalf("load root: %v %d", err, len(nodes))
 	}
 	mark = len(taken())
-	if _, err := s.ExpandNodes(t.Context(), []*Node{&nodes[0]}, s.AutoExpand(nodes[0].Type)...); err != nil {
+	if _, err := s.Expand(t.Context(), []*Node{&nodes[0]}); err != nil {
 		t.Fatal(err)
 	}
 	if got := rootReads(taken()[mark:]); got != 0 {
-		t.Fatalf("ExpandNodes 回表读了根节点 %d 次, 期望 0: %v", got, taken()[mark:])
+		t.Fatalf("Expand 回表读了根节点 %d 次, 期望 0: %v", got, taken()[mark:])
 	}
 }
 
@@ -94,7 +98,11 @@ func expandText(t *testing.T, service *Service, id int64, expression string) (*N
 	if err != nil {
 		return nil, err
 	}
-	return service.Expand(t.Context(), id, paths...)
+	n, err := service.GetNode(t.Context(), id)
+	if err != nil {
+		return nil, err
+	}
+	return service.ExpandNode(t.Context(), n, paths...)
 }
 
 func expandManyText(t *testing.T, service *Service, ids []int64, expression string) ([]*Node, error) {
@@ -103,7 +111,7 @@ func expandManyText(t *testing.T, service *Service, ids []int64, expression stri
 	if err != nil {
 		return nil, err
 	}
-	return service.ExpandMany(t.Context(), ids, paths...)
+	return expandByIDs(t, service, ids, paths...)
 }
 
 // ── Expand: typed relation paths ─────────────────
@@ -245,7 +253,7 @@ func TestExpandPathAuto(t *testing.T) {
 	s := New(testDB(t), ts)
 	p1, _ := s.CreateNode(t.Context(), &Node{Type: "person", Display: "t", Fields: Fields{"name": "张三"}})
 	art, _ := s.CreateNode(t.Context(), &Node{Type: "article", Display: "t", Fields: Fields{"title": "甲", "authors": []any{p1}}})
-	n, err := s.Expand(t.Context(), art, s.AutoExpand("article")...)
+	n, err := expandAuto(t, s, art)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,37 +265,37 @@ func TestExpandPathAuto(t *testing.T) {
 	}
 }
 
-// ExpandAuto 是"自动展开"的入口：路径取决于节点类型，由内核读一次节点决定
-// （调用方不必先查一次节点拿类型、再让 Expand 查第二遍）。结果必须与显式写法一致。
+// 自动展开（Expand 不传路径）：路径取决于节点类型，由内核读一次节点决定。
+// 结果必须与显式写出路径一致。
 func TestExpandPathAutoEntry(t *testing.T) {
 	ts := newTypes(t, expandPathTypes)
 	s := New(testDB(t), ts)
 	p1, _ := s.CreateNode(t.Context(), &Node{Type: "person", Display: "t", Fields: Fields{"name": "张三"}})
 	art, _ := s.CreateNode(t.Context(), &Node{Type: "article", Display: "t", Fields: Fields{"title": "甲", "authors": []any{p1}}})
 
-	auto, err := s.ExpandAuto(t.Context(), art)
+	auto, err := expandAuto(t, s, art)
 	if err != nil {
 		t.Fatal(err)
 	}
-	explicit, err := s.Expand(t.Context(), art, s.AutoExpand("article")...)
+	explicit, err := expandAutoMany(t, s, []int64{art})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(auto.Expand) != len(explicit.Expand) {
-		t.Fatalf("ExpandAuto = %v, explicit = %v", auto.Expand, explicit.Expand)
+	if len(auto.Expand) != len(explicit[0].Expand) {
+		t.Fatalf("自动展开 = %v, 显式 = %v", auto.Expand, explicit[0].Expand)
 	}
-	for field, want := range explicit.Expand {
+	for field, want := range explicit[0].Expand {
 		got, ok := auto.Expand[field]
 		if !ok {
-			t.Fatalf("ExpandAuto 少了 %s", field)
+			t.Fatalf("自动展开少了 %s", field)
 		}
 		if len(got.([]*Node)) != len(want.([]*Node)) {
-			t.Fatalf("%s: ExpandAuto %d != explicit %d", field, len(got.([]*Node)), len(want.([]*Node)))
+			t.Fatalf("%s: 自动 %d != 显式 %d", field, len(got.([]*Node)), len(want.([]*Node)))
 		}
 	}
 
 	// 节点不存在 → ErrNotFound（后台 handler 靠它回 404）。
-	if _, err := s.ExpandAuto(t.Context(), art+9999); !errors.Is(err, ErrNotFound) {
+	if _, err := expandAuto(t, s, art+9999); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing node = %v", err)
 	}
 }
@@ -342,7 +350,7 @@ types:
 	primary, _ := s.CreateNode(t.Context(), &Node{Type: "primary_contact", Display: "主联系人", Fields: Fields{"people": person1}})
 	group, _ := s.CreateNode(t.Context(), &Node{Type: "contact_group", Display: "联系人组", Fields: Fields{"people": []any{person1, person2}}})
 
-	nodes, err := s.ExpandMany(t.Context(), []int64{primary, group}, gquery.Expand(gquery.Ref("people")))
+	nodes, err := expandByIDs(t, s, []int64{primary, group}, gquery.Expand(gquery.Ref("people")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +381,7 @@ types:
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.Expand(t.Context(), article, gquery.Expand(gquery.Ref("author")))
+	_, err = expandByIDs(t, s, []int64{article}, gquery.Expand(gquery.Ref("author")))
 	if err == nil {
 		t.Fatal("corrupt target type must fail")
 	}

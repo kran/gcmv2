@@ -65,9 +65,9 @@ ADR-004 核心约束已实现：
 - Traverse/Subtree 只接受 transitive 或 tree.parent 字段，并限制深度、拒绝新环。
 - EquivalenceClass 验证字段归属和 equivalence 声明。
 - AddEdge/Create/Patch 统一执行 ref/refs 基数、目标类型和 symmetric 规范化。
-- `on_delete` 支持 restrict/set_null/cascade；cascade 只允许关系 Node endpoint。
+- 删除语义只有 restrict（`on_delete` / `relation` capability 已移除, 见 v0.9.4）。
 - 公共删除与 Admin 删除都是永久删除，执行引用策略（归档机制已于 v0.9.3 移出内核）。
-- 新增 EditableNode/Ref API 和只读关系完整性报告。
+- 新增读投影（Fields 完整, 引用 id 在其中）与 Expand API。
 - 旧的直接执行 Merge 已删除，新增 Merge Preview；执行合并留待字段决策和审计完成。
 
 ### 已解决：认证核心中的 password/user 假设

@@ -180,8 +180,7 @@ func TestAdminJSONKeysAreLowercase(t *testing.T) {
 		typeName = name
 	}
 
-	paths := []string{"/admin/types", "/admin/me", "/admin/settings",
-		"/admin/integrity/relations", "/admin/search?q=x"}
+	paths := []string{"/admin/types", "/admin/me", "/admin/settings", "/admin/search?q=x"}
 	for _, path := range []string{"/admin/nodes?type=", "/admin/tree?type="} {
 		paths = append(paths, path+typeName)
 	}
@@ -210,10 +209,8 @@ func TestAdminNodes(t *testing.T) {
 		{"GET", "/admin/nodes/1"},
 		{"POST", "/admin/query/article"},
 		{"GET", "/admin/tree?type=category"},
-		{"GET", "/admin/expand?node=1"},
 		{"POST", "/admin/settings"},
 		{"GET", "/admin/search?q=x"},
-		{"GET", "/admin/integrity/relations"},
 		{"GET", "/admin/merge/preview?source=1&target=2"},
 	} {
 		w := do(s, req.method, req.path, map[string]any{})
@@ -255,10 +252,6 @@ func TestAdminPasswordFlow(t *testing.T) {
 	}
 	if me.Actor.Kind != ActorAdmin {
 		t.Fatalf("admin actor = %#v", me.Actor)
-	}
-	w = do(s, "GET", "/admin/integrity/relations", nil, ck)
-	if w.Code != http.StatusOK {
-		t.Fatalf("relation integrity = %d: %s", w.Code, w.Body.String())
 	}
 	// 建节点（article）
 	w = do(s, "POST", "/admin/nodes?type=article", map[string]any{
@@ -571,6 +564,20 @@ func TestAdminNodesRefFilterAndExpand(t *testing.T) {
 	if got.Total != 3 {
 		t.Fatalf("全量 = %d 条, want 3", got.Total)
 	}
+	// ①' 列表行也要是"完整 Fields"：引用 id 在 fields 里（与详情/编辑器同形）。
+	// 没有这一条，列表只能靠 expand 猜值 —— 就是之前的裂缝。
+	withRef := 0
+	for _, n := range got.Items {
+		if id, ok := n.Fields["category"]; ok {
+			withRef++
+			if n.Expand["category"] == nil {
+				t.Fatalf("列表行 %q: fields.category=%v 但没有 expand.category", n.Display, id)
+			}
+		}
+	}
+	if withRef == 0 {
+		t.Fatal("列表行没有任何引用 id —— Fields 没被补全（HydrateFields 没在列表出口生效）")
+	}
 	expanded := 0
 	for _, n := range got.Items {
 		if n.Display == "没挂分类" {
@@ -624,6 +631,33 @@ func TestAdminNodesRefFilterAndExpand(t *testing.T) {
 	w = do(s, "GET", "/admin/nodes?type=article&filter="+url.QueryEscape("(in ->nope [1])"), nil, ck)
 	if w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("非法 filter = %d, want 422: %s", w.Code, w.Body.String())
+	}
+
+	// 详情接口与列表同形：Fields 完整 + Expand（编辑器的引用标签靠它, 否则打开就是裸 id）。
+	// 挑有引用的那一行 —— 没挂引用的节点 expand 为空是正常的。
+	withCategory := int64(0)
+	for _, n := range got.Items {
+		if _, ok := n.Fields["category"]; ok {
+			withCategory = n.ID
+			break
+		}
+	}
+	if withCategory == 0 {
+		t.Fatal("找不到挂了分类的行")
+	}
+	detail := map[string]any{}
+	w = do(s, "GET", "/admin/nodes/"+itoa(withCategory), nil, ck)
+	if w.Code != http.StatusOK {
+		t.Fatalf("detail = %d: %s", w.Code, w.Body.String())
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail["expand"] == nil {
+		t.Fatalf("详情缺 expand（编辑器里引用字段会只剩裸 id）: %s", w.Body.String())
+	}
+	if _, ok := detail["fields"].(map[string]any)["category"]; !ok {
+		t.Fatalf("详情 fields 缺引用 id: %s", w.Body.String())
 	}
 }
 

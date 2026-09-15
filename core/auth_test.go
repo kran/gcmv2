@@ -41,7 +41,7 @@ func TestRegisterAuth(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 节点存在 + 类型正确
-	n, err := s.GetNodeByID(t.Context(), id)
+	n, err := s.nodeRow(t.Context(), id)
 	if err != nil || n == nil {
 		t.Fatalf("node = %v, %v", n, err)
 	}
